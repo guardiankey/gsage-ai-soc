@@ -53,7 +53,9 @@ COPY --from=builder /install /usr/local
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl unixodbc \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd -r appuser && useradd -r -g appuser -s /sbin/nologin appuser
+    && groupadd -r appuser && useradd -r -g appuser -s /sbin/nologin appuser \
+    && mkdir -p /data/ingest \
+    && chown -R appuser:appuser /data
 
 # Application source. In dev compose these paths are overridden by bind
 # mounts, so the COPY'd files are only used for standalone production builds.

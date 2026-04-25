@@ -113,21 +113,25 @@ wizard::_gen() {
 wizard::render_env() {
     # $1 = path to env.template, $2 = path to output .env
     local template="$1" out="$2"
-    local generated_default generated_curator
+    local generated_default generated_curator generated_minio
     generated_default="$(wizard::_gen)"
     generated_curator="$(wizard::_gen)"
+    generated_minio="$(wizard::_gen)"
 
     umask 077
     local tmp
     tmp="$(mktemp)"
     cp "$template" "$tmp"
 
-    # Replace @@GENERATED_CURATOR@@ FIRST (longer match) so it doesn't get eaten by
-    # the generic @@GENERATED@@ pass. Use a unique per-line generated value for each
-    # remaining @@GENERATED@@ occurrence.
-    local safe_curator
+    # Replace @@GENERATED_CURATOR@@ and @@GENERATED_MINIO@@ FIRST (longer matches)
+    # so they don't get eaten by the generic @@GENERATED@@ pass. The MinIO
+    # placeholder must resolve to the SAME value on every line so the backend
+    # credentials match the MinIO server credentials.
+    local safe_curator safe_minio
     safe_curator="$(printf '%s' "$generated_curator" | sed 's/[\/&]/\\&/g')"
+    safe_minio="$(printf '%s' "$generated_minio" | sed 's/[\/&]/\\&/g')"
     sed -i "s/@@GENERATED_CURATOR@@/$safe_curator/g" "$tmp"
+    sed -i "s/@@GENERATED_MINIO@@/$safe_minio/g" "$tmp"
 
     # For every remaining @@GENERATED@@, substitute a fresh random value.
     local line new_file
