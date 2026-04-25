@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# gsage-cli — host wrapper for the gSage CLI client.
+# Installed under /opt/gsage/current/bin/ and symlinked into /usr/local/bin/.
+set -euo pipefail
+
+GSAGE_HOME="${GSAGE_HOME:-/opt/gsage/current}"
+OPERATOR_VENV="${GSAGE_OPERATOR_VENV:-/opt/gsage/shared/operator-venv}"
+
+if [[ ! -d "$GSAGE_HOME" ]]; then
+    echo "ERROR: gSage install dir not found: $GSAGE_HOME" >&2
+    exit 1
+fi
+if [[ ! -f "$OPERATOR_VENV/bin/activate" ]]; then
+    echo "ERROR: operator venv not found: $OPERATOR_VENV" >&2
+    echo "Re-run the installer to provision it." >&2
+    exit 1
+fi
+
+# shellcheck disable=SC1091
+source "$OPERATOR_VENV/bin/activate"
+
+# Load API host / key from /opt/gsage/shared/.env if not already exported.
+# In production the backend is reached through the frontend reverse proxy
+# on the single published port (FRONTEND_PORT, default 8080).
+if [[ -z "${GSAGE_API_HOST:-}" ]]; then
+    # Source FRONTEND_PORT from the shared .env without leaking other vars.
+    if [[ -r /opt/gsage/shared/.env ]]; then
+        FRONTEND_PORT="$(awk -F= '/^FRONTEND_PORT=/ {print $2; exit}' /opt/gsage/shared/.env)"
+    fi
+    export GSAGE_API_HOST="http://localhost:${FRONTEND_PORT:-8080}/api"
+fi
+
+export PYTHONPATH="$GSAGE_HOME:${PYTHONPATH:-}"
+cd "$GSAGE_HOME"
+exec python -m cli_client.main "$@"

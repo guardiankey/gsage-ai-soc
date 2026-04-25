@@ -1,0 +1,313 @@
+/* gSage Admin Console — Tango palette theme */
+
+/* ── Global ───────────────────────────────────────────────────────────────── */
+
+Screen {
+    background: #2e3436;
+    color: #eeeeec;
+}
+
+/* ── Header / Footer ──────────────────────────────────────────────────────── */
+
+Header {
+    background: #1e2426;
+    color: #eeeeec;
+    height: 1;
+}
+
+Footer {
+    background: #1e2426;
+    color: #babdb6;
+    height: 1;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────────────── */
+
+#sidebar {
+    width: 26;
+    background: #1e2426;
+    border-right: solid #555753;
+    overflow-y: auto;
+}
+
+Tree {
+    background: #1e2426;
+    color: #eeeeec;
+    padding: 0;
+}
+
+Tree > .tree--guides {
+    color: #555753;
+}
+
+Tree > .tree--guides-hover {
+    color: #729fcf;
+}
+
+Tree > .tree--highlight {
+    background: #204a87;
+}
+
+Tree > .tree--highlight-line {
+    background: #204a87;
+}
+
+/* ── Main layout ──────────────────────────────────────────────────────────── */
+
+#main {
+    height: 1fr;
+}
+
+ContentSwitcher {
+    width: 1fr;
+    height: 1fr;
+    background: #2e3436;
+}
+
+/* ── DataTable ────────────────────────────────────────────────────────────── */
+
+DataTable {
+    background: #2e3436;
+    color: #eeeeec;
+}
+
+DataTable > .datatable--header {
+    background: #1e2426;
+    color: #729fcf;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #204a87;
+    color: #eeeeec;
+}
+
+DataTable > .datatable--hover {
+    background: #3c474a;
+}
+
+DataTable > .datatable--even-row {
+    background: #2e3436;
+}
+
+DataTable > .datatable--odd-row {
+    background: #323a3d;
+}
+
+/* ── Input / TextArea ─────────────────────────────────────────────────────── */
+
+Input {
+    background: #1e2426;
+    border: round #555753;
+    color: #eeeeec;
+}
+
+Input:focus {
+    border: round #729fcf;
+}
+
+TextArea {
+    background: #1e2426;
+    border: round #555753;
+    color: #eeeeec;
+}
+
+TextArea:focus {
+    border: round #729fcf;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+
+Button {
+    background: #555753;
+    border: tall #555753;
+    color: #eeeeec;
+}
+
+Button:hover {
+    background: #729fcf;
+    border: tall #729fcf;
+    color: #2e3436;
+}
+
+Button.-primary {
+    background: #204a87;
+    border: tall #204a87;
+    color: #eeeeec;
+}
+
+Button.-primary:hover {
+    background: #3465a4;
+    border: tall #3465a4;
+}
+
+Button.-error {
+    background: #a40000;
+    border: tall #a40000;
+    color: #eeeeec;
+}
+
+Button.-error:hover {
+    background: #cc0000;
+    border: tall #cc0000;
+}
+
+Button.-warning {
+    background: #c4a000;
+    border: tall #c4a000;
+    color: #2e3436;
+}
+
+/* ── Select ───────────────────────────────────────────────────────────────── */
+
+Select {
+    background: #1e2426;
+    border: round #555753;
+    color: #eeeeec;
+}
+
+Select:focus {
+    border: round #729fcf;
+}
+
+SelectOverlay {
+    background: #1e2426;
+    border: round #729fcf;
+}
+
+SelectOverlay > .option-list--option-highlighted {
+    background: #204a87;
+}
+
+/* ── Labels ───────────────────────────────────────────────────────────────── */
+
+Label {
+    color: #eeeeec;
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────────── */
+
+TabbedContent > TabPane {
+    background: #2e3436;
+    padding: 0;
+}
+
+Tabs {
+    background: #1e2426;
+    border-bottom: solid #555753;
+}
+
+Tab {
+    background: #1e2426;
+    color: #babdb6;
+}
+
+Tab.-active {
+    background: #2e3436;
+    color: #729fcf;
+    border-top: tall #729fcf;
+}
+
+Tab:hover {
+    background: #3c474a;
+    color: #eeeeec;
+}
+
+/* ── ListView ─────────────────────────────────────────────────────────────── */
+
+ListView {
+    background: #2e3436;
+    border: round #555753;
+}
+
+ListItem {
+    background: #2e3436;
+    color: #eeeeec;
+}
+
+ListItem:hover {
+    background: #3c474a;
+}
+
+ListItem.--highlight {
+    background: #204a87;
+}
+
+/* ── RichLog ──────────────────────────────────────────────────────────────── */
+
+RichLog {
+    background: #1e2426;
+    color: #eeeeec;
+}
+
+/* ── Switch ───────────────────────────────────────────────────────────────── */
+
+Switch {
+    background: #555753;
+}
+
+Switch.-on {
+    background: #4e9a06;
+}
+
+Switch > .switch--slider {
+    color: #eeeeec;
+}
+
+/* ── Modal overlays ───────────────────────────────────────────────────────── */
+
+ModalScreen {
+    background: rgba(0, 0, 0, 0.6);
+}
+
+/* ── Scrollbars ───────────────────────────────────────────────────────────── */
+
+ScrollBar {
+    background: #2e3436;
+}
+
+ScrollBar > .scrollbar--slider {
+    color: #555753;
+}
+
+ScrollBar > .scrollbar--slider:hover {
+    color: #729fcf;
+}
+
+/* ── Borders ──────────────────────────────────────────────────────────────── */
+
+.border-primary {
+    border: round #729fcf;
+}
+
+.border-success {
+    border: round #4e9a06;
+}
+
+.border-error {
+    border: round #cc0000;
+}
+
+/* ── Notifications ────────────────────────────────────────────────────────── */
+
+Toast {
+    background: #2e3436;
+    border: round #729fcf;
+}
+
+Toast.-warning {
+    border: round #c4a000;
+}
+
+Toast.-error {
+    border: round #cc0000;
+}
+
+/* ── Org header bar ───────────────────────────────────────────────────────── */
+
+OrgHeader {
+    height: 1;
+    background: #1e2426;
+    layout: horizontal;
+    padding: 0 1;
+}

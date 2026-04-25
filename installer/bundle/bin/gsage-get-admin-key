@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# gsage-get-admin-key — retrieve (or rotate) the bootstrap admin API key.
+set -euo pipefail
+
+GSAGE_HOME="${GSAGE_HOME:-/opt/gsage/current}"
+OPERATOR_VENV="${GSAGE_OPERATOR_VENV:-/opt/gsage/shared/operator-venv}"
+ENV_FILE="${GSAGE_ENV_FILE:-/opt/gsage/shared/.env}"
+
+if [[ ! -d "$GSAGE_HOME" ]]; then
+    echo "ERROR: gSage install dir not found: $GSAGE_HOME" >&2
+    exit 1
+fi
+if [[ ! -f "$OPERATOR_VENV/bin/activate" ]]; then
+    echo "ERROR: operator venv not found: $OPERATOR_VENV" >&2
+    exit 1
+fi
+
+set -a
+[[ -f "$ENV_FILE" ]] && {
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+}
+set +a
+export POSTGRES_HOST="127.0.0.1"
+
+# shellcheck disable=SC1091
+source "$OPERATOR_VENV/bin/activate"
+export PYTHONPATH="$GSAGE_HOME:${PYTHONPATH:-}"
+cd "$GSAGE_HOME"
+exec python scripts/get_admin.py "$@"

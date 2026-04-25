@@ -1,0 +1,157 @@
+# =============================================================================
+# gSage AI — Installer .env template
+# Rendered by installer/installer.sh from wizard answers.
+# Placeholders:
+#   @@GENERATED@@         — installer replaces with openssl-generated random value
+#   @@PROMPT:<key>@@      — installer replaces with the wizard answer for <key>
+#   @@PROMPT_OPT:<key>@@  — optional; installer leaves blank if user skipped it
+# Everything else is a sensible default.
+# =============================================================================
+
+# ── gSage install context (populated by installer) ────────────
+GSAGE_VERSION=@@PROMPT:gsage_version@@
+GSAGE_IMAGE_REGISTRY=@@PROMPT:gsage_image_registry@@
+GSAGE_INSTALL_DIR=@@PROMPT:gsage_install_dir@@
+GSAGE_DBS_PATH=@@PROMPT:gsage_dbs_path@@
+GSAGE_KB_PATH=@@PROMPT:gsage_kb_path@@
+GSAGE_CUSTOM_CODE_PATH=@@PROMPT:gsage_custom_code_path@@
+
+# ── Application ──────────────────────────────────────────────
+APP_ENV=production
+DEBUG=false
+ENCRYPTION_KEY=@@GENERATED@@
+
+# ── PostgreSQL ───────────────────────────────────────────────
+POSTGRES_DB=gsagekey
+POSTGRES_USER=gsagekey
+POSTGRES_PASSWORD=@@GENERATED@@
+POSTGRES_HOST=postgres
+POSTGRES_PORT=@@PROMPT:postgres_port@@
+
+# ── Redis ────────────────────────────────────────────────────
+REDIS_PASSWORD=@@GENERATED@@
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+# ── Elasticsearch ────────────────────────────────────────────
+ELASTICSEARCH_URL=http://elasticsearch:9200
+ELASTICSEARCH_INDEX_PREFIX=gsage-
+ELASTICSEARCH_TRACE_INDEX_PREFIX=gsage-
+ELASTICSEARCH_TRACE_RETENTION_DAYS=90
+ELASTICSEARCH_BUFFER_FLUSH_INTERVAL=60
+ELASTICSEARCH_BUFFER_MAX_BATCH=5000
+
+# ── Weaviate ─────────────────────────────────────────────────
+WEAVIATE_HOST=weaviate
+WEAVIATE_PORT=8080
+WEAVIATE_GRPC_PORT=50051
+WEAVIATE_API_KEY=
+
+# ── Rate Limiting ────────────────────────────────────────────
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_DEFAULT_RPM=600
+RATE_LIMIT_USER_RPM=300
+
+# ── LLM Provider (set by wizard) ─────────────────────────────
+LLM_PROVIDER=@@PROMPT:llm_provider@@
+
+# ── Ollama (always configured — managed service) ─────────────
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_MAKER_MODEL=@@PROMPT_OPT:ollama_maker_model@@
+OLLAMA_EMBEDDING_MODEL=nomic-embed-ctx8k
+OLLAMA_EMBED_NUM_CTX=8192
+
+# ── OpenAI ───────────────────────────────────────────────────
+OPENAI_API_KEY=@@PROMPT_OPT:openai_api_key@@
+OPENAI_BASE_URL=
+OPENAI_MAKER_MODEL=@@PROMPT_OPT:openai_maker_model@@
+
+# ── Google Gemini ────────────────────────────────────────────
+gemini_api_key=@@PROMPT_OPT:gemini_api_key@@
+gemini_maker_model=@@PROMPT_OPT:gemini_maker_model@@
+
+# ── Anthropic ────────────────────────────────────────────────
+ANTHROPIC_API_KEY=@@PROMPT_OPT:anthropic_api_key@@
+ANTHROPIC_MAKER_MODEL=@@PROMPT_OPT:anthropic_maker_model@@
+
+# ── DeepSeek ─────────────────────────────────────────────────
+DEEPSEEK_API_KEY=@@PROMPT_OPT:deepseek_api_key@@
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_MAKER_MODEL=@@PROMPT_OPT:deepseek_maker_model@@
+
+# ── Agents ───────────────────────────────────────────────────
+AGENT_NUM_HISTORY_RUNS=5
+AGENT_TOOL_OUTPUT_MAX_CHARS=40000
+
+# ── MCP Server ───────────────────────────────────────────────
+MCP_SERVER_URL=http://mcp-server:8001
+MCP_TOOL_TIMEOUT_SECONDS=60
+
+# ── Mermaid ──────────────────────────────────────────────────
+MERMAID_CLI_BIN=mmdc
+MERMAID_VALIDATE_TIMEOUT_SECONDS=45
+
+# ── Ports exposed to the host ────────────────────────────────
+# In production only the frontend port is published publicly. The backend
+# is reached through the frontend reverse proxy (/api). BACKEND_PORT is
+# kept here only for internal references that may read it.
+BACKEND_PORT=8000
+FRONTEND_PORT=@@PROMPT:frontend_port@@
+
+# ── JWT ──────────────────────────────────────────────────────
+JWT_SECRET_KEY=@@GENERATED@@
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# ── CRUD Tools (disabled by default) ─────────────────────────
+CRUD_TOOLS_ENABLED=false
+CRUD_TOOLS_ALLOW_WRITE=false
+
+# ── DataStore ────────────────────────────────────────────────
+DATASTORE_ENABLED=false
+DATASTORE_MAX_STORES_PER_ORG=20
+DATASTORE_MAX_RECORDS_PER_STORE=1000
+DATASTORE_MAX_RECORD_SIZE_BYTES=10240
+
+# ── Bootstrap admin ──────────────────────────────────────────
+ADMIN_EMAIL=@@PROMPT:admin_email@@
+ADMIN_PASSWORD=@@PROMPT:admin_password@@
+ADMIN_ORG_NAME=@@PROMPT:admin_org_name@@
+
+# ── Self registration ────────────────────────────────────────
+ALLOW_SELF_REGISTER=false
+
+# ── SMTP (outgoing notifications) ────────────────────────────
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_USE_TLS=true
+SMTP_VALIDATE_CERTS=true
+SMTP_FROM_EMAIL=noreply@gsage.local
+SMTP_FROM_NAME=gSage AI
+SMTP_DEFAULT_FORMAT=html
+
+# ── Telegram / Email workers ─────────────────────────────────
+TELEGRAM_RATE_LIMIT_ORG_DAILY=200
+TELEGRAM_RATE_LIMIT_USER_HOURLY=30
+TELEGRAM_MAX_MESSAGE_LENGTH=4096
+TELEGRAM_RELOAD_INTERVAL=300
+EMAIL_RATE_LIMIT_ORG_DAILY=100
+EMAIL_RATE_LIMIT_USER_HOURLY=10
+EMAIL_DELETE_AFTER_PROCESS=false
+EMAIL_UNKNOWN_SENDER_FOLDER=Unknown-Senders
+
+# ── MinIO ────────────────────────────────────────────────────
+MINIO_ROOT_USER=gsage
+MINIO_ROOT_PASSWORD=@@GENERATED@@
+MINIO_ENDPOINT=minio:9000
+MINIO_BUCKET=gsage-artifacts
+MINIO_SECURE=false
+
+# ── Curator ──────────────────────────────────────────────────
+CURATOR_DB_USER=curator
+CURATOR_DB_PASSWORD=@@GENERATED_CURATOR@@
+CURATOR_DATABASE_URI=postgresql+asyncpg://curator:@@GENERATED_CURATOR@@@postgres:5432/curator
+CURATOR_API_KEY=@@GENERATED@@

@@ -1,0 +1,12 @@
+# gSage AI — CLI Client Dependencies
+#
+# Install with: pip install -r requirements-cli.txt
+
+# HTTP client
+httpx>=0.27.0,<1.0.0
+
+# Rich terminal UI
+rich>=13.7.0,<14.0.0
+
+# Textual TUI (Admin Console)
+textual>=1.0,<2

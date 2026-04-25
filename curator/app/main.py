@@ -1,0 +1,155 @@
+"""Curator — FastAPI application entry point.
+
+Lifecycle:
+    - Creates database tables (create_all) on startup.
+    - Runs seed collections.
+    - Starts a periodic background task for expired item cleanup.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
+from fastapi import FastAPI
+from sqlalchemy import delete, select, text
+
+from .config import get_settings
+from .data_routes import router as data_router
+from .database import get_engine, get_session_factory
+from .dump import dump_collection
+from .models import Base, Collection, Item
+from .routes import router as admin_router
+from .seed import run_seed
+
+log = logging.getLogger(__name__)
+
+_cleanup_task: asyncio.Task | None = None
+
+
+async def _expiry_cleanup_loop() -> None:
+    """Delete expired items and re-dump affected collections periodically."""
+    settings = get_settings()
+    factory = get_session_factory()
+
+    while True:
+        await asyncio.sleep(settings.expiry_check_interval)
+        try:
+            async with factory() as session:
+                now = datetime.now(tz=timezone.utc)
+
+                # Find collections that have at least one expired item
+                result = await session.execute(
+                    select(Item.collection_id)
+                    .where(Item.expire_at.isnot(None))
+                    .where(Item.expire_at <= now)
+                    .distinct()
+                )
+                affected_ids = [row[0] for row in result.all()]
+
+                if not affected_ids:
+                    log.debug("expiry_cleanup: no expired items")
+                    continue
+
+                # Delete expired items
+                await session.execute(
+                    delete(Item)
+                    .where(Item.expire_at.isnot(None))
+                    .where(Item.expire_at <= now)
+                )
+
+                # Mark affected collections as waiting
+                for cid in affected_ids:
+                    c = await session.get(Collection, cid)
+                    if c and c.status == "idle":
+                        c.status = "waiting"
+                        c.touch()
+
+                await session.commit()
+                log.info("expiry_cleanup: deleted expired items from collections %s", affected_ids)
+
+            # Re-dump affected collections
+            for cid in affected_ids:
+                await dump_collection(cid)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("expiry_cleanup: unexpected error")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _cleanup_task
+
+    engine = get_engine()
+    factory = get_session_factory()
+
+    # Wait for the database to be ready (retries handle postgres init-script race condition)
+    max_retries = 10
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            log.info("startup: database connection established")
+            break
+        except Exception as exc:
+            if attempt == max_retries:
+                log.error("startup: database unreachable after %d attempts — aborting", max_retries)
+                raise
+            wait = min(2 ** attempt, 30)
+            log.warning("startup: database not ready (attempt %d/%d): %s — retrying in %ss", attempt, max_retries, exc, wait)
+            await asyncio.sleep(wait)
+
+    # Create tables
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    log.info("startup: database tables created (if not exist)")
+
+    # Seed default collections
+    async with factory() as session:
+        await run_seed(session)
+    log.info("startup: seed completed")
+
+    # Start expiry cleanup background task
+    _cleanup_task = asyncio.create_task(_expiry_cleanup_loop(), name="expiry-cleanup")
+    log.info("startup: expiry cleanup task started (interval=%ss)", get_settings().expiry_check_interval)
+
+    yield
+
+    # Shutdown
+    if _cleanup_task:
+        _cleanup_task.cancel()
+        try:
+            await _cleanup_task
+        except asyncio.CancelledError:
+            pass
+
+    await engine.dispose()
+    log.info("shutdown: complete")
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+    app = FastAPI(
+        title="Curator",
+        version="1.0.0",
+        description="Reputation list management service",
+        lifespan=lifespan,
+        docs_url="/docs",
+        redoc_url="/redoc",
+    )
+
+    app.include_router(admin_router)
+    app.include_router(data_router)
+
+    @app.get("/health", tags=["health"])
+    async def health() -> dict:
+        return {"status": "ok"}
+
+    return app
+
+
+app = create_app()

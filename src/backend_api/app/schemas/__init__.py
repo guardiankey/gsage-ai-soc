@@ -1,0 +1,1 @@
+"""gSage AI — schemas package."""

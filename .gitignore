@@ -1,0 +1,71 @@
+# .gitignore — gSage AI
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Docker volumes (local)
+postgres_data/
+redis_data/
+elasticsearch_data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Alembic
+*.db
+
+# CLI Client
+.gsage_ai_history
+.cli_deps_installed
+.ruff_cache/
+
+# Binary databases (GeoIP, IP2Location, …)
+# Run dbs/<category>/update.sh to populate locally.
+dbs/**/*.mmdb
+dbs/**/*.BIN
+dbs/**/*.bin
+dbs/**/*.dat
+!dbs/**/update.sh
+
+.github/
+
+estilo_externo_apenas_para_referencia/
+
+web_client/node_modules/
+
+
+docs-local
+docs-local/*
+limbo
+limbo/*
