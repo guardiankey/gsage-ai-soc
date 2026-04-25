@@ -144,6 +144,11 @@ ln -sfn "$RELEASE_DIR" "$tmp_link"
 mv -Tf "$tmp_link" "$CURRENT_LINK"
 echo "Active release: $CURRENT_LINK → $RELEASE_DIR"
 
+# Each service in docker-compose.yml declares `env_file: .env` relative to the
+# compose directory, so docker compose expects compose/.env next to the yml.
+# Point it to the single source of truth at $ENV_FILE via a symlink.
+ln -sfn "$ENV_FILE" "$RELEASE_DIR/compose/.env"
+
 # ── 6. Operator venv (host-side Python) ──────────────────────────────
 VENV_DIR="$SHARED_DIR/operator-venv"
 if [[ ! -d "$VENV_DIR" ]]; then
@@ -164,12 +169,12 @@ echo "Installed: /usr/local/bin/gsage-{cli,admin,get-admin-key}"
 
 # ── 8. Bring the stack up ────────────────────────────────────────────
 echo ""
-echo ">> pulling images"
-( cd "$CURRENT_LINK" && docker compose --env-file "$ENV_FILE" -f compose/docker-compose.yml pull )
+echo ">> pulling images (this may take a while; progress shown only on errors)"
+( cd "$CURRENT_LINK" && docker compose --progress quiet --env-file "$ENV_FILE" -f compose/docker-compose.yml pull )
 
 echo ""
 echo ">> starting services"
-( cd "$CURRENT_LINK" && docker compose --env-file "$ENV_FILE" -f compose/docker-compose.yml up -d )
+( cd "$CURRENT_LINK" && docker compose --progress quiet --env-file "$ENV_FILE" -f compose/docker-compose.yml up -d )
 
 echo ""
 echo ">> waiting for backend_api to be healthy (up to 5 minutes)"

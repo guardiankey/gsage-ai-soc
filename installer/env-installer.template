@@ -1,10 +1,10 @@
 # =============================================================================
 # gSage AI — Installer .env template
 # Rendered by installer/installer.sh from wizard answers.
-# Placeholders:
-#   @@GENERATED@@         — installer replaces with openssl-generated random value
-#   @@PROMPT:<key>@@      — installer replaces with the wizard answer for <key>
-#   @@PROMPT_OPT:<key>@@  — optional; installer leaves blank if user skipped it
+# Placeholders (documented without literal markers to avoid render-time false positives):
+#   GENERATED            — installer replaces with openssl-generated random value
+#   PROMPT:<key>         — installer replaces with the wizard answer for <key>
+#   PROMPT_OPT:<key>     — optional; installer leaves blank if user skipped it
 # Everything else is a sensible default.
 # =============================================================================
 

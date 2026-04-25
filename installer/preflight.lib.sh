@@ -148,9 +148,44 @@ preflight::ensure_python() {
         echo "python3 not found — installing..."
         preflight::_install_packages python3 python3-venv python3-pip
     fi
-    # Ensure venv module exists (Debian splits it into python3-venv).
-    if ! python3 -c 'import venv' >/dev/null 2>&1; then
-        preflight::_install_packages python3-venv
+
+    # On Debian/Ubuntu, a working venv requires both `venv` and `ensurepip`,
+    # the latter shipped only by the version-specific package
+    # python3.<minor>-venv (e.g. python3.13-venv on Ubuntu 24.10+).
+    # `import venv` may succeed even when ensurepip is missing, so we test
+    # ensurepip explicitly and install the versioned package when needed.
+    local need_venv_pkg=0
+    python3 -c 'import venv'      >/dev/null 2>&1 || need_venv_pkg=1
+    python3 -c 'import ensurepip' >/dev/null 2>&1 || need_venv_pkg=1
+
+    if (( need_venv_pkg )); then
+        case "$GSAGE_OS_FAMILY" in
+            debian)
+                local pyver pkg
+                pyver="$(python3 -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+                pkg="python3.${pyver#*.}-venv"
+                echo "Installing $pkg (and python3-venv as fallback)..."
+                # Try the versioned package first; fall back to the generic one.
+                preflight::_install_packages "$pkg" || true
+                preflight::_install_packages python3-venv
+                ;;
+            *)
+                preflight::_install_packages python3-venv
+                ;;
+        esac
     fi
-    echo "Python: $(python3 --version) (ok)"
+
+    # Final smoke test: actually create a throwaway venv to be sure.
+    local probe
+    probe="$(mktemp -d)"
+    if ! python3 -m venv "$probe/v" >/dev/null 2>&1; then
+        rm -rf "$probe"
+        echo "ERROR: python3 -m venv is still not functional. Install the" >&2
+        echo "       distro's python3-venv (or python3.<minor>-venv) package" >&2
+        echo "       manually and re-run the installer." >&2
+        return 1
+    fi
+    rm -rf "$probe"
+
+    echo "Python: $(python3 --version) (ok, venv functional)"
 }

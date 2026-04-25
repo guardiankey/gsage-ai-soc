@@ -84,20 +84,20 @@ wizard::run() {
             wizard::_ask ollama_maker_model "Ollama maker model (ensure it is pullable)" "qwen2.5:14b"
             ;;
         openai)
-            wizard::_ask        openai_maker_model "OpenAI model" "gpt-4o-mini"
-            wizard::_ask_secret openai_api_key     "OpenAI API key"
+            wizard::_ask openai_maker_model "OpenAI model" "gpt-4o-mini"
+            wizard::_ask openai_api_key     "OpenAI API key"
             ;;
         gemini)
-            wizard::_ask        gemini_maker_model "Gemini model" "gemini-1.5-pro"
-            wizard::_ask_secret gemini_api_key     "Gemini API key"
+            wizard::_ask gemini_maker_model "Gemini model" "gemini-1.5-pro"
+            wizard::_ask gemini_api_key     "Gemini API key"
             ;;
         anthropic)
-            wizard::_ask        anthropic_maker_model "Anthropic model" "claude-3-5-sonnet-latest"
-            wizard::_ask_secret anthropic_api_key     "Anthropic API key"
+            wizard::_ask anthropic_maker_model "Anthropic model" "claude-3-5-sonnet-latest"
+            wizard::_ask anthropic_api_key     "Anthropic API key"
             ;;
         deepseek)
-            wizard::_ask        deepseek_maker_model "DeepSeek model" "deepseek-chat"
-            wizard::_ask_secret deepseek_api_key     "DeepSeek API key"
+            wizard::_ask deepseek_maker_model "DeepSeek model" "deepseek-chat"
+            wizard::_ask deepseek_api_key     "DeepSeek API key"
             ;;
     esac
 
