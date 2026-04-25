@@ -27,8 +27,10 @@ COPY --from=builder /install /usr/local
 WORKDIR /app
 COPY curator/app /app/app
 
-RUN groupadd -r curator && useradd -r -g curator curator
+RUN groupadd -r curator \
+    && useradd -r -g curator -m -d /home/curator -s /usr/sbin/nologin curator
 RUN mkdir -p /data && chown curator:curator /data
+ENV HOME=/home/curator
 USER curator
 
 CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "app.main:app", "--bind", "0.0.0.0:8000", "--workers", "2"]

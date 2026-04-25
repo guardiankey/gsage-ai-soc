@@ -180,7 +180,7 @@ echo ""
 echo ">> waiting for backend_api to be healthy (up to 5 minutes)"
 deadline=$(( $(date +%s) + 300 ))
 while :; do
-    state="$(docker inspect --format '{{.State.Health.Status}}' gsage-backend-api 2>/dev/null || echo starting)"
+    state="$(docker inspect --format '{{.State.Health.Status}}' gsage-backend_api 2>/dev/null || echo starting)"
     if [[ "$state" == "healthy" ]]; then
         echo "   backend_api: healthy"
         break
@@ -196,7 +196,7 @@ done
 # ── 9. Capture the bootstrap API key from backend logs ───────────────
 echo ""
 echo ">> capturing bootstrap admin key"
-ADMIN_KEY="$(docker logs gsage-backend-api 2>&1 | grep -oE 'gk_live_[A-Za-z0-9_-]+' | head -1 || true)"
+ADMIN_KEY="$(docker logs gsage-backend_api 2>&1 | grep -oE 'gk_live_[A-Za-z0-9_-]+' | head -1 || true)"
 
 # ── 10. Finalise logs ────────────────────────────────────────────────
 mkdir -p "$LOG_DIR_FINAL"

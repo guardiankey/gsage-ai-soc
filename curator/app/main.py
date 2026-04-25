@@ -103,13 +103,20 @@ async def lifespan(app: FastAPI):
             log.warning("startup: database not ready (attempt %d/%d): %s — retrying in %ss", attempt, max_retries, exc, wait)
             await asyncio.sleep(wait)
 
-    # Create tables
+    # Create tables + seed under a Postgres advisory lock so that concurrent
+    # gunicorn workers don't race on CREATE TABLE / seed INSERTs (which would
+    # otherwise surface as UniqueViolationError on pg_type_typname_nsp_index
+    # or on seed uniqueness constraints).
+    # Lock key is an arbitrary fixed int64 scoped to this service.
+    _INIT_LOCK_KEY = 0x6375723031  # 'cur01'
     async with engine.begin() as conn:
+        await conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _INIT_LOCK_KEY})
         await conn.run_sync(Base.metadata.create_all)
     log.info("startup: database tables created (if not exist)")
 
     # Seed default collections
     async with factory() as session:
+        await session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _INIT_LOCK_KEY})
         await run_seed(session)
     log.info("startup: seed completed")
 
