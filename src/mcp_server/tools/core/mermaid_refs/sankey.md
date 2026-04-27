@@ -30,9 +30,37 @@ sankey-beta
 A,B,10
 ```
 
+## ✅ Recommended frontmatter — ALWAYS include it
+
+You MUST prepend the following YAML frontmatter to every `sankey-beta`
+diagram you produce. With more than a handful of flows or large numeric
+values (bytes, packets, requests), the per-link labels overlap and become
+unreadable. Hiding them with `showValues: false` keeps the chart clean —
+describe the exact numbers in the surrounding narrative instead.
+
+```
+---
+config:
+  sankey:
+    showValues: false
+---
+sankey-beta
+SOURCE,DESTINATION,VALUE
+```
+
+This is exactly the header emitted by the `pcap_analyzer` tool in
+`sankey_hint.mermaid`. When you receive a `sankey_hint` from any tool,
+copy the `mermaid` field verbatim — including the frontmatter — instead
+of rebuilding the block from the raw flow list.
+
 ## Example — Generic Flow
 
 ```mermaid
+---
+config:
+  sankey:
+    showValues: false
+---
 sankey-beta
 Internet Traffic,Web Server,450
 Internet Traffic,Mail Server,120
@@ -47,6 +75,11 @@ VPN Gateway,Internal Network,75
 ## Example — Network Traffic (IPs)
 
 ```mermaid
+---
+config:
+  sankey:
+    showValues: false
+---
 sankey-beta
 Network Traffic,140.82.113.22,1364
 Network Traffic,2804-d59,1232

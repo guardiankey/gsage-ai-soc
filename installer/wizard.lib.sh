@@ -110,6 +110,12 @@ wizard::_gen() {
     openssl rand -base64 36 | tr -d '=+/' | cut -c1-40
 }
 
+wizard::_gen_key32() {
+    # Strict 32-byte base64-encoded key (44 chars with padding) for AES-256
+    # consumers like ENCRYPTION_KEY (src/shared/security/encryption.py).
+    openssl rand -base64 32
+}
+
 wizard::render_env() {
     # $1 = path to env.template, $2 = path to output .env
     local template="$1" out="$2"
@@ -132,6 +138,23 @@ wizard::render_env() {
     safe_minio="$(printf '%s' "$generated_minio" | sed 's/[\/&]/\\&/g')"
     sed -i "s/@@GENERATED_CURATOR@@/$safe_curator/g" "$tmp"
     sed -i "s/@@GENERATED_MINIO@@/$safe_minio/g" "$tmp"
+
+    # Replace @@GENERATED_KEY32@@ with a fresh 32-byte base64 key per occurrence
+    # (must come BEFORE the generic @@GENERATED@@ pass so the longer placeholder
+    # is not partially consumed). Each line gets its own fresh key.
+    local line2 new_file2
+    new_file2="$(mktemp)"
+    while IFS= read -r line2; do
+        while [[ "$line2" == *"@@GENERATED_KEY32@@"* ]]; do
+            local k32 safe_k32
+            k32="$(wizard::_gen_key32)"
+            safe_k32="$(printf '%s' "$k32" | sed 's/[\/&]/\\&/g')"
+            line2="${line2/@@GENERATED_KEY32@@/$k32}"
+            : "$safe_k32"
+        done
+        printf '%s\n' "$line2" >> "$new_file2"
+    done < "$tmp"
+    mv "$new_file2" "$tmp"
 
     # For every remaining @@GENERATED@@, substitute a fresh random value.
     local line new_file

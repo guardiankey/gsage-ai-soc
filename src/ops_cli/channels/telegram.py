@@ -112,6 +112,14 @@ async def _upsert_async(args: argparse.Namespace) -> int:
                 cfg["bot_token"] = token
             profile.interface_config = cfg
             profile.is_active = not args.deactivate
+            # If no tool permissions are configured, normalize to an open
+            # denylist so the channel works out of the box (denylist + [] =
+            # all tools allowed). Avoids the foot-gun of an empty allowlist
+            # leftover from a UI-created profile, which would block every
+            # tool call.
+            if not (profile.tool_permissions or []):
+                profile.mode = "denylist"
+                profile.tool_permissions = []
 
         db.add(profile)
         await db.commit()

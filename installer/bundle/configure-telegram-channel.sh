@@ -2,13 +2,20 @@
 # configure-telegram-channel.sh — guided setup for a Telegram bot channel.
 #
 # Delegates the DB write to:
-#   docker compose exec -T backend_api python -m ops_cli channels telegram upsert
+#   docker compose exec -T backend_api python -m src.ops_cli channels telegram upsert
 #
 # The bot token is fed on stdin — never on argv, never logged.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve the real path so the script works when invoked via a symlink in
+# /usr/local/bin/ (e.g. gsage-configure-telegram).
+_self="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+    _self="$(readlink -f "$_self" 2>/dev/null || echo "$_self")"
+fi
+SCRIPT_DIR="$(cd "$(dirname "$_self")" && pwd)"
 GSAGE_HOME="${GSAGE_HOME:-$SCRIPT_DIR}"
+COMPOSE_DIR="${GSAGE_COMPOSE_DIR:-$GSAGE_HOME/compose}"
 LOG_DIR="${GSAGE_LOG_DIR:-/opt/gsage/shared/logs/helpers}"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/configure-telegram-channel-$(date -u +%Y%m%dT%H%M%SZ).log"
@@ -16,7 +23,11 @@ LOG_FILE="$LOG_DIR/configure-telegram-channel-$(date -u +%Y%m%dT%H%M%SZ).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 echo "── configure-telegram-channel $(date -u +%FT%TZ) ──"
 echo "   log: $LOG_FILE"
-cd "$GSAGE_HOME"
+if [[ ! -f "$COMPOSE_DIR/docker-compose.yml" ]]; then
+    echo "ERROR: docker-compose.yml not found at $COMPOSE_DIR" >&2
+    exit 1
+fi
+cd "$COMPOSE_DIR"
 
 NON_INTERACTIVE=0
 ORG_SLUG=""
@@ -96,10 +107,10 @@ args=(
 [[ -n "$ORG_ID"   ]] && args+=(--org-id "$ORG_ID")
 
 echo ""
-echo "Running: docker compose exec -T backend_api python -m ops_cli ${args[*]}"
+echo "Running: docker compose exec -T backend_api python -m src.ops_cli ${args[*]}"
 echo "(token is streamed via stdin — not shown)"
 
-printf '%s\n' "$BOT_TOKEN" | docker compose exec -T backend_api python -m ops_cli "${args[@]}"
+printf '%s\n' "$BOT_TOKEN" | docker compose exec -T backend_api python -m src.ops_cli "${args[@]}"
 rc=$?
 if [[ $rc -ne 0 ]]; then
     echo ""

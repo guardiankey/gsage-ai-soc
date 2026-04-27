@@ -42,10 +42,20 @@ def register(parser: argparse.ArgumentParser) -> None:
     create.add_argument("--imap-port", type=int, default=993)
     create.add_argument("--imap-user", required=True)
     create.add_argument("--imap-no-tls", action="store_true")
+    create.add_argument(
+        "--imap-no-verify-ssl",
+        action="store_true",
+        help="Skip TLS certificate verification on IMAP (self-signed certs).",
+    )
     create.add_argument("--smtp-host", required=True)
     create.add_argument("--smtp-port", type=int, default=587)
     create.add_argument("--smtp-user", required=True)
     create.add_argument("--smtp-no-tls", action="store_true")
+    create.add_argument(
+        "--smtp-no-verify-ssl",
+        action="store_true",
+        help="Skip TLS certificate verification on SMTP (self-signed certs).",
+    )
     create.add_argument("--imap-password", default=None,
                         help="IMAP password (prefer --imap-password-stdin)")
     create.add_argument("--smtp-password", default=None,
@@ -110,10 +120,12 @@ async def _create_async(args: argparse.Namespace) -> int:
                 imap_host=args.imap_host,
                 imap_port=args.imap_port,
                 imap_use_tls=not args.imap_no_tls,
+                imap_verify_ssl=not args.imap_no_verify_ssl,
                 imap_username=args.imap_user,
                 smtp_host=args.smtp_host,
                 smtp_port=args.smtp_port,
                 smtp_use_tls=not args.smtp_no_tls,
+                smtp_verify_ssl=not args.smtp_no_verify_ssl,
                 smtp_username=args.smtp_user,
                 sender_name=args.display_name,
             )
@@ -125,10 +137,12 @@ async def _create_async(args: argparse.Namespace) -> int:
             acc.imap_host = args.imap_host
             acc.imap_port = args.imap_port
             acc.imap_use_tls = not args.imap_no_tls
+            acc.imap_verify_ssl = not args.imap_no_verify_ssl
             acc.imap_username = args.imap_user
             acc.smtp_host = args.smtp_host
             acc.smtp_port = args.smtp_port
             acc.smtp_use_tls = not args.smtp_no_tls
+            acc.smtp_verify_ssl = not args.smtp_no_verify_ssl
             acc.smtp_username = args.smtp_user
             created = False
 

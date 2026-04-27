@@ -57,7 +57,7 @@ class EmailAccountsPanel(Widget):
             self._accounts = {a["id"]: a for a in accounts}
             table = self.query_one("#email-table", DataTableExt)
             table.set_rows(
-                [[a["email_address"], a.get("imap_host", "—"), a.get("smtp_host", "—"),
+                [[a["email"], a.get("imap_host", "—"), a.get("smtp_host", "—"),
                   "✓" if a.get("is_active") else "✗", str(a.get("org_id", ""))[:8]] for a in accounts],
                 [a["id"] for a in accounts],
             )
@@ -72,7 +72,7 @@ class EmailAccountsPanel(Widget):
                 display = {k: ("****" if "password" in k else v) for k, v in account.items()}
             else:
                 display = account
-            self.query_one("#email-detail", KVPanel).update(display, title=account.get("email_address", ""))
+            self.query_one("#email-detail", KVPanel).update(display, title=account.get("email", ""))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-refresh":

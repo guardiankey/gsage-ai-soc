@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 # configure-email-channel.sh — guided setup for an IMAP/SMTP mailbox.
 #
-# Runs inside /opt/gsage/current/ and delegates the actual DB write to:
-#   docker compose exec -T backend_api python -m ops_cli channels email create
+# Runs inside /opt/gsage/current/compose/ (where docker-compose.yml lives)
+# and delegates the actual DB write to:
+#   docker compose exec -T backend_api python -m src.ops_cli channels email create
 #
 # Secrets (IMAP/SMTP passwords) are fed on stdin — never on argv, never logged.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve the real path so the script works when invoked via a symlink in
+# /usr/local/bin/ (e.g. gsage-configure-email).
+_self="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+    _self="$(readlink -f "$_self" 2>/dev/null || echo "$_self")"
+fi
+SCRIPT_DIR="$(cd "$(dirname "$_self")" && pwd)"
 GSAGE_HOME="${GSAGE_HOME:-$SCRIPT_DIR}"
+COMPOSE_DIR="${GSAGE_COMPOSE_DIR:-$GSAGE_HOME/compose}"
 LOG_DIR="${GSAGE_LOG_DIR:-/opt/gsage/shared/logs/helpers}"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/configure-email-channel-$(date -u +%Y%m%dT%H%M%SZ).log"
@@ -17,7 +25,11 @@ LOG_FILE="$LOG_DIR/configure-email-channel-$(date -u +%Y%m%dT%H%M%SZ).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 echo "── configure-email-channel $(date -u +%FT%TZ) ──"
 echo "   log: $LOG_FILE"
-cd "$GSAGE_HOME"
+if [[ ! -f "$COMPOSE_DIR/docker-compose.yml" ]]; then
+    echo "ERROR: docker-compose.yml not found at $COMPOSE_DIR" >&2
+    exit 1
+fi
+cd "$COMPOSE_DIR"
 
 NON_INTERACTIVE=0
 ORG_SLUG=""
@@ -25,8 +37,8 @@ ORG_ID=""
 TEST_PROBE=0
 DISPLAY_NAME=""
 EMAIL_ADDR=""
-IMAP_HOST=""; IMAP_PORT="993"; IMAP_USER=""
-SMTP_HOST=""; SMTP_PORT="587"; SMTP_USER=""
+IMAP_HOST=""; IMAP_PORT="993"; IMAP_USER=""; IMAP_VERIFY_SSL=""
+SMTP_HOST=""; SMTP_PORT="587"; SMTP_USER=""; SMTP_VERIFY_SSL=""
 
 usage() {
     cat <<'EOF'
@@ -37,6 +49,8 @@ Usage: configure-email-channel.sh [options]
   --email <addr>
   --imap-host <host> --imap-port <int> --imap-user <user>
   --smtp-host <host> --smtp-port <int> --smtp-user <user>
+  --imap-no-verify-ssl     Skip TLS cert verification on IMAP (self-signed)
+  --smtp-no-verify-ssl     Skip TLS cert verification on SMTP (self-signed)
   --test                   Probe IMAP LOGIN + SMTP AUTH before saving
   --non-interactive        Fail instead of prompting for missing fields
   -h, --help
@@ -56,6 +70,8 @@ while [[ $# -gt 0 ]]; do
         --smtp-host) SMTP_HOST="$2"; shift 2 ;;
         --smtp-port) SMTP_PORT="$2"; shift 2 ;;
         --smtp-user) SMTP_USER="$2"; shift 2 ;;
+        --imap-no-verify-ssl) IMAP_VERIFY_SSL="no"; shift ;;
+        --smtp-no-verify-ssl) SMTP_VERIFY_SSL="no"; shift ;;
         --test) TEST_PROBE=1; shift ;;
         --non-interactive) NON_INTERACTIVE=1; shift ;;
         -h|--help) usage 0 ;;
@@ -100,9 +116,15 @@ prompt "Email address" EMAIL_ADDR
 prompt "IMAP host" IMAP_HOST
 prompt "IMAP port" IMAP_PORT "993"
 prompt "IMAP username" IMAP_USER "$EMAIL_ADDR"
+prompt "Verify IMAP TLS certificate? (yes for trusted CA, no for self-signed)" IMAP_VERIFY_SSL "yes"
 prompt "SMTP host" SMTP_HOST "$IMAP_HOST"
 prompt "SMTP port" SMTP_PORT "587"
 prompt "SMTP username" SMTP_USER "$IMAP_USER"
+prompt "Verify SMTP TLS certificate? (yes for trusted CA, no for self-signed)" SMTP_VERIFY_SSL "$IMAP_VERIFY_SSL"
+
+# Normalize verify-ssl answers ("no"/"n"/"false"/"0" → no, anything else → yes).
+case "${IMAP_VERIFY_SSL,,}" in n|no|false|0|off) IMAP_VERIFY_SSL="no" ;; *) IMAP_VERIFY_SSL="yes" ;; esac
+case "${SMTP_VERIFY_SSL,,}" in n|no|false|0|off) SMTP_VERIFY_SSL="no" ;; *) SMTP_VERIFY_SSL="yes" ;; esac
 
 # ── Secrets via stdin (never logged) ──────────────────────────────────
 IMAP_PW=""
@@ -119,13 +141,15 @@ args=(
     --smtp-host "$SMTP_HOST" --smtp-port "$SMTP_PORT" --smtp-user "$SMTP_USER"
     --imap-password-stdin
 )
+[[ "$IMAP_VERIFY_SSL" == "no" ]] && args+=(--imap-no-verify-ssl)
+[[ "$SMTP_VERIFY_SSL" == "no" ]] && args+=(--smtp-no-verify-ssl)
 [[ -n "$SMTP_PW" ]] && args+=(--smtp-password-stdin)
 [[ -n "$ORG_SLUG" ]] && args+=(--org-slug "$ORG_SLUG")
 [[ -n "$ORG_ID"   ]] && args+=(--org-id "$ORG_ID")
 [[ $TEST_PROBE -eq 1 ]] && args+=(--test)
 
 echo ""
-echo "Running: docker compose exec -T backend_api python -m ops_cli ${args[*]}"
+echo "Running: docker compose exec -T backend_api python -m src.ops_cli ${args[*]}"
 echo "(passwords are streamed via stdin — not shown)"
 
 # Print secrets separated by a newline; ops_cli reads two lines when both
@@ -134,7 +158,7 @@ if [[ -n "$SMTP_PW" ]]; then
     printf '%s\n%s\n' "$IMAP_PW" "$SMTP_PW"
 else
     printf '%s\n' "$IMAP_PW"
-fi | docker compose exec -T backend_api python -m ops_cli "${args[@]}"
+fi | docker compose exec -T backend_api python -m src.ops_cli "${args[@]}"
 
 rc=$?
 if [[ $rc -ne 0 ]]; then

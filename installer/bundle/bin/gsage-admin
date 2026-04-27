@@ -3,6 +3,50 @@
 # Installed under /opt/gsage/current/bin/ and symlinked into /usr/local/bin/.
 set -euo pipefail
 
+# ── Ensure a UTF-8 locale ────────────────────────────────────────
+# Textual TUI, .env values with non-ASCII text and Python stdout/stderr only
+# render correctly with a UTF-8 locale.  Honour the user's existing locale
+# whenever possible; only fall back to C.UTF-8 when no UTF-8 variant exists.
+_gsage_ensure_utf8() {
+    local current="${LC_ALL:-${LANG:-}}"
+    # 1. Already UTF-8 — leave it alone.
+    if [[ "$current" =~ [Uu][Tt][Ff]-?8 ]]; then
+        export PYTHONIOENCODING=utf-8
+        return 0
+    fi
+    local available candidate lang_only
+    available="$(locale -a 2>/dev/null || true)"
+    # 2. Same language, UTF-8 variant (e.g. pt_BR.ISO-8859-1 → pt_BR.UTF-8).
+    if [[ -n "$current" && "$current" != "C" && "$current" != "POSIX" ]]; then
+        lang_only="${current%%.*}"
+        for candidate in "${lang_only}.UTF-8" "${lang_only}.utf8"; do
+            if printf '%s\n' "$available" | grep -qiFx "$candidate"; then
+                export LANG="$candidate" LC_ALL="$candidate" PYTHONIOENCODING=utf-8
+                return 0
+            fi
+        done
+    fi
+    # 3. Any available UTF-8 locale.
+    for candidate in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+        if printf '%s\n' "$available" | grep -qiFx "$candidate"; then
+            export LANG="$candidate" LC_ALL="$candidate" PYTHONIOENCODING=utf-8
+            return 0
+        fi
+    done
+    # 4. No UTF-8 locale on the system.
+    cat >&2 <<'EOF'
+ERROR: gSage requires a UTF-8 locale to render the TUI and read .env files
+       correctly, but no UTF-8 locale was found on this system.
+       Install one before running gsage-admin again, e.g.:
+         Debian/Ubuntu:  apt-get install -y locales && \
+                         locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
+         RHEL/Fedora:    dnf install -y glibc-langpack-en
+         Alpine/musl:    apk add --no-cache musl-locales musl-locales-lang
+EOF
+    return 1
+}
+_gsage_ensure_utf8 || exit 1
+
 GSAGE_HOME="${GSAGE_HOME:-/opt/gsage/current}"
 OPERATOR_VENV="${GSAGE_OPERATOR_VENV:-/opt/gsage/shared/operator-venv}"
 ENV_FILE="${GSAGE_ENV_FILE:-/opt/gsage/shared/.env}"
@@ -20,14 +64,20 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 
-# Load env so admin_console picks up DB creds (POSTGRES_HOST=localhost override
-# because the host reaches postgres via the loopback-forwarded port).
+# Load env so admin_console picks up DB creds. Datastore hostnames in the
+# shared .env reference the docker-compose network (e.g. POSTGRES_HOST=postgres,
+# WEAVIATE_HOST=weaviate) and are not resolvable from the host. Override them
+# here with the loopback-forwarded ports published by docker-compose.prod.yml.
 set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 set +a
 export POSTGRES_HOST="127.0.0.1"
 export REDIS_HOST="127.0.0.1"
+export ELASTICSEARCH_URL="http://127.0.0.1:9200"
+export WEAVIATE_HOST="127.0.0.1"
+export WEAVIATE_PORT="${WEAVIATE_HOST_PORT:-18080}"
+export WEAVIATE_GRPC_PORT="${WEAVIATE_GRPC_HOST_PORT:-50051}"
 
 # shellcheck disable=SC1091
 source "$OPERATOR_VENV/bin/activate"

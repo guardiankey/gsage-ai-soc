@@ -19,7 +19,7 @@ GSAGE_CUSTOM_CODE_PATH=@@PROMPT:gsage_custom_code_path@@
 # ── Application ──────────────────────────────────────────────
 APP_ENV=production
 DEBUG=false
-ENCRYPTION_KEY=@@GENERATED@@
+ENCRYPTION_KEY=@@GENERATED_KEY32@@
 
 # ── PostgreSQL ───────────────────────────────────────────────
 POSTGRES_DB=gsagekey
@@ -46,6 +46,11 @@ WEAVIATE_HOST=weaviate
 WEAVIATE_PORT=8080
 WEAVIATE_GRPC_PORT=50051
 WEAVIATE_API_KEY=
+# Loopback ports published on the host so the admin console (gsage-admin)
+# can reach Weaviate from outside the docker network. REST defaults to 18080
+# to avoid colliding with FRONTEND_PORT=8080. Change only if the port is busy.
+WEAVIATE_HOST_PORT=18080
+WEAVIATE_GRPC_HOST_PORT=50051
 
 # ── Rate Limiting ────────────────────────────────────────────
 RATE_LIMIT_ENABLED=true
@@ -130,7 +135,7 @@ SMTP_PASSWORD=
 SMTP_USE_TLS=true
 SMTP_VALIDATE_CERTS=true
 SMTP_FROM_EMAIL=noreply@gsage.local
-SMTP_FROM_NAME=gSage AI
+SMTP_FROM_NAME="gSage AI"
 SMTP_DEFAULT_FORMAT=html
 
 # ── Telegram / Email workers ─────────────────────────────────

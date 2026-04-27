@@ -135,6 +135,13 @@ class MaintenancePanel(Widget):
     async def _list_weaviate(self) -> None:
         from admin_console.services.maintenance_service import weaviate_list_collections_with_counts  # noqa: PLC0415
 
-        cols = await weaviate_list_collections_with_counts()
-        for col in cols:
-            self._log(f"Weaviate: {col['name']} — {col['count']} objects")
+        try:
+            cols = await weaviate_list_collections_with_counts()
+            if not cols:
+                self._log("Weaviate: no collections (or service unavailable)")
+                return
+            for col in cols:
+                self._log(f"Weaviate: {col['name']} — {col['count']} objects")
+        except Exception as exc:
+            self._log(f"Weaviate ERROR: {exc}")
+            self.notify(f"Weaviate error: {exc}", severity="error")

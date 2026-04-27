@@ -254,13 +254,13 @@ def _build_client() -> Any:
     Raises SystemExit(1) if configuration is missing.
     """
     from cli_client.client import GSageAPIClient, NotAuthenticatedError  # noqa: PLC0415
-    from cli_client.config import Config  # noqa: PLC0415
+    from cli_client.config import Config, _resolve_default_api_host  # noqa: PLC0415
 
     api_key = os.environ.get("GSAGE_API_KEY", "").strip()
     email = os.environ.get("GSAGE_EMAIL", "").strip()
     password = os.environ.get("GSAGE_PASSWORD", "").strip()
     org_id = os.environ.get("GSAGE_ORG_ID", "").strip()
-    api_host = os.environ.get("GSAGE_API_HOST", "http://localhost:8000").strip()
+    api_host = _resolve_default_api_host()
 
     if not api_key and not (email and password):
         print(

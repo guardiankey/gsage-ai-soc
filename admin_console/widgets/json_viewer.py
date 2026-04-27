@@ -88,12 +88,12 @@ class JsonViewer(Widget):
 
         if isinstance(value, dict):
             label = f"{label_prefix}{{...}}" if value else f"{label_prefix}{{}}"
-            branch = node.add(label, expand=False)
+            branch = node.add(label, expand=True)
             for k, v in value.items():
                 self._build_node(branch, v, key=k)
         elif isinstance(value, list):
             label = f"{label_prefix}[...] ({len(value)})"
-            branch = node.add(label, expand=False)
+            branch = node.add(label, expand=True)
             for i, v in enumerate(value):
                 self._build_node(branch, v, key=str(i))
         else:

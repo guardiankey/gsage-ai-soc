@@ -17,9 +17,52 @@
 #       operator-venv/            ← host Python venv for gsage-cli / gsage-admin
 #       logs/{install,helpers}/
 #       dbs/, knowledge_base/, custom_code/
-#   /usr/local/bin/{gsage-cli,gsage-admin,gsage-get-admin-key}
+#   /usr/local/bin/{gsage-cli,gsage-admin,gsage-get-admin-key,
+#                   gsage-configure-email,gsage-configure-telegram}
 
 set -euo pipefail
+
+# ── Ensure a UTF-8 locale ────────────────────────────────────────
+# Many .env values, prompts and Python (Rich / Textual) outputs use UTF-8
+# characters and bash sourcing of the rendered .env breaks under C/POSIX.
+# Honour the user's existing locale when it is already UTF-8; only fall back
+# to C.UTF-8 (or the UTF-8 variant of the same language) when needed; abort
+# with a clear error if no UTF-8 locale exists on the system.
+_gsage_ensure_utf8() {
+    local current="${LC_ALL:-${LANG:-}}"
+    if [[ "$current" =~ [Uu][Tt][Ff]-?8 ]]; then
+        export PYTHONIOENCODING=utf-8
+        return 0
+    fi
+    local available candidate lang_only
+    available="$(locale -a 2>/dev/null || true)"
+    if [[ -n "$current" && "$current" != "C" && "$current" != "POSIX" ]]; then
+        lang_only="${current%%.*}"
+        for candidate in "${lang_only}.UTF-8" "${lang_only}.utf8"; do
+            if printf '%s\n' "$available" | grep -qiFx "$candidate"; then
+                export LANG="$candidate" LC_ALL="$candidate" PYTHONIOENCODING=utf-8
+                return 0
+            fi
+        done
+    fi
+    for candidate in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+        if printf '%s\n' "$available" | grep -qiFx "$candidate"; then
+            export LANG="$candidate" LC_ALL="$candidate" PYTHONIOENCODING=utf-8
+            return 0
+        fi
+    done
+    cat >&2 <<'EOF'
+ERROR: the gSage installer requires a UTF-8 locale to render prompts and
+       write .env values correctly, but no UTF-8 locale was found.
+       Install one before re-running the installer, e.g.:
+         Debian/Ubuntu:  apt-get install -y locales && \
+                         locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
+         RHEL/Fedora:    dnf install -y glibc-langpack-en
+         Alpine/musl:    apk add --no-cache musl-locales musl-locales-lang
+EOF
+    return 1
+}
+_gsage_ensure_utf8 || exit 1
 
 # ── Pipe-safe: if we're being read from `curl | bash`, re-exec with a TTY. ──
 if [[ ! -t 0 && -r /dev/tty ]]; then
@@ -165,7 +208,11 @@ echo "Operator venv ready."
 install -m 0755 "$CURRENT_LINK/bin/gsage-cli"           /usr/local/bin/gsage-cli
 install -m 0755 "$CURRENT_LINK/bin/gsage-admin"         /usr/local/bin/gsage-admin
 install -m 0755 "$CURRENT_LINK/bin/gsage-get-admin-key" /usr/local/bin/gsage-get-admin-key
-echo "Installed: /usr/local/bin/gsage-{cli,admin,get-admin-key}"
+# Channel-configuration helpers exposed under friendlier names. They are
+# symlinked (rather than copied) so they always track the active release.
+ln -sfn "$CURRENT_LINK/configure-email-channel.sh"    /usr/local/bin/gsage-configure-email
+ln -sfn "$CURRENT_LINK/configure-telegram-channel.sh" /usr/local/bin/gsage-configure-telegram
+echo "Installed: /usr/local/bin/gsage-{cli,admin,get-admin-key,configure-email,configure-telegram}"
 
 # ── 8. Bring the stack up ────────────────────────────────────────────
 echo ""
@@ -218,17 +265,21 @@ cat <<EOF
   Admin password : (as set in the wizard — stored only in $ENV_FILE)
   Admin API key  : ${ADMIN_KEY:-(check backend logs if not printed)}
 
-  Host commands:
-    gsage-cli                        # REST CLI (argparse-based)
-    gsage-admin                      # Textual admin console
-    gsage-get-admin-key              # reprint / rotate the bootstrap API key
+  Host commands (installed under /usr/local/bin):
+    gsage-cli                  REST CLI client (argparse-based; scripting-friendly)
+    gsage-admin                Textual admin console (interactive TUI)
+    gsage-get-admin-key        Reprint or rotate the bootstrap admin API key
+    gsage-configure-email      Guided IMAP/SMTP mailbox setup for an organization
+    gsage-configure-telegram   Guided Telegram bot channel setup for an organization
+
+    Tip: list them with   ls /usr/local/bin/gsage-*
 
   Next steps:
     # Configure the inbound email channel (IMAP/SMTP):
-    sudo $CURRENT_LINK/configure-email-channel.sh
+    sudo gsage-configure-email
 
     # Configure a Telegram bot channel:
-    sudo $CURRENT_LINK/configure-telegram-channel.sh
+    sudo gsage-configure-telegram
 
   Installation log: $LOG_FILE_FINAL
 

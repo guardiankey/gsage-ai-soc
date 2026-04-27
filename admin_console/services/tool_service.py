@@ -112,14 +112,23 @@ async def create_interface_profile(
     interface: str,
     mode: str = "allowlist",
     description: str = "",
+    *,
+    dept_id: Optional[uuid.UUID] = None,
+    system_prompt: Optional[str] = None,
+    interface_config: Optional[dict] = None,
+    preferences: Optional[dict] = None,
 ) -> dict[str, Any]:
     from src.shared.models.interface_profile import GSageInterfaceProfile  # noqa: PLC0415
 
     profile = GSageInterfaceProfile(
         org_id=org_id,
+        dept_id=dept_id,
         interface=interface.strip(),
         mode=mode,
         description=description.strip() or None,
+        system_prompt=(system_prompt or None) if system_prompt is None else system_prompt.strip() or None,
+        interface_config=interface_config,
+        preferences=preferences,
         is_active=True,
         tool_permissions=[],
     )
@@ -168,6 +177,37 @@ async def update_interface_profile(
     return _profile_to_dict(p) if p else None
 
 
+async def delete_interface_profile(
+    db: AsyncSession,
+    profile_id: uuid.UUID,
+) -> bool:
+    from src.shared.models.interface_profile import GSageInterfaceProfile  # noqa: PLC0415
+
+    # Fetch org_id before delete for cache invalidation
+    result = await db.execute(
+        select(GSageInterfaceProfile).where(GSageInterfaceProfile.id == profile_id)
+    )
+    p = result.scalar_one_or_none()
+    if p is None:
+        return False
+    org_id = p.org_id
+
+    await db.execute(
+        delete(GSageInterfaceProfile).where(GSageInterfaceProfile.id == profile_id)
+    )
+    await db.commit()
+
+    from src.shared.cache.permissions_cache import (  # noqa: PLC0415
+        get_perm_redis_client,
+        invalidate_org_permissions,
+    )
+    rc = get_perm_redis_client()
+    if rc is not None:
+        await invalidate_org_permissions(rc, org_id)
+
+    return True
+
+
 def _tool_config_to_dict(tc: Any) -> dict[str, Any]:
     try:
         config = tc.config  # property decrypts
@@ -188,10 +228,14 @@ def _profile_to_dict(p: Any) -> dict[str, Any]:
     return {
         "id": str(p.id),
         "org_id": str(p.org_id),
+        "dept_id": str(p.dept_id) if p.dept_id else None,
         "interface": p.interface,
         "is_active": p.is_active,
         "mode": p.mode,
         "description": p.description or "",
+        "system_prompt": p.system_prompt or "",
         "tool_permissions": p.tool_permissions or [],
+        "interface_config": p.interface_config or {},
+        "preferences": p.preferences or {},
         "updated_at": p.updated_at.isoformat() if p.updated_at else "",
     }

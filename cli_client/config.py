@@ -4,6 +4,58 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+
+# Path to the shared installer .env (production host install).  Used as a
+# fallback when GSAGE_API_HOST is not set in the caller's environment, so
+# `gsage-cli` always reaches the local frontend reverse proxy on the right
+# FRONTEND_PORT instead of falling back to localhost:8000.
+_SHARED_ENV_PATH = Path("/opt/gsage/shared/.env")
+
+
+def _read_env_var_from_file(path: Path, key: str) -> str | None:
+    """Read a single KEY=VALUE entry from a shell-style env file.
+
+    Returns ``None`` if the file is missing/unreadable or the key is absent.
+    Unquotes surrounding double or single quotes.  Stops at the first match.
+    """
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                if k.strip() != key:
+                    continue
+                v = v.strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+                    v = v[1:-1]
+                return v
+    except OSError:
+        return None
+    return None
+
+
+def _resolve_default_api_host() -> str:
+    """Pick a sensible default base URL for the backend.
+
+    Priority:
+    1. ``GSAGE_API_HOST`` already exported in the environment.
+    2. ``FRONTEND_PORT`` from ``/opt/gsage/shared/.env`` (production install).
+    3. ``http://localhost:8080`` — production frontend default port.
+    """
+    env_host = os.getenv("GSAGE_API_HOST")
+    if env_host:
+        return env_host
+
+    if _SHARED_ENV_PATH.is_file():
+        port = _read_env_var_from_file(_SHARED_ENV_PATH, "FRONTEND_PORT")
+        if port:
+            return f"http://localhost:{port}"
+
+    return "http://localhost:8080"
 
 
 @dataclass
@@ -58,7 +110,9 @@ class Config:
             GSAGE_PASSWORD   — password for JWT login at startup
 
         Other:
-            GSAGE_API_HOST           — default: http://localhost:8000
+            GSAGE_API_HOST           — default: http://localhost:8080 (or
+                                       FRONTEND_PORT from /opt/gsage/shared/.env
+                                       on production hosts)
             GSAGE_ORG_ID             — required when using API key auth
             GSAGE_DEPT_ID            — optional department UUID (e.g. default dept)
             GSAGE_CONVERSATION_ID    — resume an existing conversation
@@ -70,7 +124,7 @@ class Config:
         password = os.getenv("GSAGE_PASSWORD")
         org_id = os.getenv("GSAGE_ORG_ID")
         dept_id = os.getenv("GSAGE_DEPT_ID")
-        api_host = os.getenv("GSAGE_API_HOST", "http://localhost:8000")
+        api_host = _resolve_default_api_host()
         conversation_id = os.getenv("GSAGE_CONVERSATION_ID")
         debug = os.getenv("GSAGE_DEBUG", "").lower() in ("true", "1", "yes")
         output_format = os.getenv("GSAGE_OUTPUT_FORMAT", "markdown")

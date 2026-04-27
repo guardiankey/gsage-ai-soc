@@ -23,7 +23,7 @@ class _RuleForm(FormScreen):
         FormField("dept_id_pattern", "Dept ID Pattern", default="*"),
         FormField("user_id_pattern", "User ID Pattern", default="*"),
         FormField("tool_pattern", "Tool Pattern", required=True, default="*"),
-        FormField("approver_user_id", "Approver User ID"),
+        FormField("approver_email", "Approver Email", required=True),
         FormField("priority", "Priority", default="0"),
         FormField("description", "Description"),
         FormField("is_active", "Active", field_type="switch", default=True),
@@ -109,18 +109,27 @@ class ApprovalRulesPanel(Widget):
             return
         from admin_console.db.postgres import get_session  # noqa: PLC0415
         from admin_console.services.approval_service import create_approval_rule  # noqa: PLC0415
+        from admin_console.services.user_service import get_user_by_email  # noqa: PLC0415
 
         try:
-            result["priority"] = int(result["priority"]) if result.get("priority") not in (None, "") else 0
-            result["is_active"] = result.get("is_active") in (True, "true", "True", "1", 1)
+            email = (result.get("approver_email") or "").strip()
+            if not email:
+                self.notify("Approver Email is required", severity="error")
+                return
             async with get_session() as db:
+                approver = await get_user_by_email(db, email)
+                if not approver:
+                    self.notify(f"User not found: {email}", severity="error")
+                    return
+                result["priority"] = int(result["priority"]) if result.get("priority") not in (None, "") else 0
+                result["is_active"] = result.get("is_active") in (True, "true", "True", "1", 1)
                 rule = await create_approval_rule(
                     db,
                     org_id_pattern=result.get("org_id_pattern", "*"),
                     user_id_pattern=result.get("user_id_pattern", "*"),
                     dept_id_pattern=result.get("dept_id_pattern", "*"),
                     tool_pattern=result.get("tool_pattern", "*"),
-                    approver_user_id=uuid.UUID(result["approver_user_id"]),
+                    approver_user_id=uuid.UUID(approver["id"]),
                     priority=result.get("priority", 100),
                     description=result.get("description", ""),
                 )
@@ -137,20 +146,41 @@ class ApprovalRulesPanel(Widget):
         if not rid:
             self.notify("Select a rule", severity="warning")
             return
-        rule = getattr(self, "_rules", {}).get(rid, {})
+        rule = dict(getattr(self, "_rules", {}).get(rid, {}))
+        # Reverse-lookup approver email for prefill
+        from admin_console.db.postgres import get_session  # noqa: PLC0415
+        from admin_console.services.user_service import get_user, get_user_by_email  # noqa: PLC0415
+        try:
+            approver_uuid = rule.get("approver_user_id")
+            if approver_uuid:
+                async with get_session() as db:
+                    approver = await get_user(db, uuid.UUID(str(approver_uuid)))
+                if approver:
+                    rule["approver_email"] = approver.get("email", "")
+        except Exception:
+            pass
         result = await self.app.push_screen_wait(_RuleForm(initial=rule))
         if not result:
             return
-        from admin_console.db.postgres import get_session  # noqa: PLC0415
         from admin_console.services.approval_service import update_approval_rule  # noqa: PLC0415
 
         try:
-            result["priority"] = int(result["priority"]) if result.get("priority") not in (None, "") else 0
-            result["is_active"] = result.get("is_active") in (True, "true", "True", "1", 1)
+            email = (result.get("approver_email") or "").strip()
+            if not email:
+                self.notify("Approver Email is required", severity="error")
+                return
             async with get_session() as db:
+                approver = await get_user_by_email(db, email)
+                if not approver:
+                    self.notify(f"User not found: {email}", severity="error")
+                    return
+                result["priority"] = int(result["priority"]) if result.get("priority") not in (None, "") else 0
+                result["is_active"] = result.get("is_active") in (True, "true", "True", "1", 1)
+                result.pop("approver_email", None)
+                result["approver_user_id"] = uuid.UUID(approver["id"])
                 await update_approval_rule(db, uuid.UUID(rid), **result)
             from admin_console.audit import log_event  # noqa: PLC0415
-            log_event("approval_rule_update", rid, result)
+            log_event("approval_rule_update", rid, {"approver_email": email})
             self.notify("Updated")
             self.load_data()
         except Exception as exc:

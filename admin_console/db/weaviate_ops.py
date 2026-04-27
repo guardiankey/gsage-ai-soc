@@ -13,10 +13,13 @@ async def _client():
 
 
 async def weaviate_collections() -> list[str]:
-    """Return list of Weaviate collection names."""
-    client = await _client()
-    all_cols = await client.collections.list_all()
-    return list(all_cols.keys())
+    """Return list of Weaviate collection names. Returns [] on error."""
+    try:
+        client = await _client()
+        all_cols = await client.collections.list_all()
+        return list(all_cols.keys())
+    except Exception:
+        return []
 
 
 async def weaviate_count(collection: str) -> int:

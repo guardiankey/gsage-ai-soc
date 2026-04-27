@@ -54,6 +54,7 @@ class GroupManagePanel(Widget):
     def compose(self) -> ComposeResult:
         with Horizontal(id="btn-row"):
             yield Button("New", id="btn-new", variant="primary")
+            yield Button("Save Changes", id="btn-save", variant="success")
             yield Button("Delete", id="btn-delete", variant="error")
             yield Button("Refresh", id="btn-refresh")
         with Horizontal(id="main-row"):
@@ -79,7 +80,6 @@ class GroupManagePanel(Widget):
                             assigned_label="Group Members",
                             id="user-shuttle",
                         )
-                yield Button("Save Changes", id="btn-save", variant="primary")
 
     def on_mount(self) -> None:
         self._selected_group_id: str | None = None

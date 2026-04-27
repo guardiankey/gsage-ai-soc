@@ -127,6 +127,20 @@ class AdminApp(App[None]):
     def on_mount(self) -> None:
         self._update_org_bar()
 
+    async def on_unmount(self) -> None:
+        """Dispose async DB pool before the event loop closes.
+
+        Without this, asyncpg connections held by the SQLAlchemy pool are
+        garbage-collected after the loop is gone, producing noisy
+        ResourceWarning messages on stderr.
+        """
+        try:
+            from src.shared.database import dispose_engine_pool  # noqa: PLC0415
+
+            await dispose_engine_pool()
+        except Exception:
+            pass
+
     # ── Reactives ─────────────────────────────────────────────────────────────
 
     def watch_active_org_name(self, name: str) -> None:

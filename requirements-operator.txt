@@ -24,6 +24,8 @@ pydantic-settings>=2.1,<3.0
 python-dotenv>=1.0,<2.0
 cryptography>=42.0,<46.0
 argon2-cffi>=23.1,<25.0
+bcrypt>=4.2,<5
+PyJWT>=2.8,<3
 
 # ── Optional datastore clients (read-side browsing in admin TUI) ──
 redis>=5.0,<7.0

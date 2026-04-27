@@ -34,26 +34,6 @@ class _OrgForm(FormScreen):
     ]
 
 
-class _SmtpForm(FormScreen):
-    TITLE = "SMTP Configuration"
-    FIELDS = [
-        FormField("host", "SMTP Host", required=True, placeholder="smtp.example.com"),
-        FormField("port", "Port", default="587", placeholder="587"),
-        FormField("username", "Username", placeholder="user@example.com"),
-        FormField("password", "Password", field_type="password"),
-        FormField("use_tls", "Use TLS", field_type="switch", default=True),
-        FormField("from_email", "From Email", placeholder="noreply@example.com"),
-        FormField("from_name", "From Name", placeholder="gSage AI"),
-        FormField(
-            "default_format",
-            "Email Format",
-            field_type="select",
-            options=[("HTML", "html"), ("Plain Text", "text")],
-            default="html",
-        ),
-    ]
-
-
 class _AuthConfigForm(FormScreen):
     TITLE = "Auth Configuration (JSON)"
     FIELDS = [
@@ -95,7 +75,6 @@ class OrgManagePanel(Widget):
             with Horizontal(id="btn-row"):
                 yield Button("New", id="btn-new", variant="primary")
                 yield Button("Edit", id="btn-edit")
-                yield Button("SMTP", id="btn-smtp")
                 yield Button("Auth Config", id="btn-auth")
                 yield Button("Toggle Active", id="btn-toggle")
                 yield Button("Refresh", id="btn-refresh")
@@ -133,8 +112,6 @@ class OrgManagePanel(Widget):
             self._new_org()
         elif event.button.id == "btn-edit":
             self._edit_org()
-        elif event.button.id == "btn-smtp":
-            self._edit_smtp()
         elif event.button.id == "btn-auth":
             self._edit_auth_config()
         elif event.button.id == "btn-toggle":
@@ -197,50 +174,6 @@ class OrgManagePanel(Widget):
             log_event("org_update", org_id, {k: v for k, v in result.items() if k != "llm_api_key"})
             self.notify("Updated")
             self.load_data()
-        except Exception as exc:
-            self.notify(str(exc), severity="error")
-
-    @work(exclusive=True)
-    async def _edit_smtp(self) -> None:
-        import json  # noqa: PLC0415
-
-        org_id = self._selected_id()
-        if not org_id:
-            self.notify("Select an org first", severity="warning")
-            return
-        from admin_console.db.postgres import get_session  # noqa: PLC0415
-        from admin_console.services.org_service import get_org_model  # noqa: PLC0415
-
-        try:
-            async with get_session() as db:
-                org_model = await get_org_model(db, uuid.UUID(org_id))
-            current: dict = (org_model.smtp_config or {}) if org_model else {}
-        except Exception as exc:
-            self.notify(f"Load smtp_config failed: {exc}", severity="error")
-            return
-
-        result = await self.app.push_screen_wait(_SmtpForm(initial=current))
-        if not result:
-            return
-
-        smtp_dict = {
-            "host": result.get("host", ""),
-            "port": int(result.get("port") or 587),
-            "username": result.get("username", ""),
-            "password": result.get("password", ""),
-            "use_tls": bool(result.get("use_tls", True)),
-            "from_email": result.get("from_email", ""),
-            "from_name": result.get("from_name", ""),
-            "default_format": result.get("default_format") or "html",
-        }
-        try:
-            from admin_console.services.org_service import update_org_smtp  # noqa: PLC0415
-
-            async with get_session() as db:
-                await update_org_smtp(db, uuid.UUID(org_id), smtp_dict)
-            from admin_console.audit import log_event  # noqa: PLC0415
-            log_event("org_smtp_update", org_id, {"host": smtp_dict["host"]})
-            self.notify("SMTP config saved")
         except Exception as exc:
             self.notify(str(exc), severity="error")
 

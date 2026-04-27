@@ -200,17 +200,26 @@ Tabs {
 Tab {
     background: #1e2426;
     color: #babdb6;
+    padding: 0 2;
 }
 
+/* Active tab: highlight via background + bold text instead of a tall top
+   border, which on some Textual versions consumes the row that holds the
+   label and hides it (tab text becomes invisible). */
 Tab.-active {
-    background: #2e3436;
-    color: #729fcf;
-    border-top: tall #729fcf;
+    background: #204a87;
+    color: #eeeeec;
+    text-style: bold;
 }
 
 Tab:hover {
     background: #3c474a;
     color: #eeeeec;
+}
+
+/* Underline indicator drawn by Tabs under the active tab. */
+Underline > .underline--bar {
+    color: #729fcf;
 }
 
 /* ── ListView ─────────────────────────────────────────────────────────────── */

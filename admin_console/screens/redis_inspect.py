@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal
 from textual.widget import Widget
-from textual.widgets import Button, DataTable, Input, Select, TabbedContent, TabPane
+from textual.widgets import Button, DataTable, Input, Select, TabbedContent, TabPane, TextArea
 
 from admin_console.widgets.confirm_dialog import ConfirmDialog
 from admin_console.widgets.kv_panel import KVPanel
@@ -23,6 +23,9 @@ class RedisInspectPanel(Widget):
     RedisInspectPanel Select { width: 22; }
     RedisInspectPanel #pattern-input { width: 20; }
     RedisInspectPanel #key-val { height: 1fr; }
+    RedisInspectPanel #keys-row { height: 1fr; layout: horizontal; }
+    RedisInspectPanel #keys-table { width: 1fr; height: 1fr; }
+    RedisInspectPanel #key-value { width: 1fr; height: 1fr; margin-left: 1; border: round #555753; }
     """
 
     def compose(self) -> ComposeResult:
@@ -38,7 +41,9 @@ class RedisInspectPanel(Widget):
             yield Button("Refresh Info", id="btn-info")
         with TabbedContent():
             with TabPane("Keys"):
-                yield DataTable(id="keys-table", cursor_type="row")
+                with Horizontal(id="keys-row"):
+                    yield DataTable(id="keys-table", cursor_type="row")
+                    yield TextArea("", id="key-value", read_only=True)
             with TabPane("Server Info"):
                 yield KVPanel(title="Redis Info", id="redis-info")
             with TabPane("Queues"):
@@ -97,9 +102,44 @@ class RedisInspectPanel(Widget):
             for k in keys[:200]:
                 typ = await asyncio.to_thread(redis_key_type, k, db)
                 ttl = await asyncio.to_thread(redis_key_ttl, k, db)
-                table.add_row(k, typ, ttl)
+                table.add_row(k, typ, ttl, key=k)
         except Exception as exc:
             self.notify(str(exc), severity="error")
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        try:
+            key = str(event.row_key.value) if event.row_key else ""
+        except Exception:
+            key = ""
+        if key:
+            self._show_key_value(key)
+
+    @work(exclusive=True)
+    async def _show_key_value(self, key: str) -> None:
+        import asyncio  # noqa: PLC0415
+        import json  # noqa: PLC0415
+
+        from admin_console.db.redis_client import redis_get, redis_key_type  # noqa: PLC0415
+
+        db_val = self.query_one("#db-select", Select).value
+        db = int(str(db_val)) if db_val != Select.BLANK else 0
+        ta = self.query_one("#key-value", TextArea)
+        try:
+            typ = (await asyncio.to_thread(redis_key_type, key, db)) or ""
+            if typ.lower() != "string":
+                ta.text = f"# Key type: {typ}\n# Preview only supports 'string' keys for now."
+                return
+            raw = await asyncio.to_thread(redis_get, key, db)
+            if raw is None:
+                ta.text = "(nil)"
+                return
+            try:
+                parsed = json.loads(raw)
+                ta.text = json.dumps(parsed, indent=2, ensure_ascii=False)
+            except Exception:
+                ta.text = raw
+        except Exception as exc:
+            ta.text = f"# Error: {exc}"
 
     @work(exclusive=True)
     async def _flush_db(self) -> None:

@@ -884,7 +884,18 @@ def handle_send_message(
     effective_attachment_ids = attachment_ids or []
 
     try:
-        with Live(console=console, refresh_per_second=15, vertical_overflow="visible") as live:
+        # Stream as plain Text inside Live (Markdown re-rendering on every
+        # delta breaks Live's overwrite logic — the rendered height changes
+        # mid-frame and Rich appends instead of overwriting, producing the
+        # "same line repeated" artefact in the terminal).  Render the final
+        # Markdown once after the Live block exits.
+        with Live(
+            "",
+            console=console,
+            refresh_per_second=15,
+            vertical_overflow="ellipsis",
+            transient=True,
+        ) as live:
             for event_name, data in client.stream_message(
                 state.conversation_id,
                 message,
@@ -892,8 +903,7 @@ def handle_send_message(
             ):
                 if event_name == "content_delta":
                     buffer += data.get("delta", "")
-                    renderable = Markdown(buffer) if state.output_format == "markdown" else buffer
-                    live.update(renderable)
+                    live.update(buffer)
 
                 elif event_name == "run_paused":
                     pending_approvals = cast(list[str], data.get("pending_approvals") or [])
@@ -902,13 +912,6 @@ def handle_send_message(
                     break
 
                 elif event_name == "message_end":
-                    if state.debug:
-                        meta = cast(dict, data.get("metadata") or {})
-                        duration = meta.get("duration_ms")
-                        if duration:
-                            # update once more so final content is visible before debug line
-                            renderable = Markdown(buffer) if state.output_format == "markdown" else buffer
-                            live.update(renderable)
                     break
 
                 elif event_name == "error":
@@ -916,11 +919,17 @@ def handle_send_message(
                     console.print(f"[{COLOR_ERROR}]{data.get('detail', 'Streaming error')}[/{COLOR_ERROR}]")
                     return
 
+        # Live block exited cleanly — render the final buffer (markdown if
+        # enabled).  ``transient=True`` cleared the streamed plain text so
+        # we can replace it with a properly formatted version.
+        if buffer:
+            if state.output_format == "markdown":
+                console.print(Markdown(buffer))
+            else:
+                console.print(buffer, markup=False)
+
         if state.debug and buffer:
-            meta_duration = None
             console.print(f"[dim]Streamed {len(buffer)} chars[/dim]")
-            if meta_duration:
-                console.print(f"[dim]Duration: {meta_duration}ms[/dim]")
 
         if paused:
             console.print()

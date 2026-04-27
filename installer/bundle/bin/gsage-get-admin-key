@@ -2,6 +2,45 @@
 # gsage-get-admin-key — retrieve (or rotate) the bootstrap admin API key.
 set -euo pipefail
 
+# ── Ensure a UTF-8 locale ────────────────────────────────────────
+# Honour the user's existing locale when it is already UTF-8; otherwise pick
+# the UTF-8 variant of the same language, falling back to C.UTF-8.
+_gsage_ensure_utf8() {
+    local current="${LC_ALL:-${LANG:-}}"
+    if [[ "$current" =~ [Uu][Tt][Ff]-?8 ]]; then
+        export PYTHONIOENCODING=utf-8
+        return 0
+    fi
+    local available candidate lang_only
+    available="$(locale -a 2>/dev/null || true)"
+    if [[ -n "$current" && "$current" != "C" && "$current" != "POSIX" ]]; then
+        lang_only="${current%%.*}"
+        for candidate in "${lang_only}.UTF-8" "${lang_only}.utf8"; do
+            if printf '%s\n' "$available" | grep -qiFx "$candidate"; then
+                export LANG="$candidate" LC_ALL="$candidate" PYTHONIOENCODING=utf-8
+                return 0
+            fi
+        done
+    fi
+    for candidate in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+        if printf '%s\n' "$available" | grep -qiFx "$candidate"; then
+            export LANG="$candidate" LC_ALL="$candidate" PYTHONIOENCODING=utf-8
+            return 0
+        fi
+    done
+    cat >&2 <<'EOF'
+ERROR: gSage requires a UTF-8 locale to read .env values and emit output
+       correctly, but no UTF-8 locale was found on this system.
+       Install one and retry, e.g.:
+         Debian/Ubuntu:  apt-get install -y locales && \
+                         locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
+         RHEL/Fedora:    dnf install -y glibc-langpack-en
+         Alpine/musl:    apk add --no-cache musl-locales musl-locales-lang
+EOF
+    return 1
+}
+_gsage_ensure_utf8 || exit 1
+
 GSAGE_HOME="${GSAGE_HOME:-/opt/gsage/current}"
 OPERATOR_VENV="${GSAGE_OPERATOR_VENV:-/opt/gsage/shared/operator-venv}"
 ENV_FILE="${GSAGE_ENV_FILE:-/opt/gsage/shared/.env}"
@@ -21,7 +60,23 @@ set -a
     source "$ENV_FILE"
 }
 set +a
+# Datastore hostnames in the shared .env reference the docker-compose network
+# and are not resolvable from the host — override with loopback-forwarded
+# ports published by docker-compose.prod.yml.
 export POSTGRES_HOST="127.0.0.1"
+export REDIS_HOST="127.0.0.1"
+export ELASTICSEARCH_URL="http://127.0.0.1:9200"
+export WEAVIATE_HOST="127.0.0.1"
+export WEAVIATE_PORT="${WEAVIATE_HOST_PORT:-18080}"
+export WEAVIATE_GRPC_PORT="${WEAVIATE_GRPC_HOST_PORT:-50051}"
+
+# The backend_api port is NOT published to the host on production installs —
+# all traffic must go through the frontend nginx reverse proxy at
+# FRONTEND_PORT (default 8080). Honour any GSAGE_API_HOST already exported
+# by the operator; otherwise default to the local nginx proxy.
+if [[ -z "${GSAGE_API_HOST:-}" ]]; then
+    export GSAGE_API_HOST="http://localhost:${FRONTEND_PORT:-8080}"
+fi
 
 # shellcheck disable=SC1091
 source "$OPERATOR_VENV/bin/activate"

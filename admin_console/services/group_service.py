@@ -19,10 +19,13 @@ async def list_groups(
     result = await db.execute(
         select(GSageGroup)
         .where(GSageGroup.org_id == org_id)
-        .options(selectinload(GSageGroup.permissions))
+        .options(
+            selectinload(GSageGroup.permissions),
+            selectinload(GSageGroup.users),
+        )
         .order_by(GSageGroup.name)
     )
-    return [_group_to_dict(g) for g in result.scalars().all()]
+    return [_group_to_dict(g, include_users=True) for g in result.scalars().all()]
 
 
 async def get_group(
