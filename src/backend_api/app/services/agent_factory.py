@@ -1002,6 +1002,9 @@ def build_agent(
         post_hooks=[persist_agno_run_projection],
         # Output format — disable Markdown for plain-text channels
         markdown=use_markdown,
+        # Disable Agno's anonymous telemetry (POST to os-api.agno.com).
+        # Self-hosted SOC deployments must not phone home.
+        telemetry=False,
         # Debug follows global setting
         debug_mode=settings.debug,
     )

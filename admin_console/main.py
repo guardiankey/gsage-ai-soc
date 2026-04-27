@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import warnings
+
+# Silence ResourceWarnings emitted during interpreter shutdown by third-party
+# libraries (asyncpg, weaviate, elasticsearch) whose __del__ finalizers run
+# after the Textual event loop is gone. The Textual app already disposes the
+# DB pool and Weaviate client cleanly via on_unmount/action_quit; remaining
+# warnings come from sync clients (e.g. Elasticsearch) which we don't control.
+warnings.filterwarnings("ignore", category=ResourceWarning)
 
 
 def main() -> None:

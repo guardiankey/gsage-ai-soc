@@ -586,7 +586,20 @@
       "department": "Abteilung",
       "allDepartments": "Alle (organisationsweit)",
       "imapVerifySsl": "IMAP-SSL-Zertifikat prüfen",
-      "smtpVerifySsl": "SMTP-SSL-Zertifikat prüfen"
+      "smtpVerifySsl": "SMTP-SSL-Zertifikat prüfen",
+      "imapUseTls": "TLS/SSL für IMAP verwenden",
+      "smtpUseTls": "TLS/SSL für SMTP verwenden",
+      "imapFolder": "IMAP-Ordner",
+      "imapIdleSupported": "Server unterstützt IMAP IDLE",
+      "senderName": "Absendername",
+      "subjectPrefix": "Betreff-Präfix",
+      "replyFooter": "Antwort-Fußzeile",
+      "unknownSenderFolder": "Ordner für unbekannte Absender",
+      "maxEmailSizeBytes": "Max. E-Mail-Größe (Bytes)",
+      "pollingIntervalSeconds": "Abfrageintervall (Sekunden)",
+      "sectionImap": "IMAP (eingehend)",
+      "sectionSmtp": "SMTP (ausgehend)",
+      "sectionDelivery": "Zustellung & Verarbeitung"
     },
     "depts": {
       "title": "Abteilungen",

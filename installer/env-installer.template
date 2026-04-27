@@ -87,6 +87,8 @@ DEEPSEEK_MAKER_MODEL=@@PROMPT_OPT:deepseek_maker_model@@
 # ── Agents ───────────────────────────────────────────────────
 AGENT_NUM_HISTORY_RUNS=5
 AGENT_TOOL_OUTPUT_MAX_CHARS=40000
+# Disable Agno SDK telemetry (no phoning home to os-api.agno.com)
+AGNO_TELEMETRY=false
 
 # ── MCP Server ───────────────────────────────────────────────
 MCP_SERVER_URL=http://mcp-server:8001

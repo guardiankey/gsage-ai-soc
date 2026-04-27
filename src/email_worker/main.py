@@ -296,6 +296,24 @@ class EmailWorker:
                         session.add(email_msg)
 
         except Exception as exc:
+            # Detect race: account was deleted between IMAP fetch and DB persist.
+            # The IMAP client still holds an open session against the deleted
+            # account, so messages briefly continue to arrive. Log as WARNING
+            # (not ERROR) since this is benign and the per-account loop will
+            # exit on its next reconnect cycle (account.get returns None).
+            err_text = str(exc)
+            if (
+                "ForeignKeyViolationError" in err_text
+                and "email_account_id" in err_text
+            ):
+                logger.warning(
+                    "EmailWorker._on_new_email: account %s was deleted while "
+                    "IMAP session was still active — discarding message %s. "
+                    "Worker will stop polling this account on next reconnect.",
+                    account_id,
+                    parsed.message_id,
+                )
+                return
             logger.error(
                 "EmailWorker._on_new_email: DB persist failed — message_id=%s error=%s",
                 parsed.message_id,

@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -259,11 +260,13 @@ function EmailAccountForm({ onSubmit, onCancel, departments, isLoading }: {
     imap_port: 993,
     imap_username: '',
     imap_password: '',
+    imap_use_tls: true,
     imap_verify_ssl: true,
     smtp_host: '',
     smtp_port: 25,
     smtp_username: '',
     smtp_password: '',
+    smtp_use_tls: true,
     smtp_verify_ssl: true,
     is_active: true,
   })
@@ -321,14 +324,25 @@ function EmailAccountForm({ onSubmit, onCancel, departments, isLoading }: {
           <Input type="password" value={form.imap_password} onChange={set('imap_password')} autoComplete="new-password" />
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          id="imap_verify_ssl"
-          checked={form.imap_verify_ssl ?? true}
-          onChange={(e) => setForm((p) => ({ ...p, imap_verify_ssl: e.target.checked }))}
-        />
-        <Label htmlFor="imap_verify_ssl">{t('admin.emailAccounts.imapVerifySsl')}</Label>
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="imap_use_tls"
+            checked={form.imap_use_tls ?? true}
+            onChange={(e) => setForm((p) => ({ ...p, imap_use_tls: e.target.checked }))}
+          />
+          <Label htmlFor="imap_use_tls">{t('admin.emailAccounts.imapUseTls')}</Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="imap_verify_ssl"
+            checked={form.imap_verify_ssl ?? true}
+            onChange={(e) => setForm((p) => ({ ...p, imap_verify_ssl: e.target.checked }))}
+          />
+          <Label htmlFor="imap_verify_ssl">{t('admin.emailAccounts.imapVerifySsl')}</Label>
+        </div>
       </div>
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
@@ -350,14 +364,25 @@ function EmailAccountForm({ onSubmit, onCancel, departments, isLoading }: {
           <Input type="password" value={form.smtp_password ?? ''} onChange={set('smtp_password')} autoComplete="new-password" placeholder={t('admin.emailAccounts.smtpNoAuthPlaceholder')} />
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          id="smtp_verify_ssl"
-          checked={form.smtp_verify_ssl ?? true}
-          onChange={(e) => setForm((p) => ({ ...p, smtp_verify_ssl: e.target.checked }))}
-        />
-        <Label htmlFor="smtp_verify_ssl">{t('admin.emailAccounts.smtpVerifySsl')}</Label>
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="smtp_use_tls"
+            checked={form.smtp_use_tls ?? true}
+            onChange={(e) => setForm((p) => ({ ...p, smtp_use_tls: e.target.checked }))}
+          />
+          <Label htmlFor="smtp_use_tls">{t('admin.emailAccounts.smtpUseTls')}</Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="smtp_verify_ssl"
+            checked={form.smtp_verify_ssl ?? true}
+            onChange={(e) => setForm((p) => ({ ...p, smtp_verify_ssl: e.target.checked }))}
+          />
+          <Label htmlFor="smtp_verify_ssl">{t('admin.emailAccounts.smtpVerifySsl')}</Label>
+        </div>
       </div>
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>{t('common.cancel')}</Button>
@@ -379,18 +404,36 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
     display_name: initial.display_name,
     imap_host: initial.imap_host,
     imap_port: initial.imap_port,
+    imap_username: initial.imap_username,
+    imap_use_tls: initial.imap_use_tls,
     imap_verify_ssl: initial.imap_verify_ssl,
+    imap_folder: initial.imap_folder,
+    imap_idle_supported: initial.imap_idle_supported,
     smtp_host: initial.smtp_host,
     smtp_port: initial.smtp_port,
+    smtp_username: initial.smtp_username,
+    smtp_use_tls: initial.smtp_use_tls,
     smtp_verify_ssl: initial.smtp_verify_ssl,
+    sender_name: initial.sender_name,
+    subject_prefix: initial.subject_prefix,
+    reply_footer: initial.reply_footer,
+    unknown_sender_folder: initial.unknown_sender_folder,
+    max_email_size_bytes: initial.max_email_size_bytes,
+    polling_interval_seconds: initial.polling_interval_seconds,
     is_active: initial.is_active,
   })
   const [deptId, setDeptId] = useState<string>(initial.dept_id ?? '__org__')
   const [imapPassword, setImapPassword] = useState('')
   const [smtpPassword, setSmtpPassword] = useState('')
 
-  const set = (key: keyof EmailAccountUpdate) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((p) => ({ ...p, [key]: e.target.type === 'number' ? Number(e.target.value) : e.target.value }))
+  const set = (key: keyof EmailAccountUpdate) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setForm((p) => ({
+        ...p,
+        [key]: (e.target as HTMLInputElement).type === 'number'
+          ? Number((e.target as HTMLInputElement).value)
+          : e.target.value,
+      }))
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -401,7 +444,7 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
       <div className="space-y-1.5">
         <Label>{t('admin.emailAccounts.displayName')}</Label>
         <Input value={form.display_name ?? ''} onChange={set('display_name')} />
@@ -418,6 +461,11 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
           </SelectContent>
         </Select>
       </div>
+
+      {/* ── IMAP ─────────────────────────────────────────────────── */}
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">
+        {t('admin.emailAccounts.sectionImap')}
+      </div>
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
           <Label>{t('admin.emailAccounts.imapHost')}</Label>
@@ -427,6 +475,10 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
           <Label>{t('admin.emailAccounts.imapPort')}</Label>
           <Input type="number" value={form.imap_port ?? ''} onChange={set('imap_port')} />
         </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label>{t('admin.emailAccounts.imapUsername')}</Label>
+        <Input value={form.imap_username ?? ''} onChange={set('imap_username')} autoComplete="username" />
       </div>
       <div className="space-y-1.5">
         <Label>
@@ -443,14 +495,49 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
           autoComplete="new-password"
         />
       </div>
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          id="imap_verify_ssl_edit"
-          checked={form.imap_verify_ssl ?? true}
-          onChange={(e) => setForm((p) => ({ ...p, imap_verify_ssl: e.target.checked }))}
-        />
-        <Label htmlFor="imap_verify_ssl_edit">{t('admin.emailAccounts.imapVerifySsl')}</Label>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>{t('admin.emailAccounts.imapFolder')}</Label>
+          <Input value={form.imap_folder ?? ''} onChange={set('imap_folder')} placeholder="INBOX" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>{t('admin.emailAccounts.unknownSenderFolder')}</Label>
+          <Input value={form.unknown_sender_folder ?? ''} onChange={set('unknown_sender_folder')} />
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="imap_use_tls_edit"
+            checked={form.imap_use_tls ?? true}
+            onChange={(e) => setForm((p) => ({ ...p, imap_use_tls: e.target.checked }))}
+          />
+          <Label htmlFor="imap_use_tls_edit">{t('admin.emailAccounts.imapUseTls')}</Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="imap_verify_ssl_edit"
+            checked={form.imap_verify_ssl ?? true}
+            onChange={(e) => setForm((p) => ({ ...p, imap_verify_ssl: e.target.checked }))}
+          />
+          <Label htmlFor="imap_verify_ssl_edit">{t('admin.emailAccounts.imapVerifySsl')}</Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="imap_idle_supported_edit"
+            checked={form.imap_idle_supported ?? true}
+            onChange={(e) => setForm((p) => ({ ...p, imap_idle_supported: e.target.checked }))}
+          />
+          <Label htmlFor="imap_idle_supported_edit">{t('admin.emailAccounts.imapIdleSupported')}</Label>
+        </div>
+      </div>
+
+      {/* ── SMTP ─────────────────────────────────────────────────── */}
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">
+        {t('admin.emailAccounts.sectionSmtp')}
       </div>
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
@@ -461,6 +548,15 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
           <Label>{t('admin.emailAccounts.smtpPort')}</Label>
           <Input type="number" value={form.smtp_port ?? ''} onChange={set('smtp_port')} />
         </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label>{t('admin.emailAccounts.smtpUsername')}</Label>
+        <Input
+          value={form.smtp_username ?? ''}
+          onChange={set('smtp_username')}
+          autoComplete="username"
+          placeholder={t('admin.emailAccounts.smtpNoAuthPlaceholder')}
+        />
       </div>
       <div className="space-y-1.5">
         <Label>
@@ -477,16 +573,61 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
           autoComplete="new-password"
         />
       </div>
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          id="smtp_verify_ssl_edit"
-          checked={form.smtp_verify_ssl ?? true}
-          onChange={(e) => setForm((p) => ({ ...p, smtp_verify_ssl: e.target.checked }))}
-        />
-        <Label htmlFor="smtp_verify_ssl_edit">{t('admin.emailAccounts.smtpVerifySsl')}</Label>
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="smtp_use_tls_edit"
+            checked={form.smtp_use_tls ?? true}
+            onChange={(e) => setForm((p) => ({ ...p, smtp_use_tls: e.target.checked }))}
+          />
+          <Label htmlFor="smtp_use_tls_edit">{t('admin.emailAccounts.smtpUseTls')}</Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="smtp_verify_ssl_edit"
+            checked={form.smtp_verify_ssl ?? true}
+            onChange={(e) => setForm((p) => ({ ...p, smtp_verify_ssl: e.target.checked }))}
+          />
+          <Label htmlFor="smtp_verify_ssl_edit">{t('admin.emailAccounts.smtpVerifySsl')}</Label>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
+
+      {/* ── Delivery & Processing ────────────────────────────────── */}
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">
+        {t('admin.emailAccounts.sectionDelivery')}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>{t('admin.emailAccounts.senderName')}</Label>
+          <Input value={form.sender_name ?? ''} onChange={set('sender_name')} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>{t('admin.emailAccounts.subjectPrefix')}</Label>
+          <Input value={form.subject_prefix ?? ''} onChange={set('subject_prefix')} />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label>{t('admin.emailAccounts.replyFooter')}</Label>
+        <Textarea
+          rows={3}
+          value={form.reply_footer ?? ''}
+          onChange={set('reply_footer')}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>{t('admin.emailAccounts.maxEmailSizeBytes')}</Label>
+          <Input type="number" value={form.max_email_size_bytes ?? ''} onChange={set('max_email_size_bytes')} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>{t('admin.emailAccounts.pollingIntervalSeconds')}</Label>
+          <Input type="number" value={form.polling_interval_seconds ?? ''} onChange={set('polling_interval_seconds')} />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 pt-2">
         <input
           type="checkbox"
           id="is_active_edit"

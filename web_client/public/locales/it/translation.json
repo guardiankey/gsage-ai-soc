@@ -586,7 +586,20 @@
       "department": "Reparto",
       "allDepartments": "Tutti (a livello di org)",
       "imapVerifySsl": "Verifica certificato SSL IMAP",
-      "smtpVerifySsl": "Verifica certificato SSL SMTP"
+      "smtpVerifySsl": "Verifica certificato SSL SMTP",
+      "imapUseTls": "Usa TLS/SSL per IMAP",
+      "smtpUseTls": "Usa TLS/SSL per SMTP",
+      "imapFolder": "Cartella IMAP",
+      "imapIdleSupported": "Il server supporta IMAP IDLE",
+      "senderName": "Nome mittente",
+      "subjectPrefix": "Prefisso oggetto",
+      "replyFooter": "Piè di pagina delle risposte",
+      "unknownSenderFolder": "Cartella per mittenti sconosciuti",
+      "maxEmailSizeBytes": "Dimensione massima e-mail (byte)",
+      "pollingIntervalSeconds": "Intervallo di polling (secondi)",
+      "sectionImap": "IMAP (in entrata)",
+      "sectionSmtp": "SMTP (in uscita)",
+      "sectionDelivery": "Consegna ed elaborazione"
     },
     "depts": {
       "title": "Dipartimenti",

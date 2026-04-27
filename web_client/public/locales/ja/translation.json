@@ -586,7 +586,20 @@
       "department": "部署",
       "allDepartments": "全て（組織全体）",
       "imapVerifySsl": "IMAP SSL証明書を検証",
-      "smtpVerifySsl": "SMTP SSL証明書を検証"
+      "smtpVerifySsl": "SMTP SSL証明書を検証",
+      "imapUseTls": "IMAPでTLS/SSLを使用",
+      "smtpUseTls": "SMTPでTLS/SSLを使用",
+      "imapFolder": "IMAPフォルダー",
+      "imapIdleSupported": "サーバーはIMAP IDLEをサポート",
+      "senderName": "送信者名",
+      "subjectPrefix": "件名の接頭辞",
+      "replyFooter": "返信のフッター",
+      "unknownSenderFolder": "未知の送信者用フォルダー",
+      "maxEmailSizeBytes": "メールの最大サイズ（バイト）",
+      "pollingIntervalSeconds": "ポーリング間隔（秒）",
+      "sectionImap": "IMAP（受信）",
+      "sectionSmtp": "SMTP（送信）",
+      "sectionDelivery": "配信と処理"
     },
     "depts": {
       "title": "部門",

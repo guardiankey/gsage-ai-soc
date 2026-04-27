@@ -49,7 +49,8 @@ def register(parser: argparse.ArgumentParser) -> None:
     )
     create.add_argument("--smtp-host", required=True)
     create.add_argument("--smtp-port", type=int, default=587)
-    create.add_argument("--smtp-user", required=True)
+    # SMTP user is optional: blank == unauthenticated relay (some on-prem MTAs).
+    create.add_argument("--smtp-user", default="")
     create.add_argument("--smtp-no-tls", action="store_true")
     create.add_argument(
         "--smtp-no-verify-ssl",

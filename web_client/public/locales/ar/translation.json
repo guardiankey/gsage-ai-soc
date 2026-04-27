@@ -586,7 +586,20 @@
       "department": "القسم",
       "allDepartments": "الكل (على مستوى المؤسسة)",
       "imapVerifySsl": "التحقق من شهادة SSL لـ IMAP",
-      "smtpVerifySsl": "التحقق من شهادة SSL لـ SMTP"
+      "smtpVerifySsl": "التحقق من شهادة SSL لـ SMTP",
+      "imapUseTls": "استخدام TLS/SSL لـ IMAP",
+      "smtpUseTls": "استخدام TLS/SSL لـ SMTP",
+      "imapFolder": "مجلد IMAP",
+      "imapIdleSupported": "يدعم الخادم IMAP IDLE",
+      "senderName": "اسم المرسل",
+      "subjectPrefix": "بادئة الموضوع",
+      "replyFooter": "تذييل الرد",
+      "unknownSenderFolder": "مجلد المرسلين غير المعروفين",
+      "maxEmailSizeBytes": "الحد الأقصى لحجم البريد (بايت)",
+      "pollingIntervalSeconds": "فترة الفحص (ثوانٍ)",
+      "sectionImap": "IMAP (الوارد)",
+      "sectionSmtp": "SMTP (الصادر)",
+      "sectionDelivery": "التسليم والمعالجة"
     },
     "depts": {
       "title": "الأقسام",

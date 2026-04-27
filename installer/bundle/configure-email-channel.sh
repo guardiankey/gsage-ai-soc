@@ -37,8 +37,12 @@ ORG_ID=""
 TEST_PROBE=0
 DISPLAY_NAME=""
 EMAIL_ADDR=""
-IMAP_HOST=""; IMAP_PORT="993"; IMAP_USER=""; IMAP_VERIFY_SSL=""
-SMTP_HOST=""; SMTP_PORT="587"; SMTP_USER=""; SMTP_VERIFY_SSL=""
+IMAP_HOST=""; IMAP_PORT=""; IMAP_USER=""; IMAP_VERIFY_SSL=""
+SMTP_HOST=""; SMTP_PORT=""; SMTP_USER=""; SMTP_VERIFY_SSL=""
+# Sentinel for SMTP_USER: when the user explicitly hits ENTER on the prompt we
+# want an *empty* value (unauthenticated relay), not a default copied from
+# IMAP_USER. We track whether --smtp-user was passed on argv via this flag.
+SMTP_USER_SET=0
 
 usage() {
     cat <<'EOF'
@@ -69,7 +73,7 @@ while [[ $# -gt 0 ]]; do
         --imap-user) IMAP_USER="$2"; shift 2 ;;
         --smtp-host) SMTP_HOST="$2"; shift 2 ;;
         --smtp-port) SMTP_PORT="$2"; shift 2 ;;
-        --smtp-user) SMTP_USER="$2"; shift 2 ;;
+        --smtp-user) SMTP_USER="$2"; SMTP_USER_SET=1; shift 2 ;;
         --imap-no-verify-ssl) IMAP_VERIFY_SSL="no"; shift ;;
         --smtp-no-verify-ssl) SMTP_VERIFY_SSL="no"; shift ;;
         --test) TEST_PROBE=1; shift ;;
@@ -118,8 +122,12 @@ prompt "IMAP port" IMAP_PORT "993"
 prompt "IMAP username" IMAP_USER "$EMAIL_ADDR"
 prompt "Verify IMAP TLS certificate? (yes for trusted CA, no for self-signed)" IMAP_VERIFY_SSL "yes"
 prompt "SMTP host" SMTP_HOST "$IMAP_HOST"
-prompt "SMTP port" SMTP_PORT "587"
-prompt "SMTP username" SMTP_USER "$IMAP_USER"
+prompt "SMTP port (25 / 465 / 587)" SMTP_PORT "587"
+# SMTP user: do NOT default to IMAP_USER. We want ENTER to mean "empty"
+# (unauthenticated relay). Only auto-fill when --smtp-user was given on argv.
+if [[ $SMTP_USER_SET -eq 0 && -z "$SMTP_USER" && $NON_INTERACTIVE -eq 0 ]]; then
+    read -r -p "SMTP username (blank = unauthenticated relay): " SMTP_USER
+fi
 prompt "Verify SMTP TLS certificate? (yes for trusted CA, no for self-signed)" SMTP_VERIFY_SSL "$IMAP_VERIFY_SSL"
 
 # Normalize verify-ssl answers ("no"/"n"/"false"/"0" → no, anything else → yes).
@@ -138,9 +146,12 @@ args=(
     --display-name "$DISPLAY_NAME"
     --email "$EMAIL_ADDR"
     --imap-host "$IMAP_HOST" --imap-port "$IMAP_PORT" --imap-user "$IMAP_USER"
-    --smtp-host "$SMTP_HOST" --smtp-port "$SMTP_PORT" --smtp-user "$SMTP_USER"
+    --smtp-host "$SMTP_HOST" --smtp-port "$SMTP_PORT"
     --imap-password-stdin
 )
+# Only pass --smtp-user when the operator actually provided one — passing an
+# empty string would still set a username on the channel.
+[[ -n "$SMTP_USER" ]] && args+=(--smtp-user "$SMTP_USER")
 [[ "$IMAP_VERIFY_SSL" == "no" ]] && args+=(--imap-no-verify-ssl)
 [[ "$SMTP_VERIFY_SSL" == "no" ]] && args+=(--smtp-no-verify-ssl)
 [[ -n "$SMTP_PW" ]] && args+=(--smtp-password-stdin)

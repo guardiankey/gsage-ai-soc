@@ -100,7 +100,11 @@ async def _run_with_cleanup(
     finally:
         from src.shared.database import dispose_engine_pool
         from src.backend_api.app.services.agent_factory import dispose_agno_db_pool
+        from src.shared.services.async_cleanup import close_lingering_httpx_clients
 
+        # Close LLM/HTTP clients *before* DB pools so any in-flight request
+        # finishes against a still-live event loop.
+        await close_lingering_httpx_clients()
         await dispose_engine_pool()
         await dispose_agno_db_pool()
 

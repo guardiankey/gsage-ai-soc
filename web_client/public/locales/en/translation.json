@@ -616,7 +616,20 @@
       "department": "Department",
       "allDepartments": "All (org-wide)",
       "imapVerifySsl": "Verify IMAP SSL Certificate",
-      "smtpVerifySsl": "Verify SMTP SSL Certificate"
+      "smtpVerifySsl": "Verify SMTP SSL Certificate",
+      "imapUseTls": "Use IMAP TLS/SSL",
+      "smtpUseTls": "Use SMTP TLS/SSL",
+      "imapFolder": "IMAP Folder",
+      "imapIdleSupported": "Server supports IMAP IDLE",
+      "senderName": "Sender Name",
+      "subjectPrefix": "Subject Prefix",
+      "replyFooter": "Reply Footer",
+      "unknownSenderFolder": "Unknown Sender Folder",
+      "maxEmailSizeBytes": "Max Email Size (bytes)",
+      "pollingIntervalSeconds": "Polling Interval (seconds)",
+      "sectionImap": "IMAP (inbound)",
+      "sectionSmtp": "SMTP (outbound)",
+      "sectionDelivery": "Delivery & Processing"
     }
   }
 }

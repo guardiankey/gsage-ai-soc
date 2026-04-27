@@ -128,11 +128,11 @@ class AdminApp(App[None]):
         self._update_org_bar()
 
     async def on_unmount(self) -> None:
-        """Dispose async DB pool before the event loop closes.
+        """Dispose async resources before the event loop closes.
 
-        Without this, asyncpg connections held by the SQLAlchemy pool are
-        garbage-collected after the loop is gone, producing noisy
-        ResourceWarning messages on stderr.
+        Without this, asyncpg connections held by the SQLAlchemy pool and
+        the Weaviate async client are garbage-collected after the loop is
+        gone, producing noisy ResourceWarning messages on stderr.
         """
         try:
             from src.shared.database import dispose_engine_pool  # noqa: PLC0415
@@ -140,6 +140,35 @@ class AdminApp(App[None]):
             await dispose_engine_pool()
         except Exception:
             pass
+        try:
+            from src.shared.weaviate_client import close_weaviate_client  # noqa: PLC0415
+
+            await close_weaviate_client()
+        except Exception:
+            pass
+
+    async def action_quit(self) -> None:  # type: ignore[override]
+        """Close async resources *before* tearing down the event loop.
+
+        Textual's default Ctrl+C handler triggers ``App.exit()`` which
+        eventually calls ``on_unmount``, but by then Textual is already in
+        shutdown and the asyncpg/weaviate cleanup tasks may not get a
+        chance to drain — producing ResourceWarnings on stderr. Doing the
+        dispose here guarantees a clean shutdown.
+        """
+        try:
+            from src.shared.database import dispose_engine_pool  # noqa: PLC0415
+
+            await dispose_engine_pool()
+        except Exception:
+            pass
+        try:
+            from src.shared.weaviate_client import close_weaviate_client  # noqa: PLC0415
+
+            await close_weaviate_client()
+        except Exception:
+            pass
+        self.exit()
 
     # ── Reactives ─────────────────────────────────────────────────────────────
 
