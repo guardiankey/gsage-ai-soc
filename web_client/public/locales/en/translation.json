@@ -100,6 +100,7 @@
     "uploadFormats": "Supported: PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML, JSON, XML, EML, ZIP, TAR.GZ — Max 10 MB per file",
     "dropHere": "Drop the files here",
     "ingestStarted": "Ingestion started",
+    "urlIngestStarted": "URL queued for ingestion",
     "ingestStatus": "Ingestion status",
     "ingestHistory": "Upload history",
     "noIngestHistory": "No uploads yet.",

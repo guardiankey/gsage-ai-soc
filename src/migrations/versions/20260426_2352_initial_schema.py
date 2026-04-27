@@ -1,8 +1,8 @@
 """initial_schema
 
-Revision ID: 33303470587c
+Revision ID: 519021a00605
 Revises: 
-Create Date: 2026-04-22 21:22:39.681632
+Create Date: 2026-04-26 23:52:40.974538
 
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '33303470587c'
+revision: str = '519021a00605'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -363,6 +363,7 @@ def upgrade() -> None:
     sa.Column('chunks_stored', sa.Integer(), nullable=True),
     sa.Column('error_message', sa.Text(), nullable=True),
     sa.Column('storage_key', sa.String(length=1000), nullable=True, comment='MinIO object key in the kb-originals bucket. NULL for pre-existing jobs.'),
+    sa.Column('source_url', sa.String(length=2000), nullable=True, comment='Origin URL when the job was created from a URL submission. NULL for direct file uploads.'),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),

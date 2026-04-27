@@ -19,6 +19,7 @@ import {
   addKnowledge,
   deleteKnowledge,
   ingestDocument,
+  ingestUrl,
   getIngestStatus,
   listIngestJobs,
   downloadIngestOriginal,
@@ -134,22 +135,50 @@ export default function KnowledgePage() {
   }
 
   const addMut = useMutation({
-    mutationFn: () =>
-      addKnowledge(
+    mutationFn: async () => {
+      const trimmedUrl = newUrl.trim()
+      const trimmedContent = newContent.trim()
+      const title = newTitle.trim()
+      const description = newDescription.trim() || undefined
+      // URL without inline content → async ingest pipeline (download +
+      // convert + chunk + embed runs on the Celery knowledge worker).
+      if (trimmedUrl && !trimmedContent) {
+        const job = await ingestUrl(orgId!, title, trimmedUrl, ingestScope, description)
+        return { kind: 'url' as const, job }
+      }
+      // Direct content (with optional URL annotation) → fast inline path.
+      const doc = await addKnowledge(
         orgId!,
-        newTitle.trim(),
-        newContent.trim() || undefined,
-        newDescription.trim() || undefined,
-        newUrl.trim() || undefined,
-      ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['knowledge', orgId] })
+        title,
+        trimmedContent || undefined,
+        description,
+        trimmedUrl || undefined,
+      )
+      return { kind: 'content' as const, doc }
+    },
+    onSuccess: (result) => {
       setAddOpen(false)
       setNewTitle('')
       setNewDescription('')
       setNewContent('')
       setNewUrl('')
-      toast.success(t('knowledge.addSuccess'))
+      if (result.kind === 'url') {
+        // Track the new ingest job and let the poller drive UI updates.
+        setIngestJobs((prev) => [
+          {
+            jobId: result.job.job_id,
+            fileName: result.job.filename,
+            status: result.job.status ?? 'queued',
+            scope: ingestScope,
+          },
+          ...prev,
+        ])
+        queryClient.invalidateQueries({ queryKey: ['knowledge-ingest-jobs', orgId] })
+        toast.info(t('knowledge.urlIngestStarted'))
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['knowledge', orgId] })
+        toast.success(t('knowledge.addSuccess'))
+      }
     },
     onError: () => toast.error(t('common.error')),
   })

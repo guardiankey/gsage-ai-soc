@@ -117,6 +117,12 @@ class GSageIngestJob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="MinIO object key in the kb-originals bucket. NULL for pre-existing jobs.",
     )
 
+    source_url: Mapped[Optional[str]] = mapped_column(
+        String(2000),
+        nullable=True,
+        comment="Origin URL when the job was created from a URL submission. NULL for direct file uploads.",
+    )
+
     __table_args__ = (
         Index("ix_ingest_job_org_status", "org_id", "status"),
         Index("ix_ingest_job_user", "user_id"),

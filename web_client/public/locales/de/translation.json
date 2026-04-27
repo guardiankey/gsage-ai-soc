@@ -100,6 +100,7 @@
     "uploadFormats": "Unterstützt: PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML, JSON, XML, EML, ZIP, TAR.GZ — Max. 10 MB pro Datei",
     "dropHere": "Dateien hier ablegen",
     "ingestStarted": "Einpflegung gestartet",
+    "urlIngestStarted": "URL zur Einpflegung eingereiht",
     "ingestStatus": "Einpflegestatus",
     "ingestHistory": "Upload-Verlauf",
     "noIngestHistory": "Noch keine Uploads.",

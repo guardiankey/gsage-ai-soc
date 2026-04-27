@@ -109,6 +109,19 @@ export async function ingestDocument(
   return response.data
 }
 
+export async function ingestUrl(
+  orgId: string,
+  name: string,
+  url: string,
+  scope: 'org' | 'user' | 'dept' = 'org',
+  description?: string
+): Promise<IngestJob> {
+  const payload: Record<string, string> = { name, url, scope }
+  if (description) payload.description = description
+  const response = await apiClient.post(`/v1/orgs/${orgId}/knowledge/ingest/url`, payload)
+  return response.data
+}
+
 export async function getIngestStatus(orgId: string, jobId: string): Promise<IngestJob> {
   const response = await apiClient.get(`/v1/orgs/${orgId}/knowledge/ingest/${jobId}`)
   return response.data

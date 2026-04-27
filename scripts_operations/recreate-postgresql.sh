@@ -21,7 +21,7 @@ echo -e "\n${YELLOW}[1/3] Stopping postgres container...${NC}"
 docker compose down postgres
 
 echo -e "${YELLOW}[2/3] Removing data volume...${NC}"
-docker volume rm gsage-ai_postgres_data 2>/dev/null \
+docker volume rm gsage-ai-soc_postgres_data 2>/dev/null \
   && echo "    Volume removed." \
   || echo "    Volume not found — skipping."
 

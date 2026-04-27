@@ -100,6 +100,7 @@
     "uploadFormats": "対応形式：PDF、DOCX、XLSX、PPTX、CSV、TXT、MD、HTML、JSON、XML、EML、ZIP、TAR.GZ — 1ファイルあたり最大10 MB",
     "dropHere": "ファイルをここにドロップ",
     "ingestStarted": "取り込みを開始しました",
+    "urlIngestStarted": "URL を取り込みキューに登録しました",
     "ingestStatus": "取り込み状況",
     "ingestHistory": "アップロード履歴",
     "noIngestHistory": "まだアップロードがありません。",

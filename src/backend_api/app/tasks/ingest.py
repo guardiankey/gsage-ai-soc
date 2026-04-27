@@ -458,6 +458,220 @@ def ingest_document_task(
 
 
 # ---------------------------------------------------------------------------
+# URL ingest task — download → save to shared volume → reuse document pipeline
+# ---------------------------------------------------------------------------
+
+# Allowed extensions for URL-sourced files (subset of _ALLOWED_EXTENSIONS in
+# the API layer). Archives are intentionally NOT supported via URL to avoid
+# zip-bomb-from-URL surface.
+_URL_ALLOWED_EXTENSIONS = {
+    ".pdf", ".docx", ".txt", ".md", ".xlsx", ".pptx", ".csv",
+    ".html", ".htm", ".json", ".xml", ".eml",
+}
+
+# Map Content-Type → extension (covers common server responses).
+_CONTENT_TYPE_TO_EXT = {
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "text/csv": ".csv",
+    "text/html": ".html",
+    "application/xhtml+xml": ".html",
+    "text/plain": ".txt",
+    "text/markdown": ".md",
+    "text/x-markdown": ".md",
+    "application/json": ".json",
+    "application/xml": ".xml",
+    "text/xml": ".xml",
+    "message/rfc822": ".eml",
+}
+
+_URL_MAX_BYTES = 10 * 1024 * 1024  # 10 MB — same as regular file uploads
+
+
+def _extract_filename_from_disposition(header: str | None) -> str | None:
+    """Best-effort parse of Content-Disposition `filename=` parameter."""
+    if not header:
+        return None
+    import re
+
+    # RFC 5987 (filename*=) takes precedence over filename=
+    m = re.search(r"filename\*\s*=\s*(?:[^']*''\s*)?([^;\s]+)", header, flags=re.IGNORECASE)
+    if not m:
+        m = re.search(r'filename\s*=\s*"?([^";]+)"?', header, flags=re.IGNORECASE)
+    if not m:
+        return None
+    from urllib.parse import unquote
+
+    return unquote(m.group(1).strip())
+
+
+@celery_app.task(
+    name="src.backend_api.app.tasks.ingest.ingest_url_task",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+)
+def ingest_url_task(
+    self,
+    *,
+    job_id: str,
+    org_id: str,
+    user_id: str,
+    source_url: str,
+    name: str,
+    scope: str,
+    dept_id: str | None = None,
+) -> dict:
+    """Download a URL into the shared ingest volume, then dispatch the
+    standard ``ingest_document_task`` pipeline.
+
+    Releases the API request immediately — all I/O (HTTP fetch, content-type
+    detection, MarkItDown conversion, embedding) happens here on the
+    ``knowledge`` Celery queue.
+    """
+    import asyncio as _asyncio
+    import mimetypes
+    import os as _os
+    from urllib.parse import urlparse, unquote
+
+    import httpx as _httpx
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from src.shared.config.settings import get_settings
+    from src.shared.models.ingest_job import IngestStatus
+
+    base_dir = Path(_os.environ.get("INGEST_TMP_DIR", "/data/ingest"))
+    job_dir = base_dir / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    dest_path: Path | None = None
+
+    async def _download() -> tuple[Path, int, str]:
+        async with _httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=_httpx.Timeout(60.0),
+        ) as client:
+            response = await client.get(source_url)
+            response.raise_for_status()
+            raw_bytes = response.content
+            if len(raw_bytes) > _URL_MAX_BYTES:
+                raise ValueError(
+                    f"URL response exceeds {_URL_MAX_BYTES // (1024 * 1024)} MB limit"
+                )
+
+            # 1) Try Content-Disposition filename
+            disp_name = _extract_filename_from_disposition(
+                response.headers.get("content-disposition")
+            )
+            ext = ""
+            if disp_name:
+                ext = Path(disp_name).suffix.lower()
+
+            # 2) Fall back to Content-Type
+            if ext not in _URL_ALLOWED_EXTENSIONS:
+                ct_full = (response.headers.get("content-type") or "").lower()
+                ct = ct_full.split(";", 1)[0].strip()
+                ext = _CONTENT_TYPE_TO_EXT.get(ct, "")
+                if not ext:
+                    guessed = mimetypes.guess_extension(ct) or ""
+                    ext = guessed.lower()
+
+            # 3) Fall back to URL path
+            if ext not in _URL_ALLOWED_EXTENSIONS:
+                parsed = urlparse(source_url)
+                path_ext = Path(unquote(parsed.path)).suffix.lower()
+                if path_ext in _URL_ALLOWED_EXTENSIONS:
+                    ext = path_ext
+
+            # 4) Default to .html (MarkItDown handles HTML well)
+            if ext not in _URL_ALLOWED_EXTENSIONS:
+                ext = ".html"
+
+            # Build a safe filename based on the user-provided name
+            safe_stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".") or "document"
+            safe_stem = safe_stem[:200]  # cap length
+            target = job_dir / f"{safe_stem}{ext}"
+            target.write_bytes(raw_bytes)
+            return target, len(raw_bytes), f"{safe_stem}{ext}"
+
+    async def _run() -> str:
+        nonlocal dest_path
+        settings = get_settings()
+        engine = create_async_engine(
+            settings.database_url, echo=False, pool_pre_ping=True
+        )
+        session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+        try:
+            await _update_job(session_maker, job_id, status=IngestStatus.PROCESSING)
+            target, size, filename = await _download()
+            dest_path = target
+            await _update_job(
+                session_maker,
+                job_id,
+                original_filename=filename,
+                file_size=size,
+                # Stay PROCESSING — ingest_document_task will set its own status.
+            )
+            return str(target)
+        finally:
+            await engine.dispose()
+
+    try:
+        filepath_str = _asyncio.run(_run())
+    except Exception as exc:
+        log.error(
+            "ingest_url_task failed during download: job=%s url=%s error=%s",
+            job_id, source_url, exc, exc_info=True,
+        )
+
+        async def _mark_failed() -> None:
+            settings = get_settings()
+            engine = create_async_engine(
+                settings.database_url, echo=False, pool_pre_ping=True
+            )
+            session_maker = async_sessionmaker(engine, expire_on_commit=False)
+            try:
+                await _update_job(
+                    session_maker,
+                    job_id,
+                    status=IngestStatus.FAILED,
+                    error_message=f"URL fetch failed: {exc}"[:2000],
+                )
+            finally:
+                await engine.dispose()
+
+        try:
+            _asyncio.run(_mark_failed())
+        except Exception:
+            log.warning("Could not update job status to FAILED for job=%s", job_id)
+        # Best-effort cleanup of the partial download dir
+        try:
+            if dest_path and dest_path.exists():
+                dest_path.unlink()
+            if job_dir.exists() and not any(job_dir.iterdir()):
+                job_dir.rmdir()
+        except OSError:
+            pass
+        return {"status": "failed", "error": str(exc)}
+
+    # Hand off to the standard document pipeline (it will mark COMPLETED).
+    ingest_document_task.apply_async(
+        kwargs={
+            "job_id": job_id,
+            "org_id": org_id,
+            "user_id": user_id,
+            "filepath": filepath_str,
+            "scope": scope,
+            "dept_id": dept_id,
+        },
+        queue="knowledge",
+    )
+    return {"status": "downloaded", "filepath": filepath_str}
+
+
+# ---------------------------------------------------------------------------
 # Default knowledge loader
 # ---------------------------------------------------------------------------
 

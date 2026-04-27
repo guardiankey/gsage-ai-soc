@@ -75,6 +75,21 @@ class IngestJobSubmitResponse(BaseModel):
     scope: str
 
 
+class IngestUrlRequest(BaseModel):
+    """Body for POST /knowledge/ingest/url — async URL ingestion."""
+
+    name: str = Field(..., min_length=1, max_length=500)
+    url: str = Field(..., min_length=1, max_length=2000)
+    description: Optional[str] = Field(None, max_length=1000)
+    scope: str = Field("org", pattern="^(org|user|dept)$")
+
+    @model_validator(mode="after")
+    def validate_url(self) -> "IngestUrlRequest":
+        if not (self.url.startswith("http://") or self.url.startswith("https://")):
+            raise ValueError("'url' must start with http:// or https://")
+        return self
+
+
 class IngestJobStatusResponse(BaseModel):
     """Full status of an ingest job (returned by GET /knowledge/ingest/{job_id})."""
 

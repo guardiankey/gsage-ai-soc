@@ -100,6 +100,7 @@
     "uploadFormats": "المدعومة: PDF، DOCX، XLSX، PPTX، CSV، TXT، MD، HTML، JSON، XML، EML، ZIP، TAR.GZ — حد أقصى 10 ميجابايت لكل ملف",
     "dropHere": "أفلت الملفات هنا",
     "ingestStarted": "بدأ الاستيراد",
+    "urlIngestStarted": "تمت إضافة الرابط إلى قائمة الاستيراد",
     "ingestStatus": "حالة الاستيراد",
     "ingestHistory": "سجل الرفع",
     "noIngestHistory": "لا توجد رفوعات بعد.",

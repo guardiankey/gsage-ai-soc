@@ -28,6 +28,7 @@ from src.backend_api.app.core.tenant import TenantContext
 from src.backend_api.app.schemas.knowledge import (
     IngestJobStatusResponse,
     IngestJobSubmitResponse,
+    IngestUrlRequest,
     KnowledgeContentCreate,
     KnowledgeContentOut,
     KnowledgeSearchRequest,
@@ -407,6 +408,72 @@ async def ingest_document(
             "filepath": str(dest_path),
             "scope": scope,
             "dept_id": str(ctx.dept_id) if scope == IngestScope.DEPT and ctx.dept_id else None,
+        },
+        queue="knowledge",
+    )
+
+    return IngestJobSubmitResponse(
+        job_id=str(job.id),
+        status=job.status,
+        filename=job.original_filename,
+        scope=job.scope,
+    )
+
+
+@router.post(
+    "/orgs/{org_id}/knowledge/ingest/url",
+    response_model=IngestJobSubmitResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Submit a URL for async ingestion into the knowledge base",
+)
+async def ingest_url(
+    org_id: uuid.UUID,
+    payload: IngestUrlRequest,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    db: AsyncSession = Depends(get_db),
+) -> IngestJobSubmitResponse:
+    """Accept a URL and enqueue it for async download + ingestion.
+
+    The Celery worker downloads the URL, detects the content type
+    (PDF, DOCX, HTML, etc.), saves it to the shared ingest volume, then
+    hands off to the standard ``ingest_document_task`` pipeline.
+    """
+    ctx.require_permission("knowledge:write")
+
+    if payload.scope == IngestScope.DEPT and ctx.dept_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Department scope requires an active department context. Switch to a department first.",
+        )
+
+    # Persist job row up-front; original_filename is the user-supplied name
+    # (worker will refine it once Content-Type/Disposition is known).
+    job = GSageIngestJob(
+        org_id=org_id,
+        user_id=ctx.user_id,
+        dept_id=ctx.dept_id if payload.scope == IngestScope.DEPT else None,
+        scope=payload.scope,
+        original_filename=payload.name[:500],
+        file_size=0,
+        status=IngestStatus.QUEUED,
+        source_url=payload.url,
+    )
+    db.add(job)
+    await db.flush()
+    await db.commit()
+    await db.refresh(job)
+
+    from src.backend_api.app.tasks.ingest import ingest_url_task  # noqa: PLC0415
+
+    ingest_url_task.apply_async(
+        kwargs={
+            "job_id": str(job.id),
+            "org_id": str(org_id),
+            "user_id": str(ctx.user_id),
+            "source_url": payload.url,
+            "name": payload.name,
+            "scope": payload.scope,
+            "dept_id": str(ctx.dept_id) if payload.scope == IngestScope.DEPT and ctx.dept_id else None,
         },
         queue="knowledge",
     )
