@@ -1,5 +1,7 @@
 # gSage SOC AI
 
+Project's site: [https://gsage.org/](https://gsage.org/)
+
 gSage SOC AI is an on-premise SOC assistant that combines AI agents, structured tooling, and human review workflows to help security teams monitor, investigate, triage, and respond faster -- *exceptional operational efficiency without losing security or control*.
 
 It is designed for organizations that want AI-assisted security operations without sending core workflows or operational data to a third-party SaaS by default. The platform runs in your environment, integrates with your internal services via APIs, and keeps observability, auditability, and control as first-class concerns.
@@ -56,7 +58,7 @@ See more examples in [PROMPT_EXAMPLES.md](PROMPT_EXAMPLES.md).
 
 The platform is designed to make new integrations straightforward to add. See [docs/dev/TOOLS.md](docs/dev/TOOLS.md) for the list of implemented tools and guidance for building new ones.
 
-In the repository guardiankey/gSage-soc-ai-tools, you can find a collection of community-contributed tools and integrations that can be used with this platform.
+In the repository [guardiankey/gsage-soc-ai-tools](https://github.com/guardiankey/gsage-ai-soc), you can find a collection of community-contributed tools and integrations that can be used with this platform.
 
 ## Why this project exists
 
@@ -87,11 +89,11 @@ The result is a modular SOC workflow platform that can support investigation, en
 
 ## Core strengths
 
-- On-premise first: designed to run in your own infrastructure.
-- AI with guardrails: tool execution is isolated and permission-aware.
-- Multi-tenant by design: organizations, users, and permissions are part of the core model.
-- Audit-friendly: logs, traces, and execution context are treated as product features, not afterthoughts.
-- Practical deployment: Docker Compose is enough for the intended scale.
+- **On-premise first**: designed to run in your own infrastructure.
+- **AI with guardrails**: tool execution is isolated and permission-aware.
+- **Multi-tenant by design**: organizations, users, and permissions are part of the core model.
+- **Audit-friendly**: logs, traces, and execution context are treated as product features, not afterthoughts.
+- **Practical deployment**: Docker Compose is enough for the intended scale.
 
 ## Innovative features
 
@@ -129,7 +131,7 @@ The platform is split into focused services:
 - `curator`: service to manage blacklists, allowlists, and other operational data that can be used by tools and rules.
 - external LLM provider: model inference through Ollama, OpenAI, Gemini, DeepSeek, or an OpenAI-compatible endpoint.
 
-If you want the implementation-oriented view, start with [docs/dev/README.md](docs/dev/README.md), and [docs/dev/TOOLS.md](docs/dev/TOOLS.md).
+If you want the implementation-oriented view, start with [docs/dev/TOOLS.md](docs/dev/TOOLS.md).
 
 ## Install
 
@@ -162,14 +164,19 @@ Only **one port** is published publicly: the web UI (default `8080`). The
 backend API is reached through the frontend reverse proxy at `/api`.
 
 Re-running the installer on an existing host upgrades in place while
-preserving `.env` and all volumes. Full architectural details in
-[docs-local/architecture/50-INSTALLER.md](docs-local/architecture/50-INSTALLER.md).
+preserving `.env` and all volumes.
 
 ### Post-install: channels
 
+- After install, you can access the web UI at `http://localhost:8080` with the admin credentials you set during installation.
+- You may want to set up a Telegram bot or an email channel for prompt submission and response delivery. Use the following scripts to configure those channels.
+- In web UI, menu Admin, you can also manage channels, organizations, users, tools, and other settings. You have to configure the Telegram ID and email addresses for each user that should have access to those channels.
+- You have to configure tools with your credentials for them to work. For example, if you want to use the VirusTotal tool, you need to set `VT_API_KEY` in `.env` with your VirusTotal API key. The same applies to other tools that require credentials.
+- If you need a tool, check if there is an existing one in [gsage-soc-ai-tools](https://github.com/guardiankey/gsage-soc-ai-tools). If not, you can build your own tool and add it to the platform. See [docs/dev/TOOLS.md](docs/dev/TOOLS.md) for guidance on building new tools. We encourage contributions of tools to the community repository so others can benefit from them.
+
 ```bash
-sudo /opt/gsage/current/configure-email-channel.sh      # IMAP/SMTP mailbox
-sudo /opt/gsage/current/configure-telegram-channel.sh   # @BotFather token
+sudo /opt/gsage/current/configure-email-channel.sh      # IMAP/SMTP mailbox.
+sudo /opt/gsage/current/configure-telegram-channel.sh   # @BotFather token.
 ```
 
 ### Development checkout
@@ -189,7 +196,7 @@ docker compose logs backend | grep 'Admin API Key'
 
 After the stack is up:
 
-1. open the web UI on `http://localhost:5000`
+1. open the web UI on `http://localhost:8080`
 2. confirm the backend health endpoint is returning healthy status
 3. configure the desired LLM provider and credentials in `.env`
 4. create the initial data needed by your environment
@@ -209,7 +216,7 @@ pip install -r requirements-cli.txt
 
 # Set your API key
 export GSAGE_API_KEY='your-api-key-here'
-export GSAGE_API_HOST='http://localhost:8000'  # optional, defaults to localhost:8000
+export GSAGE_API_HOST='http://localhost:8080'  # optional, defaults to localhost:8080
 
 # Run the CLI
 python -m cli_client.main
@@ -339,14 +346,7 @@ By submitting contributions, you agree to the repository's contribution and lice
 
 ## License
 
-This project is distributed under the gSage AI Business Source License 1.0. It is source-available, but it is not currently an OSI-approved open source license.
-
-In practical terms:
-
-- development and testing use are allowed
-- limited production use is allowed for up to 3 server instances
-- commercial resale or broader commercial use requires a commercial license
-- the planned change date in the license is `2100-01-01`, after which the project is intended to move to GPLv2-or-later or a compatible license
+This project is distributed under the gSage AI Business Source License 1.0. 
 
 Read the full terms in [LICENSE.md](LICENSE.md).
 

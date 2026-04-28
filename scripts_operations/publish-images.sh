@@ -158,6 +158,28 @@ echo "  Push     : $([[ $PUSH -eq 1 ]] && echo 'yes' || echo 'no (build only)')"
 echo "══════════════════════════════════════════════════════════"
 echo ""
 
+# ── Sync docs into knowledge_base/gsage before building ───────────────────
+# These files are baked into the runtime images via COPY in the Dockerfile.
+KB_GSAGE="$PROJECT_ROOT/knowledge_base/gsage"
+declare -A KB_SOURCES=(
+    ["README.md"]="$PROJECT_ROOT/README.md"
+    ["TOOLS.md"]="$PROJECT_ROOT/docs/dev/TOOLS.md"
+    ["LICENSE.md"]="$PROJECT_ROOT/LICENSE.md"
+)
+
+echo "  Syncing docs to knowledge_base/gsage/ …"
+mkdir -p "$KB_GSAGE"
+for dest_name in "${!KB_SOURCES[@]}"; do
+    src="${KB_SOURCES[$dest_name]}"
+    if [[ -f "$src" ]]; then
+        cp -f "$src" "$KB_GSAGE/$dest_name"
+        echo "    copied $(basename "$src") → knowledge_base/gsage/$dest_name"
+    else
+        echo "    WARNING: source not found, skipping: $src" >&2
+    fi
+done
+echo ""
+
 FAILED_PUSH=0
 
 # ── Build + tag + push loop ────────────────────────────────────────────────

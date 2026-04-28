@@ -9,6 +9,9 @@ The source of truth for this document is:
 - `src/mcp_server/tools/base.py`
 - `src/mcp_server/registry/registry.py`
 - `src/mcp_server/main.py`
+- `src/shared/cache/decorator.py`
+- `src/shared/cache/__init__.py`
+- `src/shared/models/tool_cache.py`
 - `src/shared/models/tool_config.py`
 - `src/shared/models/tool_state.py`
 
@@ -22,10 +25,29 @@ If you only need the shortest possible path, do this:
 2. Create a concrete `BaseTool` subclass with a unique `name` and an `execute()` implementation.
 3. Define `permissions`, `summary`, `category`, and `params_schema`.
 4. If the tool needs per-org config, add `config_defaults`, `config_schema`, and optionally `requires_config = True`.
-5. Restart the MCP server.
-6. Grant the tool permission tags to a group and configure the organization's tool profile if needed.
+5. If the tool needs persistent counters/cursors, declare `state_defaults` and mutate the `state` dict in place inside `execute()`.
+6. If the tool needs reusable result caching, use `src.shared.cache.cached` on a helper function. Do not try to bolt cache logic into `BaseTool.run()`.
+7. Restart the MCP server.
+8. Grant the tool permission tags to a group and configure the organization's tool profile if needed.
 
 There is no manual registration step.
+
+---
+
+## Mental Model
+
+Think about the framework in three layers:
+
+1. `BaseTool` orchestration.
+   This is the request wrapper around your business logic. It handles permissions, rate limiting, circuit breaker, config loading, state loading, retries, background dispatch, state save, and audit.
+
+2. Your `execute()` method.
+   This is where parameter validation and the actual domain operation belong. In most tools, this is the only method you need to implement.
+
+3. Optional shared infrastructure.
+   Use adjacent facilities only when needed: `@cached` for execution-result caching, `_store_file()` / `_load_file()` for artifacts, `should_run_background()` for pre-flight offload, and `enrich_for_listing()` for config-derived hints shown to the LLM.
+
+If you find yourself reimplementing permission checks, retries, audit writes, config decryption, or state persistence inside `execute()`, you are usually working against the framework instead of with it.
 
 ---
 
@@ -48,6 +70,9 @@ There is no manual registration step.
 
 6. `BaseTool.run()` is the real execution pipeline.
    It handles permission checks, rate limiting, circuit breaker, config loading, state loading, retries, background dispatch, state persistence, and audit logging.
+
+7. There are two different cache layers.
+   `BaseTool` automatically caches decrypted config rows in Redis for 5 minutes. Reusable caching of expensive helper results is a separate opt-in facility backed by `GSageToolCache` and the `@cached` decorator.
 
 ---
 
@@ -104,6 +129,28 @@ The current visibility model is intentionally split:
 - `call_tool` still re-validates permission before running anything.
 
 If your tool should be discoverable but not always injected into the MCP tool list, leave `core_tool = False` and make sure `summary` and `category` are useful so `search_tools` can surface it.
+
+---
+
+## Pick The Smallest Extension Point
+
+For new tools, start with the smallest hook that solves the problem:
+
+| Need | Prefer |
+|---|---|
+| Normal request handling | Implement `execute()` only |
+| Background offload decision based on params/config | Override `should_run_background()` |
+| Show profiles/hosts/presets in `list_tools` | Override `enrich_for_listing()` |
+| Read or emit platform-managed files | Use `_load_file()` / `_store_file()` |
+| Cache idempotent helper results | Use `src.shared.cache.cached` on a helper function |
+| Share DB session with advanced helpers | Override `run()` only to inject a `ContextVar`, then delegate to `super().run()` |
+
+Overriding `run()` is an advanced move. Existing tools do it mostly for two reasons:
+
+- exposing the SQLAlchemy session to helper functions that need a `session` kwarg, such as `@cached` helpers
+- running a feature-flag pre-check before delegating back to `BaseTool.run()`
+
+If you override `run()`, keep the wrapper thin and still call `super().run(...)`.
 
 ---
 
@@ -246,14 +293,22 @@ Do not duplicate these concerns inside `execute()` unless you have a very specif
 2. profile-aware permission checks
 3. Redis rate limiting
 4. circuit breaker checks
-5. config loading and merge
+5. config loading with a Redis cache (`toolcfg:{org_id}:{tool_name}:{profile_id}`, TTL 5 minutes)
 6. state loading
 7. optional background pre-flight dispatch
 8. required-parameter presence validation from `params_schema`
 9. timeout handling and retryable retries
 10. circuit breaker feedback
-11. state persistence
+11. automatic persistence of the mutated `state` dict
 12. audit logging to Elasticsearch
+
+Config resolution order is:
+
+1. `config_defaults`
+2. environment variables `TOOL_<TOOL_NAME>__<FIELD>`
+3. encrypted DB config row from `GSageToolConfig`
+
+This means a tool configured only through environment variables is considered configured even when there is no DB row.
 
 The retry model is currently:
 
@@ -347,6 +402,110 @@ After adding or changing configurable tools, regenerate the auto-generated envir
 python scripts/generate_env_defaults.py
 ```
 
+Environment values are coerced using `config_schema` when possible. The current implementation understands at least:
+
+- `boolean`
+- `integer`
+- `number`
+- `array` / `object` from JSON text
+
+If coercion fails, the raw string is kept and a warning is logged.
+
+---
+
+## Caching
+
+There are two cache mechanisms relevant to tool authors.
+
+### 1. Automatic config cache in `BaseTool`
+
+You do not need to write any code for this one. `load_config()` reads `GSageToolConfig`, decrypts it, validates required fields, and caches the decrypted payload in Redis for 5 minutes.
+
+Use this mental model:
+
+- config cache is automatic
+- it is scoped by org + tool + profile
+- it caches configuration only, not business results
+
+### 2. Execution-result cache via `src.shared.cache.cached`
+
+For expensive, read-like, idempotent helper operations, use the shared cache decorator backed by `GSageToolCache`.
+
+```python
+import uuid
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.shared.cache import cached
+
+
+@cached(
+   ttl=3600,
+   scope="org",
+   key_fn=lambda *, domain, **_: f"dns:{domain.lower()}",
+   logical_name="my_tool",
+)
+async def _lookup_domain(
+   *,
+   domain: str,
+   org_id: uuid.UUID,
+   session: AsyncSession,
+) -> dict:
+   ...
+```
+
+What the decorator expects:
+
+- the helper must receive `session=` as an `AsyncSession` kwarg or cache is bypassed
+- `scope="org"` requires `org_id=`
+- `scope="user"` requires `user_id=`
+- args and return values must be JSON-serializable, except `datetime` and `UUID`, which are handled automatically
+
+What the decorator does for you:
+
+- builds a stable SHA256 cache key
+- returns cache hits directly from PostgreSQL
+- increments hit counters
+- lazily deletes expired rows on access
+- writes new entries with `INSERT ... ON CONFLICT DO NOTHING`
+- never fails the main request just because cache serialization or insert failed
+
+Useful options:
+
+- `key_fn` gives you a stable logical discriminator without exposing the whole call signature to key generation
+- `ttl_fn(result, *args, **kwargs)` lets you vary TTL per result or skip caching by returning `0` or `None`
+- `logical_name` lets logs and cache rows use the tool name instead of an internal helper name
+
+When to use it:
+
+- external lookups with stable responses for some period
+- metadata fetches that are expensive but safe to reuse
+- feeds or reference datasets consumed by multiple invocations
+
+When not to use it:
+
+- destructive operations
+- write actions
+- results that contain request-unique or approval-sensitive side effects
+- anything whose visibility scope would be wrong if reused
+
+Related utilities in `src.shared.cache` also exist for invalidation and maintenance:
+
+- `invalidate_tool_cache()`
+- `invalidate_org_cache()`
+- `invalidate_user_cache()`
+- `prune_expired_cache()`
+- `get_cache_stats()`
+
+### Practical cache pattern inside a tool
+
+Because `execute()` does not receive the SQLAlchemy session directly, cached helpers usually need one of these patterns:
+
+1. use a `ContextVar` populated in a thin `run()` override, then call the cached helper with `session=session`
+2. if you are only loading platform files, prefer `_load_file()` instead of building your own session transport
+
+Existing examples of session-bridging wrappers include `cisa_kev`, `nvd_lookup`, and `datastore`.
+
 ---
 
 ## Config Profiles And Listing Enrichment
@@ -382,6 +541,19 @@ Helpers available in `BaseTool`:
 - `load_state()`
 - `save_state()`
 - `update_state_atomic()` for JSONB field updates without read-modify-write races
+
+Important practical detail: the state object passed into `execute()` is the same dict later considered for automatic persistence by `BaseTool.run()`. That means:
+
+- mutate `state` in place if you want the wrapper to save it automatically
+- reassigning `state = {...}` inside `execute()` only changes your local variable; it does not replace the object tracked by `run()`
+
+Typical pattern:
+
+```python
+state["daily_queries_used"] = state.get("daily_queries_used", 0) + 1
+```
+
+Use `update_state_atomic()` when you need a single-field JSONB update without a read-modify-write race, especially for counters under concurrency.
 
 State is not encrypted. Use it for operational data, not secrets.
 
@@ -432,6 +604,14 @@ Loads a previously stored file by `file_id`, validates org/user ownership rules,
 
 This is the correct path for tools that need to process files already uploaded into the platform.
 
+In normal `execute()` flows you usually do not need to pass `session=` explicitly. `BaseTool.run()` already injects a session context that `_load_file()` can reuse internally. You should still pass the request scope values needed for access control:
+
+- `org_id`
+- `user_id` for user-scoped files
+- `dept_id` for department-scoped files
+
+Most file-processing tools in the current codebase call `_load_file()` with those IDs and no explicit session.
+
 ---
 
 ## CRUD Tools And Feature Flags
@@ -467,6 +647,15 @@ If you are building a normal integration against an external system, subclass `B
 
 6. Do not forget permission assignment.
    A correctly implemented tool will still be invisible until a group has the right tag.
+
+7. Do not confuse config cache with execution-result cache.
+   Redis config caching is automatic in `BaseTool`; reusable result caching is an explicit `@cached` choice.
+
+8. Do not rebuild the state dict if you expect auto-save.
+   Mutate the provided `state` object in place.
+
+9. Do not override `run()` unless you need orchestration that truly cannot live in `execute()`.
+   If you do override it, keep it thin and delegate to `super().run()`.
 
 ---
 
