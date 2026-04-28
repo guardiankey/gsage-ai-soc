@@ -166,9 +166,13 @@ with open(sys.argv[1]) as f: print(json.load(f).get("registry","guardiankey"))
 
     wizard::run
     wizard::render_env "$SCRIPT_DIR/env.template" "$ENV_FILE"
+    # Leave the raw template as .env.example for reference (no secrets — only placeholders).
+    install -m 0644 "$SCRIPT_DIR/env.template" "$SHARED_DIR/.env.example"
 else
     echo ""
     echo "Existing .env preserved: $ENV_FILE"
+    # Always refresh the example so it stays in sync with the installed version.
+    [[ -f "$SCRIPT_DIR/env.template" ]] && install -m 0644 "$SCRIPT_DIR/env.template" "$SHARED_DIR/.env.example"
 fi
 
 # ── 5. Extract release tree ──────────────────────────────────────────

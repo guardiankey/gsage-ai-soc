@@ -46,6 +46,71 @@ _TICKET_SUBITEM_TYPES = ["TicketFollowup", "ITILSolution", "TicketTask", "Item_T
 _COMPUTER_SUBITEM_TYPES = ["Item_Line", "Log", "NetworkPort"]
 _GENERIC_SUBITEM_TYPES = ["Log", "Document_Item"]
 
+# Compact-mode field whitelists per itemtype.
+# Returned as a small, LLM-friendly subset of the full GLPI item record
+# (which can have 100+ fields including UI/session noise like cookie_token_date,
+# pallete, date_format, etc.). Only fields useful for analysis are kept.
+_COMPACT_FIELDS: dict[str, list[str]] = {
+    "Ticket": [
+        "id", "name", "status", "priority", "urgency", "impact", "type",
+        "itilcategories_id", "requesttypes_id",
+        "date", "date_creation", "date_mod", "solvedate", "closedate",
+        "time_to_resolve", "time_to_own",
+        "content",
+        "users_id_recipient", "users_id_lastupdater",
+        "_users_id_assign", "_groups_id_assign",
+        "_users_id_requester", "_groups_id_requester",
+        "entities_id", "locations_id",
+    ],
+    "User": [
+        "id", "name", "realname", "firstname", "phone", "phone2", "mobile",
+        "is_active", "last_login", "profiles_id", "usertitles_id",
+        "usercategories_id", "entities_id", "locations_id",
+        "groups_id", "_useremails",
+    ],
+    "Group": [
+        "id", "name", "completename", "comment", "is_recursive",
+        "is_requester", "is_assign", "groups_id", "entities_id",
+    ],
+    "Computer": [
+        "id", "name", "serial", "otherserial", "uuid",
+        "computertypes_id", "computermodels_id", "manufacturers_id",
+        "states_id", "users_id", "groups_id",
+        "locations_id", "entities_id",
+        "date_creation", "date_mod", "is_deleted",
+    ],
+}
+# Fallback: when no whitelist is defined for an itemtype, drop these noisy keys.
+_COMPACT_DROP_KEYS: set[str] = {
+    "cookie_token", "cookie_token_date", "personal_token", "personal_token_date",
+    "api_token", "api_token_date", "password", "password_last_update",
+    "date_format", "number_format", "names_format", "csv_delimiter",
+    "pallete", "palette", "theme", "highcontrast_css", "language",
+    "begin_date", "end_date", "display_count_on_home", "is_ids_visible",
+    "keep_devices_when_purging_an_item", "notification_to_myself",
+    "backcreated", "task_state", "refresh_views", "set_default_tech",
+    "set_default_requester", "priority_1", "priority_2", "priority_3",
+    "priority_4", "priority_5", "priority_6", "followup_private",
+    "task_private", "default_requesttypes_id", "layout",
+    "lock_autolock_mode", "lock_directunlock_notification",
+    "timezone",
+}
+
+
+def _compact_item(itemtype: str, item: dict) -> dict:
+    """Return a slimmed-down view of a GLPI item for LLM consumption.
+
+    - If ``itemtype`` has a whitelist in ``_COMPACT_FIELDS``, keep only those keys
+      that are present in the source dict.
+    - Otherwise, return all keys except those in ``_COMPACT_DROP_KEYS``.
+    """
+    if not isinstance(item, dict):
+        return item
+    whitelist = _COMPACT_FIELDS.get(itemtype)
+    if whitelist:
+        return {k: item[k] for k in whitelist if k in item}
+    return {k: v for k, v in item.items() if k not in _COMPACT_DROP_KEYS}
+
 
 class GlpiGetItemTool(BaseTool):
     """Retrieve a single GLPI item by type and ID.
@@ -80,7 +145,7 @@ class GlpiGetItemTool(BaseTool):
     """
 
     name: ClassVar[str] = "glpi_get_item"
-    version: ClassVar[str] = "1.0.0"
+    version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = "Retrieve a single GLPI item (ticket, asset, user) by its numeric ID"
     category: ClassVar[str] = "itsm"
     permissions: ClassVar[list[str]] = ["glpi:read"]
@@ -175,6 +240,16 @@ class GlpiGetItemTool(BaseTool):
                 "default": False,
                 "description": "Include linked documents. Default: false.",
             },
+            "compact": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Return only the most relevant fields (id, name, status, priority, "
+                    "category, technician, dates, content, etc.) instead of the full "
+                    "GLPI record. Drops UI/session noise (cookie_token_date, palette, "
+                    "date_format, etc.). Greatly reduces response size and LLM context cost."
+                ),
+            },
         },
         "additionalProperties": False,
     }
@@ -217,6 +292,7 @@ class GlpiGetItemTool(BaseTool):
         with_infocoms: bool = params.get("with_infocoms", False)
         with_contracts: bool = params.get("with_contracts", False)
         with_documents: bool = params.get("with_documents", False)
+        compact: bool = params.get("compact", False)
 
         log.info(
             "glpi_get_item: itemtype=%s, id=%d, config_keys=%s",
@@ -276,6 +352,9 @@ class GlpiGetItemTool(BaseTool):
             return self._failure("INTERNAL_ERROR", str(exc), execution_time_ms=elapsed)
 
         elapsed = int((time.monotonic() - t0) * 1000)
+
+        if compact:
+            item = _compact_item(itemtype, item)
 
         result: dict = {"itemtype": itemtype, "id": item_id, "item": item}
         if sub_item_results:

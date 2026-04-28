@@ -118,9 +118,10 @@ wizard::_gen_key32() {
 wizard::render_env() {
     # $1 = path to env.template, $2 = path to output .env
     local template="$1" out="$2"
-    local generated_default generated_curator generated_minio
+    local generated_default generated_curator generated_curator_key generated_minio
     generated_default="$(wizard::_gen)"
     generated_curator="$(wizard::_gen)"
+    generated_curator_key="$(wizard::_gen)"
     generated_minio="$(wizard::_gen)"
 
     umask 077
@@ -128,13 +129,15 @@ wizard::render_env() {
     tmp="$(mktemp)"
     cp "$template" "$tmp"
 
-    # Replace @@GENERATED_CURATOR@@ and @@GENERATED_MINIO@@ FIRST (longer matches)
-    # so they don't get eaten by the generic @@GENERATED@@ pass. The MinIO
-    # placeholder must resolve to the SAME value on every line so the backend
-    # credentials match the MinIO server credentials.
-    local safe_curator safe_minio
+    # Replace @@GENERATED_CURATOR@@, @@GENERATED_CURATOR_KEY@@ and @@GENERATED_MINIO@@
+    # FIRST (longer matches) so they don't get eaten by the generic @@GENERATED@@ pass.
+    # Each named placeholder resolves to the SAME value on every line so credentials
+    # are consistent across sections (e.g. Curator API key matches tool config).
+    local safe_curator safe_curator_key safe_minio
     safe_curator="$(printf '%s' "$generated_curator" | sed 's/[\/&]/\\&/g')"
+    safe_curator_key="$(printf '%s' "$generated_curator_key" | sed 's/[\/&]/\\&/g')"
     safe_minio="$(printf '%s' "$generated_minio" | sed 's/[\/&]/\\&/g')"
+    sed -i "s/@@GENERATED_CURATOR_KEY@@/$safe_curator_key/g" "$tmp"
     sed -i "s/@@GENERATED_CURATOR@@/$safe_curator/g" "$tmp"
     sed -i "s/@@GENERATED_MINIO@@/$safe_minio/g" "$tmp"
 

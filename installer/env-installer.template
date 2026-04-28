@@ -169,4 +169,11 @@ MINIO_SECURE=false
 CURATOR_DB_USER=curator
 CURATOR_DB_PASSWORD=@@GENERATED_CURATOR@@
 CURATOR_DATABASE_URI=postgresql+asyncpg://curator:@@GENERATED_CURATOR@@@postgres:5432/curator
-CURATOR_API_KEY=@@GENERATED@@
+CURATOR_API_KEY=@@GENERATED_CURATOR_KEY@@
+
+# ── Curator tool config ──────────────────────────────────────
+# Pre-configured so the curator tools work out of the box on first run.
+TOOL_CURATOR_LISTS__BASE_URL=http://curator:8000
+TOOL_CURATOR_LISTS__API_KEY=@@GENERATED_CURATOR_KEY@@
+TOOL_CURATOR_MANAGE__BASE_URL=http://curator:8000
+TOOL_CURATOR_MANAGE__API_KEY=@@GENERATED_CURATOR_KEY@@

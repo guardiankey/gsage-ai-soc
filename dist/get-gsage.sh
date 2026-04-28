@@ -78,8 +78,9 @@ echo ">> extracting ..."
 tar -xzf "$BUNDLE_FILE"
 
 # Locate the top-level directory produced by the tarball.
-BUNDLE_DIR="$(tar -tzf "$BUNDLE_FILE" | head -1 | cut -d/ -f1)"
-[[ -d "$BUNDLE_DIR" ]] || _die "could not locate extracted directory '$BUNDLE_DIR'."
+# Use `|| true` to suppress SIGPIPE from head closing the pipe early (pipefail).
+BUNDLE_DIR="$(tar -tzf "$BUNDLE_FILE" 2>/dev/null | head -1 | cut -d/ -f1 || true)"
+[[ -n "$BUNDLE_DIR" && -d "$BUNDLE_DIR" ]] || _die "could not locate extracted directory '$BUNDLE_DIR'."
 
 # ── 4. Run installer ─────────────────────────────────────────────────
 INSTALLER="$WORK_DIR/$BUNDLE_DIR/installer.sh"

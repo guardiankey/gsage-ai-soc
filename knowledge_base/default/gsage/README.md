@@ -171,12 +171,21 @@ preserving `.env` and all volumes.
 - After install, you can access the web UI at `http://localhost:8080` with the admin credentials you set during installation.
 - You may want to set up a Telegram bot or an email channel for prompt submission and response delivery. Use the following scripts to configure those channels.
 - In web UI, menu Admin, you can also manage channels, organizations, users, tools, and other settings. You have to configure the Telegram ID and email addresses for each user that should have access to those channels.
-- You have to configure tools with your credentials for them to work. For example, if you want to use the VirusTotal tool, you need to set `VT_API_KEY` in `.env` with your VirusTotal API key. The same applies to other tools that require credentials.
-- If you need a tool, check if there is an existing one in [gsage-soc-ai-tools](https://github.com/guardiankey/gsage-soc-ai-tools). If not, you can build your own tool and add it to the platform. See [docs/dev/TOOLS.md](docs/dev/TOOLS.md) for guidance on building new tools. We encourage contributions of tools to the community repository so others can benefit from them.
 
 ```bash
 sudo /opt/gsage/current/configure-email-channel.sh      # IMAP/SMTP mailbox.
 sudo /opt/gsage/current/configure-telegram-channel.sh   # @BotFather token.
+```
+
+### Post-install: tools
+
+
+- You have to configure tools with your credentials for them to work. For example, if you want to use the VirusTotal tool, you need to set `VT_API_KEY` in `.env` with your VirusTotal API key. The same applies to other tools that require credentials.
+- If you need a tool, check if there is an existing one in [gsage-soc-ai-tools](https://github.com/guardiankey/gsage-soc-ai-tools). If not, you can build your own tool and add it to the platform. See [docs/dev/TOOLS.md](docs/dev/TOOLS.md) for guidance on building new tools. We encourage contributions of tools to the community repository so others can benefit from them.
+- Configure your tools by setting variables at `/opt/gsage/shared/.env` or through the web UI admin panel. After changing `.env`, you need to recreate the affected containers for the changes to take effect. In save dir there is a `.env.example` file that you can use as a reference for the variables to set.
+
+```bash
+docker compose -f /opt/gsage/current/compose/docker-compose.yml up -d --force-recreate backend_api mcp-server celery-worker-tools 
 ```
 
 ### Development checkout

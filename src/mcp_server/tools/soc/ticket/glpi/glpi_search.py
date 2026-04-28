@@ -239,7 +239,7 @@ class GlpiSearchTool(BaseTool):
     """
 
     name: ClassVar[str] = "glpi_search"
-    version: ClassVar[str] = "1.2.0"
+    version: ClassVar[str] = "1.3.0"
     summary: ClassVar[str] = "Search any GLPI itemtype (tickets, assets, users) using the GLPI search engine"
     category: ClassVar[str] = "itsm"
     permissions: ClassVar[list[str]] = ["glpi:read"]
@@ -444,6 +444,17 @@ class GlpiSearchTool(BaseTool):
                 "default": "DESC",
                 "description": "Sort order: ASC or DESC (default: DESC).",
             },
+            "fields": {
+                "type": "array",
+                "items": {"type": "integer", "minimum": 1},
+                "description": (
+                    "Extra searchOption field IDs to include in each result row "
+                    "(merged with the default forcedisplay set). Useful to fetch "
+                    "additional fields without a follow-up get_item call. "
+                    "Example for User: [1, 9, 34, 5] (login, realname, email, phone). "
+                    "Use action='list_fields' to discover valid IDs for the itemtype."
+                ),
+            },
         },
         "additionalProperties": False,
     }
@@ -558,6 +569,7 @@ class GlpiSearchTool(BaseTool):
         max_results: int = min(int(params.get("max_results", 20)), _MAX_RESULTS_HARD_LIMIT)
         sort_field: Optional[int] = params.get("sort_field")
         order: str = params.get("order", "DESC")
+        extra_fields: list[int] = list(params.get("fields") or [])
 
         # quick_search is mutually exclusive with criteria, keyword, user, group,
         # and the Ticket-specific technician/requester/watcher/*_group filters.
@@ -658,6 +670,14 @@ class GlpiSearchTool(BaseTool):
                 if itemtype == "Ticket":
                     # id, name, priority, requester, technician, content, status, date_creation, date_mod
                     forcedisplay = [1, 2, 3, 4, 5, 7, 12, 15, 19]
+
+                # Merge user-supplied extra fields, preserving order and removing duplicates.
+                if extra_fields:
+                    seen = set(forcedisplay)
+                    for fid in extra_fields:
+                        if fid not in seen:
+                            forcedisplay.append(fid)
+                            seen.add(fid)
 
                 range_str = f"0-{max_results - 1}"
 
