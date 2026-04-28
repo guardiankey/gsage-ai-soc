@@ -26,7 +26,7 @@ POSTGRES_DB=gsagekey
 POSTGRES_USER=gsagekey
 POSTGRES_PASSWORD=@@GENERATED@@
 POSTGRES_HOST=postgres
-POSTGRES_PORT=@@PROMPT:postgres_port@@
+POSTGRES_PORT=5432
 
 # ── Redis ────────────────────────────────────────────────────
 REDIS_PASSWORD=@@GENERATED@@

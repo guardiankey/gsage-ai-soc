@@ -10,10 +10,13 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-dist/
+dist/staging/
 build/
 .eggs/
 *.egg
+
+# Webclient
+web_client/dist/
 
 # Virtual environments
 venv/

@@ -72,7 +72,6 @@ wizard::run() {
     echo "── Exposed ports (host) ──"
     echo "Only one port is published publicly: the frontend (web UI + /api proxy)."
     wizard::_ask frontend_port "Web UI / API port"               "8080"
-    wizard::_ask postgres_port "Postgres port (127.0.0.1 only)"  "5432"
 
     echo ""
     echo "── LLM provider (maker) ──"
