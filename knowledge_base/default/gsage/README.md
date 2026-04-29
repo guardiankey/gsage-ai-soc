@@ -142,14 +142,7 @@ official images from the public registry, and runs an interactive wizard.
 ### Production (one-host install)
 
 ```bash
-# Download the latest release tarball (replace <ver> with the version you want)
-curl -fLO https://github.com/guardiankey/gsage-ai-soc/releases/download/v<ver>/gsage-<ver>.tar.gz
-curl -fLO https://github.com/guardiankey/gsage-ai-soc/releases/download/v<ver>/gsage-<ver>.tar.gz.sha256
-sha256sum -c gsage-<ver>.tar.gz.sha256
-
-# Extract and run
-tar -xzf gsage-<ver>.tar.gz
-sudo bash gsage-<ver>/installer.sh
+curl -fsSL http://raw.githubusercontent.com/guardiankey/gsage-ai-soc/refs/heads/main/dist/get-gsage.sh | sudo bash
 ```
 
 The installer:
