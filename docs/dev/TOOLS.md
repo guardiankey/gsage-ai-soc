@@ -15,6 +15,16 @@ The source of truth for this document is:
 - `src/shared/models/tool_config.py`
 - `src/shared/models/tool_state.py`
 
+
+For contributing:
+
+1. Clone the repo.
+2. Create your tool in the correct location with the minimal skeleton.
+3. Add your credits to `CREDITS.md` if you want.
+4. Open a PR and request review from the team.
+
+We recommend to create an issue first to discuss the design and get early feedback, but if you have a clear vision for a new tool and want to move fast, feel free to open a PR directly.
+
 ---
 
 ## Fast Path
