@@ -190,14 +190,36 @@ Background tool execution:
   responding to any subsequent user message.
 
 Tool discovery & execution:
-- Core tools: call directly by name.
-- Specialized capabilities (ITSM, EDR, firewall, etc.): call
-  ``search_tools`` FIRST. It returns ``params_schema``, ``requires_approval``
-  and annotations.
+- Two execution surfaces exist, and they are NOT interchangeable:
+  * CORE tools — listed in your function/tool list. Call them directly by
+    their own name (e.g. ``dns_lookup(...)``, ``threat_intel_lookup(...)``).
+  * DISCOVERABLE tools — every other tool (ITSM, EDR, firewall, MSRC,
+    GLPI, curator, vendor connectors, …). They are NOT exposed as
+    callable functions. The ONLY way to run them is through the proxies
+    ``run_discovered_tool`` or ``run_approved_tool``, passing the tool
+    name as the ``tool_name`` argument.
+- Workflow for any non-core capability:
+  1. ``search_tools`` to find the tool and fetch its schema
+     (``params_schema``, ``requires_approval``, annotations).
+  2. Build ``params`` strictly from that schema.
+  3. Invoke via ``run_discovered_tool`` or ``run_approved_tool``
+     (see the approval gate below).
 - MANDATORY: before saying "I can't" to any action, you MUST call
   ``search_tools`` — a matching tool may exist.
 - The "Discoverable tools catalog" section (if present) is only a keyword
   hint; always run ``search_tools`` to get the full schema.
+
+HARD RULE — discovered tools are NEVER callable by their own name:
+- Discovering a tool means "I now know it exists and its schema"; it does
+  NOT register a new top-level function for you to call.
+- If a tool came from ``search_tools`` (or from the catalog hint), it MUST
+  be executed through ``run_discovered_tool`` / ``run_approved_tool``,
+  even when it does not require approval.
+- Calling such a tool by its bare name will fail with "tool not found"
+  and must not be attempted.
+  ✅ run_discovered_tool(tool_name="msrc_bulletin", params={"cve":"CVE-2024-..."} )
+  ❌ msrc_bulletin(cve="CVE-2024-...")
+  ❌ functions.msrc_bulletin({"cve":"CVE-2024-..."})
 
 APPROVAL GATE — MANDATORY CHECKLIST for every discovered-tool call:
   1. Did I fetch the schema via ``search_tools``? If not → do it now.
@@ -456,7 +478,13 @@ async def _fetch_tool_catalog(
     if not by_cat:
         return None
 
-    lines = ["Available discoverable tools (call search_tools to get their schema before using them):"]
+    lines = [
+        "Available discoverable tools — names below are HINTS, not callable "
+        "functions. To use any of them: (1) call ``search_tools`` to fetch "
+        "the schema, then (2) execute via ``run_discovered_tool`` (or "
+        "``run_approved_tool`` if it requires approval). Never call these "
+        "names directly."
+    ]
     for cat in sorted(by_cat):
         tools_str = ", ".join(sorted(by_cat[cat]))
         lines.append(f"- {cat}: {tools_str}")

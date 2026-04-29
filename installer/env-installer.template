@@ -111,12 +111,12 @@ JWT_ALGORITHM=HS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
-# ── CRUD Tools (disabled by default) ─────────────────────────
-CRUD_TOOLS_ENABLED=false
-CRUD_TOOLS_ALLOW_WRITE=false
+# ── CRUD Tools (enabled by default) ─────────────────────────
+CRUD_TOOLS_ENABLED=true
+CRUD_TOOLS_ALLOW_WRITE=true
 
 # ── DataStore ────────────────────────────────────────────────
-DATASTORE_ENABLED=false
+DATASTORE_ENABLED=true
 DATASTORE_MAX_STORES_PER_ORG=20
 DATASTORE_MAX_RECORDS_PER_STORE=1000
 DATASTORE_MAX_RECORD_SIZE_BYTES=10240
