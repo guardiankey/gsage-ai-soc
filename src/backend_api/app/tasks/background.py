@@ -113,11 +113,13 @@ async def _async_execute_background_tool(task_id: str) -> None:
             if tool is None:
                 raise RuntimeError(f"Tool '{task.tool_name}' not found in registry")
 
-            # Load config and state (mirrors run() steps 4 + state load)
+            # Load config and state (mirrors run() steps 4 + state load).
+            # Resolution chain must match BaseTool.run(): defaults < env < DB.
             config = await tool.load_config(
                 agent_context, session, redis_client, profile_id=task.profile_id
             )
-            effective_config = {**tool.config_defaults, **(config or {})}
+            env_defaults = tool._load_env_defaults()
+            effective_config = {**tool.config_defaults, **env_defaults, **(config or {})}
             state = await tool.load_state(
                 agent_context, session, profile_id=task.profile_id
             )

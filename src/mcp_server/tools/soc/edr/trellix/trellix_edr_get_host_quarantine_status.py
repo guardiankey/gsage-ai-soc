@@ -141,7 +141,9 @@ class TrellixEdrGetHostQuarantineStatusTool(BaseTool):
                     "system_id": r.get("system_id"),
                     "hostname": r.get("HostInfo_hostname"),
                     "ip_address": r.get("HostInfo_ip_address"),
-                    "os_name": r.get("HostInfo_os_name"),
+                    "platform": r.get("HostInfo_platform"),
+                    "os": r.get("HostInfo_os"),
+                    "connection_status": r.get("HostInfo_connection_status"),
                     "is_quarantined": _extract_quarantine_flag(r),
                     "raw": r,
                 }
@@ -165,11 +167,24 @@ class TrellixEdrGetHostQuarantineStatusTool(BaseTool):
 
 
 def _extract_quarantine_flag(row: dict) -> Optional[bool]:
-    """Best-effort extraction of a quarantine flag from common HostInfo fields.
+    """Best-effort extraction of a quarantine flag from HostInfo fields.
 
-    Returns ``True``/``False`` when a known field is present and parsable;
-    ``None`` when no recognised field is exposed.
+    The primary signal in Trellix EDR v2 is ``HostInfo.connection_status``,
+    which reports values like ``connected``, ``disconnected`` and
+    ``contained`` (containment = network isolation = quarantine).
+    Falls back to legacy ``isolated``/``quarantine_status`` style fields.
+
+    Returns ``True``/``False`` when a known field is parsable; ``None``
+    when no recognised field is exposed.
     """
+    cs = row.get("HostInfo_connection_status")
+    if isinstance(cs, str) and cs.strip():
+        normalized = cs.strip().lower()
+        if normalized in ("contained", "isolated", "quarantined"):
+            return True
+        if normalized in ("connected", "disconnected", "online", "offline"):
+            return False
+
     for key in (
         "HostInfo_is_isolated",
         "HostInfo_isolated",
@@ -183,5 +198,5 @@ def _extract_quarantine_flag(row: dict) -> Optional[bool]:
             if isinstance(value, (int, float)):
                 return bool(value)
             if isinstance(value, str):
-                return value.strip().lower() in ("true", "1", "yes", "isolated", "quarantined")
+                return value.strip().lower() in ("true", "1", "yes", "isolated", "quarantined", "contained")
     return None

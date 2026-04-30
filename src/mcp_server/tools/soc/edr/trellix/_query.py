@@ -586,9 +586,15 @@ def build_host_locator_query(
     """
     op = "equals" if exact else "contains"
     if hostname:
-        return f'HostInfo hostname, ip_address, os_name WHERE HostInfo hostname {op} "{_escape(hostname)}"'
+        return (
+            'HostInfo hostname, ip_address, platform, os, connection_status '
+            f'WHERE HostInfo hostname {op} "{_escape(hostname)}"'
+        )
     if ip_address:
-        return f'HostInfo hostname, ip_address, os_name WHERE HostInfo ip_address {op} "{_escape(ip_address)}"'
+        return (
+            'HostInfo hostname, ip_address, platform, os, connection_status '
+            f'WHERE HostInfo ip_address {op} "{_escape(ip_address)}"'
+        )
     raise TrellixEDRError("locator query requires hostname or ip_address.", code="INVALID_INPUT")
 
 
