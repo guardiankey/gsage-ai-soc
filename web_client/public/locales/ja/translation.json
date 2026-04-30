@@ -213,6 +213,7 @@
     "keyNamePlaceholder": "例：マイCLIキー",
     "noKeys": "まだAPIキーがありません。",
     "deleted": "APIキーが削除されました",
+    "revoked": "取り消し済み",
     "deleteTitle": "APIキーを削除",
     "deleteDesc": "このAPIキーは永久に失効されます。この操作は元に戻せません。",
     "copyNow": "今すぐキーをコピーしてください — 再表示されません",

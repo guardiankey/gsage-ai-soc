@@ -213,6 +213,7 @@
     "keyNamePlaceholder": "e.g. My CLI key",
     "noKeys": "No API keys yet.",
     "deleted": "API key deleted",
+    "revoked": "Revoked",
     "deleteTitle": "Delete API key",
     "deleteDesc": "This API key will be permanently revoked. This action cannot be undone.",
     "copyNow": "Copy your key now — it will not be shown again",

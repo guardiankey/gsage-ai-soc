@@ -22,6 +22,7 @@ import {
   deleteOrgApiKey,
   type ApiKey,
 } from '@/api/api-keys'
+import { extractApiError } from '@/api/client'
 import { Pagination, calcTotalPages } from '@/components/ui/pagination'
 import { useAuth } from '@/contexts/AuthContext'
 import { toast } from 'sonner'
@@ -65,7 +66,7 @@ export default function ApiKeysPage() {
       setMyNewKey(data.raw_key)
       setMyKeyName('')
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err) => toast.error(extractApiError(err)),
   })
 
   const deleteMyMut = useMutation({
@@ -75,7 +76,10 @@ export default function ApiKeysPage() {
       setMyDeleteId(null)
       toast.success(t('apiKeys.deleted'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err) => {
+      setMyDeleteId(null)
+      toast.error(extractApiError(err))
+    },
   })
 
   const createOrgMut = useMutation({
@@ -85,7 +89,7 @@ export default function ApiKeysPage() {
       setOrgNewKey(data.raw_key)
       setOrgKeyName('')
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err) => toast.error(extractApiError(err)),
   })
 
   const deleteOrgMut = useMutation({
@@ -95,7 +99,10 @@ export default function ApiKeysPage() {
       setOrgDeleteId(null)
       toast.success(t('apiKeys.deleted'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err) => {
+      setOrgDeleteId(null)
+      toast.error(extractApiError(err))
+    },
   })
 
   return (
@@ -235,26 +242,33 @@ function ApiKeyList({ keys, onDelete }: { keys: ApiKey[]; onDelete: (id: string)
     <div className="divide-y">
       {keys.map((key) => (
         <div key={key.id} className="flex items-center gap-3 px-4 py-3 group">
-          <Key className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <Key className={`h-4 w-4 shrink-0 ${key.is_active ? 'text-muted-foreground' : 'text-muted-foreground/40'}`} />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium">{key.name}</p>
+            <div className="flex items-center gap-2">
+              <p className={`text-sm font-medium ${!key.is_active ? 'line-through text-muted-foreground' : ''}`}>{key.name}</p>
+              {!key.is_active && (
+                <Badge variant="outline" className="text-xs">{t('apiKeys.revoked')}</Badge>
+              )}
+            </div>
             <div className="flex items-center gap-2 mt-0.5">
               <code className="text-xs text-muted-foreground">
-                {key.prefix ? `${key.prefix}••••••` : '••••••••'}
+                {key.key_prefix ? `${key.key_prefix}••••••` : '••••••••'}
               </code>
               <span className="text-xs text-muted-foreground">
                 {t('apiKeys.created')}: {formatDistanceToNow(new Date(key.created_at), { addSuffix: true })}
               </span>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 opacity-0 group-hover:opacity-100 hover:text-destructive"
-            onClick={() => onDelete(key.id)}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {key.is_active && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 opacity-0 group-hover:opacity-100 hover:text-destructive"
+              onClick={() => onDelete(key.id)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       ))}
     </div>

@@ -213,6 +213,7 @@
     "keyNamePlaceholder": "z.B. Mein CLI-Schlüssel",
     "noKeys": "Noch keine API-Schlüssel.",
     "deleted": "API-Schlüssel gelöscht",
+    "revoked": "Widerrufen",
     "deleteTitle": "API-Schlüssel löschen",
     "deleteDesc": "Dieser API-Schlüssel wird dauerhaft widerrufen. Diese Aktion kann nicht rückgängig gemacht werden.",
     "copyNow": "Kopiere deinen Schlüssel jetzt — er wird nicht erneut angezeigt",

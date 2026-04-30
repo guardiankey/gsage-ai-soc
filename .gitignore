@@ -64,6 +64,7 @@ dbs/**/*.dat
 .github/
 
 estilo_externo_apenas_para_referencia/
+external_code/*
 
 web_client/node_modules/
 

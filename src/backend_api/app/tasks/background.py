@@ -144,9 +144,18 @@ async def _async_execute_background_tool(task_id: str) -> None:
                     agent_context, session, state, profile_id=task.profile_id
                 )
 
-            # Persist result
+            # Persist result. Status mirrors the tool's outcome:
+            #   - tool_result.status == "error"  -> task FAILED (with error_message)
+            #   - anything else (success/partial/background) -> COMPLETED
             task.result = tool_result.to_dict()
-            task.status = BackgroundTaskStatus.COMPLETED
+            if tool_result.status == "error":
+                task.status = BackgroundTaskStatus.FAILED
+                err = tool_result.error or {}
+                err_code = err.get("code") or "TOOL_ERROR"
+                err_msg = err.get("message") or "Tool returned error status"
+                task.error_message = f"[{err_code}] {err_msg}"[:2000]
+            else:
+                task.status = BackgroundTaskStatus.COMPLETED
             task.completed_at = datetime.now(timezone.utc)
             await session.commit()
 

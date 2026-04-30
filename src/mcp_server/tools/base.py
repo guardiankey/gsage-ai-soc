@@ -651,7 +651,30 @@ class BaseTool(ABC):
 
         state = await self.load_state(agent_context, session, profile_id=profile_id)
 
-        # ── 4b. Background pre-flight / always_background dispatch ───────────
+        # ── 4b. Required-params validation (must happen BEFORE BG dispatch) ──
+        # Validate required fields from params_schema before calling execute()
+        # so tools get a clear MISSING_PARAM error instead of a raw KeyError —
+        # and so always_background tools don't enqueue a Celery task that is
+        # guaranteed to fail.
+        _schema = self.params_schema or {}
+        _required_fields: list[str] = _schema.get("required", [])
+        _missing = [f for f in _required_fields if f not in params]
+        if _missing:
+            elapsed = int((time.monotonic() - start) * 1000)
+            missing_str = ", ".join(f"'{f}'" for f in _missing)
+            result = self._failure(
+                code="MISSING_PARAM",
+                message=f"Missing required parameter(s): {missing_str}",
+                execution_time_ms=elapsed,
+            )
+            await audit.log_execution(
+                agent_context, self.name, self.version,
+                params, "error", elapsed, "MISSING_PARAM",
+                audit_context=audit_context or None,
+            )
+            return result
+
+        # ── 4c. Background pre-flight / always_background dispatch ───────────
         if await self.should_run_background(params, effective_config):
             elapsed = int((time.monotonic() - start) * 1000)
             from src.shared.models.background_task import BackgroundTaskTrigger  # noqa: PLC0415
@@ -675,27 +698,6 @@ class BaseTool(ABC):
                 audit_context=audit_context or None,
             )
             return bg_result
-
-        # ── 4c. Required-params validation ───────────────────────────────
-        # Validate required fields from params_schema before calling execute()
-        # so tools get a clear MISSING_PARAM error instead of a raw KeyError.
-        _schema = self.params_schema or {}
-        _required_fields: list[str] = _schema.get("required", [])
-        _missing = [f for f in _required_fields if f not in params]
-        if _missing:
-            elapsed = int((time.monotonic() - start) * 1000)
-            missing_str = ", ".join(f"'{f}'" for f in _missing)
-            result = self._failure(
-                code="MISSING_PARAM",
-                message=f"Missing required parameter(s): {missing_str}",
-                execution_time_ms=elapsed,
-            )
-            await audit.log_execution(
-                agent_context, self.name, self.version,
-                params, "error", elapsed, "MISSING_PARAM",
-                audit_context=audit_context or None,
-            )
-            return result
 
         # ── 5. Execute with retry ────────────────────────────────────────
         result: ToolResult = self._failure(

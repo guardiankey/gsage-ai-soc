@@ -22,7 +22,7 @@ class BlockIPTool(BaseTool):
     version: ClassVar[str] = "0.1.0"
     summary: ClassVar[str] = "Add an IP address to the organization's firewall deny-list (requires human approval)"
     category: ClassVar[str] = "firewall"
-    available: ClassVar[bool] = True  # stub with simulated response for HITL testing
+    available: ClassVar[bool] = False  # stub with simulated response for HITL testing
     permissions: ClassVar[list[str]] = ["firewall:write"]
     rate_limit_per_minute: ClassVar[int] = 10
     timeout_seconds: ClassVar[int] = 30

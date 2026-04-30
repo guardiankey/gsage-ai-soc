@@ -3,7 +3,7 @@ import { apiClient } from './client'
 export interface ApiKey {
   id: string
   name: string
-  prefix: string
+  key_prefix: string
   scoped_permissions?: string[]
   environment?: string
   is_active: boolean
