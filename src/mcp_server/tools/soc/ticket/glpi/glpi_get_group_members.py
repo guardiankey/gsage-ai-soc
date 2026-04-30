@@ -5,19 +5,28 @@ fields (login, realname, firstname, email, phone, last_login). Optionally
 includes members of sub-groups recursively (based on the parent group's
 ``completename`` prefix).
 
-Without this tool, the equivalent workflow requires:
+Implementation notes
+--------------------
+GLPI's ``search/User`` endpoint with ``forcedisplay`` returned the correct
+``totalcount`` but empty field values for several joined/derived columns
+(realname, email, …) on some GLPI 10.x installations. To avoid relying on
+fragile ``searchOption`` IDs, this tool uses the more deterministic CRUD
+endpoints:
 
-* 1× ``glpi_search`` (User with ``field=13 equals group_id``) — returns just id+login
-* N× ``glpi_get_item`` (User) — to pull the remaining fields
-
-This tool collapses that into one round-trip with the right ``forcedisplay``
-fields, removing the N+1 problem from team-dashboard / on-call listings.
+* ``GET /Group/{id}/Group_User`` — returns ``users_id`` for every direct
+  member of the group.
+* ``GET /User/{users_id}`` (in parallel) — returns the canonical user
+  record with stable JSON keys (``name``, ``realname``, ``firstname``,
+  ``phone``, ``mobile``, ``last_login``, ``is_active``).
+* ``GET /User/{users_id}/UserEmail`` — returns the user's email
+  addresses (default one is preferred).
 
 Required permission: ``glpi:read``
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, ClassVar, Optional
@@ -28,65 +37,49 @@ from src.shared.security.context import AgentContext
 
 log = logging.getLogger(__name__)
 
-# GLPI searchOption field IDs for User (standard GLPI 10.x layout).
-_USER_FIELD_ID = 2
-_USER_FIELD_LOGIN = 1
-_USER_FIELD_REALNAME = 9
-_USER_FIELD_FIRSTNAME = 10
-_USER_FIELD_EMAIL = 34
-_USER_FIELD_PHONE = 6
-_USER_FIELD_MOBILE = 11
-_USER_FIELD_LAST_LOGIN = 30
-_USER_FIELD_IS_ACTIVE = 8
-_USER_FIELD_GROUP = 13  # Group (via Group_User)
-
 # searchOption field IDs for Group used to discover sub-groups by completename.
 _GROUP_FIELD_ID = 2
 _GROUP_FIELD_COMPLETENAME = 16
 _GROUP_FIELD_NAME = 1
 
-_USER_FORCEDISPLAY = [
-    _USER_FIELD_ID,
-    _USER_FIELD_LOGIN,
-    _USER_FIELD_REALNAME,
-    _USER_FIELD_FIRSTNAME,
-    _USER_FIELD_EMAIL,
-    _USER_FIELD_PHONE,
-    _USER_FIELD_MOBILE,
-    _USER_FIELD_LAST_LOGIN,
-    _USER_FIELD_IS_ACTIVE,
-]
-
-# Map raw search row keys (always strings on GLPI) to friendly attribute names.
-_USER_FIELD_LABELS: dict[int, str] = {
-    _USER_FIELD_ID: "id",
-    _USER_FIELD_LOGIN: "login",
-    _USER_FIELD_REALNAME: "realname",
-    _USER_FIELD_FIRSTNAME: "firstname",
-    _USER_FIELD_EMAIL: "email",
-    _USER_FIELD_PHONE: "phone",
-    _USER_FIELD_MOBILE: "mobile",
-    _USER_FIELD_LAST_LOGIN: "last_login",
-    _USER_FIELD_IS_ACTIVE: "is_active",
-}
-
 _MAX_MEMBERS_HARD_LIMIT = 200
+# Cap concurrent per-user GETs to avoid hammering GLPI.
+_USER_FETCH_CONCURRENCY = 8
+# Max members to enumerate from Group_User per group (before client-side trim).
+_GROUP_USER_RANGE = "0-499"
 
 
-def _normalise_user_row(row: dict) -> dict[str, Any]:
-    """Map a GLPI search row (keys are field IDs as strings) to a flat dict."""
-    out: dict[str, Any] = {}
-    for fid, label in _USER_FIELD_LABELS.items():
-        # GLPI may return either int keys or string keys — try both.
-        out[label] = row.get(str(fid), row.get(fid))
-    # Build a friendly display_name from realname / firstname when available.
-    realname = (out.get("realname") or "").strip()
-    firstname = (out.get("firstname") or "").strip()
+def _coerce_int(value: Any) -> Optional[int]:
+    """Best-effort conversion to int (GLPI often returns numeric fields as strings)."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_member(item: dict, email: Optional[str], fallback_id: int) -> dict[str, Any]:
+    """Map a GLPI ``User`` getItem response to the tool's flat output shape."""
+    realname = (item.get("realname") or "").strip()
+    firstname = (item.get("firstname") or "").strip()
+    login = item.get("name")
     if firstname or realname:
-        out["display_name"] = f"{firstname} {realname}".strip()
+        display_name = f"{firstname} {realname}".strip()
     else:
-        out["display_name"] = out.get("login")
-    return out
+        display_name = login
+    return {
+        "id": _coerce_int(item.get("id")) or fallback_id,
+        "login": login,
+        "realname": realname or None,
+        "firstname": firstname or None,
+        "email": email,
+        "phone": item.get("phone") or None,
+        "mobile": item.get("mobile") or None,
+        "last_login": item.get("last_login") or None,
+        "is_active": _coerce_int(item.get("is_active")),
+        "display_name": display_name,
+    }
 
 
 class GlpiGetGroupMembersTool(BaseTool):
@@ -111,10 +104,13 @@ class GlpiGetGroupMembersTool(BaseTool):
     **Why a dedicated tool**
 
     GLPI's ``getItem`` for ``Group`` does **not** include the member list,
-    and ``search/User`` only returns id + login by default — a separate
-    ``getItem`` is needed for each user. This tool issues a single
-    ``search/User`` with the right ``forcedisplay`` to fetch every relevant
-    field in one round-trip.
+    and ``search/User`` returns inconsistent values for joined columns
+    (email/realname/etc. are blank on several GLPI 10.x deployments).
+    This tool walks the canonical CRUD endpoints — ``Group/{id}/Group_User``
+    to obtain ``users_id`` for each direct member, then ``User/{users_id}``
+    in parallel for the user record (and ``UserEmail`` sub-resource for
+    the default email). Result fields are stable and don't depend on
+    ``searchOption`` IDs.
 
     **Sub-group expansion**
 
@@ -127,7 +123,7 @@ class GlpiGetGroupMembersTool(BaseTool):
     """
 
     name: ClassVar[str] = "glpi_get_group_members"
-    version: ClassVar[str] = "1.0.0"
+    version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = "List members of a GLPI group (with optional recursive sub-group expansion)"
     category: ClassVar[str] = "itsm"
     permissions: ClassVar[list[str]] = ["glpi:read"]
@@ -238,35 +234,46 @@ class GlpiGetGroupMembersTool(BaseTool):
                             group_id,
                         )
 
-                # Build OR group on field 13 (groups) for every group id we want to match.
-                criteria: list[dict] = []
-                for i, gid in enumerate(group_ids):
-                    entry: dict = {
-                        "field": _USER_FIELD_GROUP,
-                        "searchtype": "equals",
-                        "value": str(gid),
-                    }
-                    if i > 0:
-                        entry["link"] = "OR"
-                    criteria.append(entry)
+                # Collect distinct user IDs from Group_User across all target groups.
+                user_ids: list[int] = []
+                seen: set[int] = set()
+                for gid in group_ids:
+                    try:
+                        rows = await client.get_sub_items(
+                            "Group", gid, "Group_User",
+                            range=_GROUP_USER_RANGE,
+                            expand_dropdowns=False,
+                        )
+                    except GLPIError as exc:
+                        log.warning(
+                            "glpi_get_group_members: Group_User lookup failed for group %d: %s",
+                            gid, exc,
+                        )
+                        continue
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        uid = _coerce_int(row.get("users_id"))
+                        if uid and uid not in seen:
+                            seen.add(uid)
+                            user_ids.append(uid)
+
+                total_in_groups = len(user_ids)
+                # Trim before fetching details to honour max_results.
+                user_ids = user_ids[:max_results]
+
+                # Fetch user details (and emails) in parallel, capped by a semaphore.
+                sem = asyncio.Semaphore(_USER_FETCH_CONCURRENCY)
+
+                async def _fetch_one(uid: int) -> Optional[dict]:
+                    async with sem:
+                        return await _fetch_user_details(client, uid)
+
+                fetched = await asyncio.gather(*(_fetch_one(uid) for uid in user_ids))
+                members = [m for m in fetched if m is not None]
 
                 if active_only:
-                    criteria.append({
-                        "field": _USER_FIELD_IS_ACTIVE,
-                        "searchtype": "equals",
-                        "value": "1",
-                        "link": "AND",
-                    })
-
-                range_str = f"0-{max_results - 1}"
-                result = await client.search_items(
-                    "User",
-                    criteria,
-                    range=range_str,
-                    sort=_USER_FIELD_LOGIN,
-                    order="ASC",
-                    forcedisplay=_USER_FORCEDISPLAY,
-                )
+                    members = [m for m in members if (m.get("is_active") in (1, "1", True))]
 
         except GLPIError as exc:
             elapsed = int((time.monotonic() - t0) * 1000)
@@ -282,9 +289,8 @@ class GlpiGetGroupMembersTool(BaseTool):
 
         elapsed = int((time.monotonic() - t0) * 1000)
 
-        rows = result.get("data") or []
-        members = [_normalise_user_row(row) for row in rows]
-        total = result.get("totalcount", len(members))
+        # Sort by login for stable output.
+        members.sort(key=lambda m: (m.get("login") or "").lower())
 
         return self._success(
             data={
@@ -294,7 +300,7 @@ class GlpiGetGroupMembersTool(BaseTool):
                     "queried_group_ids": group_ids,
                     "parent_completename": parent_completename,
                     "active_only": active_only,
-                    "total_count": total,
+                    "total_count": total_in_groups,
                     "returned_count": len(members),
                 },
                 "members": members,
@@ -304,6 +310,46 @@ class GlpiGetGroupMembersTool(BaseTool):
 
 
 # ── Module-level helpers ───────────────────────────────────────────────────
+
+
+async def _fetch_user_details(client: GLPIClient, user_id: int) -> Optional[dict]:
+    """Fetch a single user (CRUD ``getItem``) plus their default email.
+
+    Returns the flat member dict or ``None`` when the user record cannot
+    be retrieved (logged as a warning).
+    """
+    try:
+        item = await client.get_item("User", user_id, expand_dropdowns=False)
+    except GLPIError as exc:
+        log.warning(
+            "glpi_get_group_members: getItem User %d failed: %s", user_id, exc
+        )
+        return None
+    if not isinstance(item, dict) or not item:
+        return None
+
+    email: Optional[str] = None
+    try:
+        emails = await client.get_sub_items(
+            "User", user_id, "UserEmail", range="0-9", expand_dropdowns=False,
+        )
+    except GLPIError as exc:
+        log.debug(
+            "glpi_get_group_members: UserEmail lookup failed for user %d: %s",
+            user_id, exc,
+        )
+        emails = []
+
+    if emails:
+        default = next(
+            (e for e in emails if isinstance(e, dict) and _coerce_int(e.get("is_default"))),
+            None,
+        )
+        chosen = default or (emails[0] if isinstance(emails[0], dict) else None)
+        if chosen:
+            email = chosen.get("email") or None
+
+    return _build_member(item, email, fallback_id=user_id)
 
 
 async def _fetch_group_completename(client: GLPIClient, group_id: int) -> Optional[str]:

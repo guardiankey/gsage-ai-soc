@@ -1,6 +1,8 @@
 # gSage SOC AI
 
-Project's site: [https://gsage.org/](https://gsage.org/)
+* Project's site: [https://gsage.org/](https://gsage.org/)
+* Overview video: [https://youtu.be/J4g0blz7PnE](https://youtu.be/J4g0blz7PnE)
+
 
 gSage SOC AI is an on-premise SOC assistant that combines AI agents, structured tooling, and human review workflows to help security teams monitor, investigate, triage, and respond faster -- *exceptional operational efficiency without losing security or control*.
 
