@@ -662,3 +662,60 @@ The datastore is now ready to be queried, updated, and extended. You can filter 
 - GitHub uses a custom HTTPServer header rather than exposing a standard Nginx or Apache banner.
 - HSTS preload is configured strongly.
 - The IP resolves to GitHub's CDN/edge infrastructure in the United States.
+
+## Endpoint Detection & Response
+
+### Example 13. Trellix EDR — File Hunt and Host Quarantine
+
+**Prompt**
+
+> A user reported a suspicious file with hash `44d88612fea8a8f36de82e1278abb02f`. Search every endpoint in our Trellix EDR for it, and if it appears on host `WS-FINANCE-12`, quarantine that host. Reason: confirmed EICAR test detection.
+
+**Workflow notes**
+
+- `trellix_edr_search_files` — `hash="44d88612fea8a8f36de82e1278abb02f"` (the tool auto-detects MD5 from the 32-char length). Always background, polls until done.
+- Inspect the returned `summary.top["HostInfo_hostname"]` to confirm `WS-FINANCE-12` is present.
+- `trellix_edr_quarantine_host` — `hostname="WS-FINANCE-12"`, `reason="confirmed EICAR test detection"`. Always background, **requires approval**.
+
+**Response**
+
+#### Trellix EDR — Hash hunt for `44d88612fea8a8f36de82e1278abb02f` (MD5)
+
+| Metric | Value |
+| --- | --- |
+| Query ID | `rts-7a3f-...` |
+| Total rows | 4 |
+| Affected hosts | 3 |
+| Truncated | No |
+
+**Top hosts**
+
+| Hostname | Hits |
+| --- | --- |
+| WS-FINANCE-12 | 2 |
+| WS-RH-04 | 1 |
+| LAPTOP-ANALYST-09 | 1 |
+
+**Top file paths**
+
+| Path | Hits |
+| --- | --- |
+| C:\Users\Public\Downloads\eicar.com | 3 |
+| C:\Temp\test_eicar.txt | 1 |
+
+The file was confirmed on `WS-FINANCE-12`. Submitting quarantine request now…
+
+#### Quarantine — `WS-FINANCE-12`
+
+| Field | Value |
+| --- | --- |
+| Action | quarantineHost |
+| Hostname | WS-FINANCE-12 |
+| IP | 10.20.4.112 |
+| System ID | `9b2f...c1` |
+| Reaction ID | `r-4521` |
+| Reason | confirmed EICAR test detection |
+| Status | submitted (pending approval) |
+
+The action requires approval; the approver will see hostname, IP, reason, and the hash that triggered the request. Once approved, Trellix will isolate the host and confirmation will return on the audit log. Want me to also pull the network flows from that host before isolation?
+
