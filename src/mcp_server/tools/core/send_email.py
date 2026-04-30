@@ -23,6 +23,7 @@ class SendEmailTool(_SendEmailBase):
     """
 
     name: ClassVar[str] = "send_email"
+    config_namespace: ClassVar[str] = "smtp_send"
     version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = (
         "Send an email via the configured SMTP server with optional "

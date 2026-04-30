@@ -40,6 +40,7 @@ class TrellixEdrGetHostQuarantineStatusTool(BaseTool):
     """
 
     name: ClassVar[str] = "trellix_edr_get_host_quarantine_status"
+    config_namespace: ClassVar[str] = "trellix_edr"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "Look up Trellix EDR hosts by hostname/IP and return their quarantine "

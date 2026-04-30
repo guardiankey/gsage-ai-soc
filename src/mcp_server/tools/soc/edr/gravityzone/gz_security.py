@@ -99,6 +99,7 @@ class GzSecurityTool(BaseTool):
     """
 
     name: ClassVar[str] = "gz_security"
+    config_namespace: ClassVar[str] = "gravityzone"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = "Read GravityZone security posture data: endpoint blocklist and PHASR policy recommendations"
     category: ClassVar[str] = "edr"

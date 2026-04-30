@@ -81,11 +81,11 @@ class TrellixEdrSearchProcessesTool(BaseTool):
     """
 
     name: ClassVar[str] = "trellix_edr_search_processes"
+    config_namespace: ClassVar[str] = "trellix_edr"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
-        "Hunt processes across Trellix EDR endpoints (Processes / ProcessHistory). "
-        "Default returns aggregated rows for fleet-wide hunting; set "
-        "include_host_info=True to break down by host (use with narrow filters)."
+        "Hunt processes across Trellix EDR endpoints (Processes / "
+        "ProcessHistory) — fleet-wide aggregation by default."
     )
     category: ClassVar[str] = "edr"
     permissions: ClassVar[list[str]] = ["edr:read"]

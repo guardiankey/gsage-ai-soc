@@ -123,6 +123,7 @@ class GlpiGetGroupMembersTool(BaseTool):
     """
 
     name: ClassVar[str] = "glpi_get_group_members"
+    config_namespace: ClassVar[str] = "glpi"
     version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = "List members of a GLPI group (with optional recursive sub-group expansion)"
     category: ClassVar[str] = "itsm"

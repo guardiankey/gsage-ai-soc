@@ -350,6 +350,17 @@ class BaseTool(ABC):
     config_defaults: ClassVar[dict] = {}
     requires_config: ClassVar[bool] = False
 
+    # Optional shared-config namespace.  When set, ``load_config`` and
+    # ``_load_env_defaults`` first read the row / env vars under the
+    # *namespace* identifier and then overlay the row / env vars under
+    # ``self.name``.  This lets a family of related tools (e.g. all
+    # ``trellix_edr_*``) share OAuth credentials and base URL while still
+    # allowing per-tool overrides.  Profiles are scoped per (tool_name,
+    # profile_id), so namespace and tool both honour the same profile_id
+    # selector.  ``None`` (default) → fall back to legacy single-row
+    # behaviour keyed by ``self.name``.
+    config_namespace: ClassVar[Optional[str]] = None
+
     # ── State (per-org, plain JSON, optional) ───────────────────────────────
     state_schema: ClassVar[Optional[dict]] = None
     state_defaults: ClassVar[dict] = {}
@@ -811,6 +822,17 @@ class BaseTool(ABC):
 
     # ── Config management ────────────────────────────────────────────────────
 
+    def _config_lookup_keys(self) -> list[str]:
+        """Tool-name keys to read config from, ordered base→override.
+
+        When ``config_namespace`` is set and differs from ``self.name``,
+        the namespace row is consulted first and the per-tool row overlays
+        on top.  Otherwise only ``self.name`` is used.
+        """
+        if self.config_namespace and self.config_namespace != self.name:
+            return [self.config_namespace, self.name]
+        return [self.name]
+
     async def load_config(
         self,
         agent_context: AgentContext,
@@ -825,6 +847,10 @@ class BaseTool(ABC):
         1. Check Redis cache (TTL 5min)
         2. Cache miss → query DB, decrypt, validate, cache.
         3. Returns None if no config exists (tool uses config_defaults).
+
+        When :attr:`config_namespace` is set, rows for both the namespace
+        and ``self.name`` are loaded and merged (shallow), with per-tool
+        values taking precedence.
         """
         cache_key = TOOL_CONFIG_CACHE_KEY.format(
             org_id=agent_context.org_id,
@@ -836,24 +862,38 @@ class BaseTool(ABC):
         if cached_raw is not None:
             return json.loads(cached_raw)
 
-        # Cache miss — query DB
+        # Cache miss — query DB.  When a namespace is declared we fetch
+        # both rows in one query and merge in lookup order.
+        lookup_keys = self._config_lookup_keys()
         stmt = select(GSageToolConfig).where(
             GSageToolConfig.org_id == agent_context.org_id,
-            GSageToolConfig.tool_name == self.name,
+            GSageToolConfig.tool_name.in_(lookup_keys),
             GSageToolConfig.profile_id == profile_id,
         )
         result = await session.execute(stmt)
-        row = result.scalar_one_or_none()
+        rows = {row.tool_name: row for row in result.scalars().all()}
 
-        if row is None:
+        if not rows:
             return None  # Caller uses config_defaults
 
-        config = row.config  # Property decrypts on access
+        # Merge in lookup order (base first, override last).  ``row.config``
+        # decrypts on access.
+        merged: dict = {}
+        for key in lookup_keys:
+            row = rows.get(key)
+            if row is None:
+                continue
+            row_config = row.config
+            if isinstance(row_config, dict):
+                merged.update(row_config)
+
+        if not merged:
+            return None
 
         # Validate against schema (basic required fields check)
         if self.config_schema:
             required = self.config_schema.get("required", [])
-            missing = [f for f in required if f not in config]
+            missing = [f for f in required if f not in merged]
             if missing:
                 logger.error(
                     "Tool config for %s/%s (profile=%s) missing required fields: %s",
@@ -861,10 +901,10 @@ class BaseTool(ABC):
                 )
                 return None
 
-        # Cache the decrypted config
-        await redis_client.setex(cache_key, TOOL_CONFIG_CACHE_TTL, json.dumps(config))
+        # Cache the decrypted, merged config
+        await redis_client.setex(cache_key, TOOL_CONFIG_CACHE_TTL, json.dumps(merged))
 
-        return config
+        return merged
 
     # ── Environment defaults ─────────────────────────────────────────────────
 
@@ -873,6 +913,12 @@ class BaseTool(ABC):
 
         Convention: ``TOOL_{TOOL_NAME}__{FIELD_NAME}``
         Example: ``TOOL_PORT_CHECK__CONNECT_TIMEOUT_MS=3000``
+
+        When :attr:`config_namespace` is set, env vars under the namespace
+        prefix are read first and per-tool env vars overlay on top, e.g.::
+
+            TOOL_TRELLIX_EDR__CLIENT_ID=...           # shared across family
+            TOOL_TRELLIX_EDR_SEARCH_FILES__MAX_ROWS=50  # tool-specific override
 
         These values sit between ``config_defaults`` (code) and any per-org
         DB row in the resolution chain::
@@ -885,13 +931,14 @@ class BaseTool(ABC):
         when per-org isolation is required.
         """
         if not hasattr(self, "_env_defaults_cache"):
-            prefix = f"TOOL_{self.name.upper()}__"
             result: dict = {}
-            for key, raw_value in os.environ.items():
-                if not key.startswith(prefix):
-                    continue
-                field = key[len(prefix):].lower()
-                result[field] = self._coerce_env_value(field, raw_value)
+            for lookup_name in self._config_lookup_keys():
+                prefix = f"TOOL_{lookup_name.upper()}__"
+                for key, raw_value in os.environ.items():
+                    if not key.startswith(prefix):
+                        continue
+                    field = key[len(prefix):].lower()
+                    result[field] = self._coerce_env_value(field, raw_value)
             self._env_defaults_cache = result
         return self._env_defaults_cache
 
@@ -1118,20 +1165,42 @@ class BaseTool(ABC):
 
         Each dict has ``profile_id`` and ``description`` (may be None).
         Only meaningful when ``supports_multiple_configs=True``.
+
+        When :attr:`config_namespace` is set, profiles from both the
+        namespace and ``self.name`` are returned, deduped by profile_id.
+        Per-tool description (when present) takes precedence over the
+        namespace description.
         """
+        lookup_keys = self._config_lookup_keys()
         stmt = (
-            select(GSageToolConfig.profile_id, GSageToolConfig.description)
+            select(
+                GSageToolConfig.tool_name,
+                GSageToolConfig.profile_id,
+                GSageToolConfig.description,
+            )
             .where(
                 GSageToolConfig.org_id == org_id,
-                GSageToolConfig.tool_name == self.name,
+                GSageToolConfig.tool_name.in_(lookup_keys),
             )
             .order_by(GSageToolConfig.profile_id)
         )
         result = await session.execute(stmt)
-        return [
-            {"profile_id": row.profile_id, "description": row.description}
-            for row in result.all()
-        ]
+
+        # Build dedup map: per-tool row overrides namespace row.  We
+        # iterate in lookup order (namespace first, name last) so the
+        # later assignment wins.
+        priority = {key: idx for idx, key in enumerate(lookup_keys)}
+        merged: dict[str, dict] = {}
+        rows = list(result.all())
+        rows.sort(key=lambda r: priority.get(r.tool_name, 0))
+        for row in rows:
+            existing = merged.get(row.profile_id)
+            description = row.description or (existing or {}).get("description")
+            merged[row.profile_id] = {
+                "profile_id": row.profile_id,
+                "description": description,
+            }
+        return sorted(merged.values(), key=lambda p: p["profile_id"])
 
     # ── File helpers ─────────────────────────────────────────────────────
 

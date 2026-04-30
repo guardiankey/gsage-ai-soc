@@ -43,6 +43,7 @@ class TrellixEdrSearchTool(BaseTool):
     """
 
     name: ClassVar[str] = "trellix_edr_search"
+    config_namespace: ClassVar[str] = "trellix_edr"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "Hunt across endpoints with Trellix EDR realtime searches "

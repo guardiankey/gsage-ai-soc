@@ -195,8 +195,10 @@ async def continue_after_bg_task(
     if task is None:
         raise ValueError(f"Background task {task_id} not found")
 
-    if task.status != BackgroundTaskStatus.COMPLETED:
-        raise ValueError(f"Background task {task_id} is not COMPLETED (status={task.status})")
+    if task.status not in (BackgroundTaskStatus.COMPLETED, BackgroundTaskStatus.FAILED):
+        raise ValueError(
+            f"Background task {task_id} is not in a terminal state (status={task.status})"
+        )
 
     # Resolve the TenantSession
     session_result = await db.execute(

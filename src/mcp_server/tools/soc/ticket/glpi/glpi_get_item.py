@@ -145,6 +145,7 @@ class GlpiGetItemTool(BaseTool):
     """
 
     name: ClassVar[str] = "glpi_get_item"
+    config_namespace: ClassVar[str] = "glpi"
     version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = "Retrieve a single GLPI item (ticket, asset, user) by its numeric ID"
     category: ClassVar[str] = "itsm"

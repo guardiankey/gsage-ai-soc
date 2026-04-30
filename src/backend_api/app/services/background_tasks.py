@@ -23,11 +23,14 @@ async def get_pending_bg_notifications(
     gsage_session_id: uuid.UUID,
     db: AsyncSession,
 ) -> list[GSageBackgroundTask]:
-    """Return completed, un-notified background tasks for the given session."""
+    """Return finished (completed or failed), un-notified background tasks for the session."""
     result = await db.execute(
         select(GSageBackgroundTask).where(
             GSageBackgroundTask.gsage_session_id == gsage_session_id,
-            GSageBackgroundTask.status == BackgroundTaskStatus.COMPLETED,
+            GSageBackgroundTask.status.in_([
+                BackgroundTaskStatus.COMPLETED,
+                BackgroundTaskStatus.FAILED,
+            ]),
             GSageBackgroundTask.notified.is_(False),
         ).order_by(GSageBackgroundTask.completed_at.asc())
     )

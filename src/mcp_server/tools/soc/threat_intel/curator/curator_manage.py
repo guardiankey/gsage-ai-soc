@@ -76,6 +76,7 @@ class CuratorManageTool(BaseTool):
     """
 
     name: ClassVar[str] = "curator_manage"
+    config_namespace: ClassVar[str] = "curator"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = "Add, remove, and manage entries in Curator reputation lists and collections"
     category: ClassVar[str] = "threat_intel"

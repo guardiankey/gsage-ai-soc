@@ -43,6 +43,7 @@ class AdReadTool(BaseTool):
     """
 
     name: ClassVar[str] = "ad_read"
+    config_namespace: ClassVar[str] = "active_directory"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "Read-only Active Directory queries: list/search users, groups, "

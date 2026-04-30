@@ -41,6 +41,7 @@ class TrellixEdrQuarantineHostTool(BaseTool):
     """
 
     name: ClassVar[str] = "trellix_edr_quarantine_host"
+    config_namespace: ClassVar[str] = "trellix_edr"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "Quarantine or release a host on Trellix EDR by hostname/IP "

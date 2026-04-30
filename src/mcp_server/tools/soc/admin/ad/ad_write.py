@@ -79,6 +79,7 @@ class AdWriteTool(BaseTool):
     """
 
     name: ClassVar[str] = "ad_write"
+    config_namespace: ClassVar[str] = "active_directory"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "Active Directory write operations: disable/enable/unlock users, "

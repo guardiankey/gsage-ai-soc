@@ -36,6 +36,7 @@ class TrellixEdrSearchFilesTool(BaseTool):
     """
 
     name: ClassVar[str] = "trellix_edr_search_files"
+    config_namespace: ClassVar[str] = "trellix_edr"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "Search files across Trellix EDR endpoints by name and/or hash "

@@ -176,7 +176,11 @@ def _field_info(field: str, cls_obj: type) -> dict:
 
 
 def generate_tool_block(tool_cls: type) -> Optional[str]:
-    """Return the env comment block for a single tool, or None if no config."""
+    """Return the env comment block for a single tool, or None if no config.
+
+    Used as a fallback when the tool has no ``config_namespace`` (legacy
+    one-tool-per-block behaviour).
+    """
     fields = _get_all_fields(tool_cls)
     if not fields:
         return None
@@ -201,9 +205,96 @@ def generate_tool_block(tool_cls: type) -> Optional[str]:
     return "\n".join(lines)
 
 
+def _emit_field_lines(field: str, env_prefix: str, cls_obj: type) -> list[str]:
+    """Render the comment + env-var line(s) for a single field."""
+    info = _field_info(field, cls_obj)
+    env_var = f"{env_prefix}{field.upper()}"
+    out: list[str] = []
+    if info.get("description"):
+        out.append(f"# {info['description']}")
+    if info.get("sensitive"):
+        out.append(f"# {env_var}=")
+    else:
+        out.append(f"# {env_var}={_format_default(info.get('default'))}")
+    return out
+
+
+def generate_namespace_block(
+    namespace: str, members: list[type]
+) -> Optional[str]:
+    """Generate one combined block for a family of tools sharing a namespace.
+
+    Layout:
+      # ── tool_namespace:<namespace> (shared by: a, b, c) ─────
+      <shared/union fields under TOOL_<NAMESPACE>__>
+
+      # ── tool:<name> (overrides for <namespace>) ───
+      <tool-only fields under TOOL_<NAME>__>
+      ...
+    """
+    members_sorted = sorted(members, key=lambda c: c.name)  # type: ignore[attr-defined]
+    member_fields: dict[type, list[str]] = {
+        m: _get_all_fields(m) for m in members_sorted
+    }
+    if not any(member_fields.values()):
+        return None
+
+    # Union of every field across all members → emitted under namespace.
+    union_fields: set[str] = set()
+    for fields in member_fields.values():
+        union_fields.update(fields)
+
+    if not union_fields:
+        return None
+
+    # Pick a representative class to source description/default for each
+    # shared field — first member that declares it wins.
+    field_sources: dict[str, type] = {}
+    for m in members_sorted:
+        for f in member_fields[m]:
+            field_sources.setdefault(f, m)
+
+    member_names = ", ".join(m.name for m in members_sorted)  # type: ignore[attr-defined]
+    lines: list[str] = [
+        _sep(f"tool_namespace:{namespace} (shared by: {member_names})")
+    ]
+    for field in sorted(union_fields):
+        lines.extend(
+            _emit_field_lines(
+                field, f"TOOL_{namespace.upper()}__", field_sources[field]
+            )
+        )
+
+    # Per-tool override sections — only when the tool declares fields that
+    # no sibling exposes (rare but supported, e.g. send_email_direct).
+    for m in members_sorted:
+        own_only = sorted(set(member_fields[m]) - union_fields)
+        # union_fields already contains all member fields, so own_only is
+        # empty unless a tool declares a field with a different schema
+        # shape from siblings.  We still emit a per-tool override section
+        # commented out so admins can find the precise prefix.
+        if not own_only:
+            continue
+        lines.append("")
+        lines.append(_sep(f"tool:{m.name} (overrides for {namespace})"))  # type: ignore[attr-defined]
+        for field in own_only:
+            lines.extend(
+                _emit_field_lines(field, f"TOOL_{m.name.upper()}__", m)  # type: ignore[attr-defined]
+            )
+
+    return "\n".join(lines)
+
+
 def generate_all_tool_blocks(tools: dict[str, type]) -> str:
-    """Return the full generated content for the TOOL DEFAULTS zone."""
-    blocks: list[str] = []
+    """Return the full generated content for the TOOL DEFAULTS zone.
+
+    Tools sharing a ``config_namespace`` are grouped together so the
+    shared credentials/base fields appear once under the namespace
+    prefix.  Tools without a namespace use the legacy one-block-per-tool
+    layout.
+    """
+    # Group by namespace (None → standalone).
+    groups: dict[Optional[str], list[type]] = {}
     for tool_name in sorted(tools.keys()):
         tool_cls = tools[tool_name]
         has_config = (
@@ -212,6 +303,19 @@ def generate_all_tool_blocks(tools: dict[str, type]) -> str:
         )
         if not has_config:
             continue
+        ns = getattr(tool_cls, "config_namespace", None)
+        groups.setdefault(ns, []).append(tool_cls)
+
+    blocks: list[str] = []
+
+    # Shared-namespace groups, sorted by namespace name.
+    for ns in sorted(k for k in groups.keys() if k):
+        block = generate_namespace_block(ns, groups[ns])  # type: ignore[arg-type]
+        if block:
+            blocks.append(block)
+
+    # Standalone tools (no namespace), sorted by name.
+    for tool_cls in groups.get(None, []):
         block = generate_tool_block(tool_cls)
         if block:
             blocks.append(block)

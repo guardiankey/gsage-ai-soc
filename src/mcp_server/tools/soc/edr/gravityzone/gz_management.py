@@ -90,6 +90,7 @@ class GzManagementTool(BaseTool):
     """
 
     name: ClassVar[str] = "gz_management"
+    config_namespace: ClassVar[str] = "gravityzone"
     version: ClassVar[str] = "2.0.0"
     summary: ClassVar[str] = "Execute write operations in GravityZone: isolate/restore endpoints, update blocklist entries"
     category: ClassVar[str] = "edr"

@@ -29,6 +29,7 @@ class SendEmailDirectTool(_SendEmailBase):
     """
 
     name: ClassVar[str] = "send_email_direct"
+    config_namespace: ClassVar[str] = "smtp_send"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "Send an email immediately, without human approval.  Restricted "

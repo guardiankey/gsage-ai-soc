@@ -68,6 +68,7 @@ class GlpiUpdateTicketTool(BaseTool):
     """
 
     name: ClassVar[str] = "glpi_update_ticket"
+    config_namespace: ClassVar[str] = "glpi"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = "Update an existing GLPI ticket: add notes, change status, or assign users"
     category: ClassVar[str] = "itsm"

@@ -55,6 +55,7 @@ class GlpiCreateTicketTool(BaseTool):
     """
 
     name: ClassVar[str] = "glpi_create_ticket"
+    config_namespace: ClassVar[str] = "glpi"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = "Create a new GLPI Ticket (Incident or Service Request) with title, description, and priority"
     category: ClassVar[str] = "itsm"

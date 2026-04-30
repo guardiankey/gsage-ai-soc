@@ -77,6 +77,7 @@ class GzEndpointsTool(BaseTool):
     """
 
     name: ClassVar[str] = "gz_endpoints"
+    config_namespace: ClassVar[str] = "gravityzone"
     version: ClassVar[str] = "2.0.0"
     summary: ClassVar[str] = "Query GravityZone network inventory for endpoint details, managed devices, and installation info"
     category: ClassVar[str] = "edr"

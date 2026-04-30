@@ -63,6 +63,7 @@ class CuratorListsTool(BaseTool):
     """
 
     name: ClassVar[str] = "curator_lists"
+    config_namespace: ClassVar[str] = "curator"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = "Read reputation list data (IPs, domains, hashes) from the Curator microservice"
     category: ClassVar[str] = "threat_intel"

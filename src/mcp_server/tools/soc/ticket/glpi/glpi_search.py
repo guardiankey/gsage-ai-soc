@@ -239,6 +239,7 @@ class GlpiSearchTool(BaseTool):
     """
 
     name: ClassVar[str] = "glpi_search"
+    config_namespace: ClassVar[str] = "glpi"
     version: ClassVar[str] = "1.3.0"
     summary: ClassVar[str] = "Search any GLPI itemtype (tickets, assets, users) using the GLPI search engine"
     category: ClassVar[str] = "itsm"

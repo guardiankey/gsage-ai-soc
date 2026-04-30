@@ -31,6 +31,7 @@ class TrellixEdrSearchNetworkTool(BaseTool):
     """
 
     name: ClassVar[str] = "trellix_edr_search_network"
+    config_namespace: ClassVar[str] = "trellix_edr"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "Search network flows on Trellix EDR endpoints by remote IP/port, "
