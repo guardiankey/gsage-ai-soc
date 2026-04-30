@@ -466,12 +466,20 @@ async def send_email(
 
     # Build an unverified SSL context when the admin opted out of cert
     # validation (e.g. internal relays using self-signed certificates).
+    # Decide TLS mode based on port: 465 = implicit TLS (use_tls), all
+    # other ports (25/587) use STARTTLS when TLS was requested.  Office365
+    # / Gmail / most MTAs on 587 reply with a plaintext SMTP banner, so an
+    # implicit TLS handshake fails with "wrong version number".
+    implicit_tls = bool(cfg.use_tls) and int(cfg.port) == 465
+    starttls = bool(cfg.use_tls) and not implicit_tls
+
     send_kwargs: dict = {
         "hostname": cfg.host,
         "port": cfg.port,
         "username": cfg.username or None,
         "password": cfg.password or None,
-        "use_tls": cfg.use_tls,
+        "use_tls": implicit_tls,
+        "start_tls": starttls,
         "recipients": all_envelope_recipients,
         "validate_certs": cfg.validate_certs,
     }
