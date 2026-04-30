@@ -40,6 +40,13 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # =============================================================================
 # Stage 2 — base: minimal runtime with Python deps and appuser
+#
+# IMPORTANT: this stage MUST NOT copy application source code. All `COPY src/`
+# and similar steps are performed at the END of each runtime-* stage, AFTER
+# the heavy `apt-get install` layers. This keeps the apt caches valid across
+# rebuilds triggered by source code changes — otherwise editing any file under
+# src/ would invalidate `base` and force tshark/texlive/chromium/nodejs to be
+# reinstalled in every downstream stage.
 # =============================================================================
 FROM python:3.12-slim AS base
 
@@ -56,13 +63,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd -r appuser && useradd -r -g appuser -s /sbin/nologin appuser \
     && mkdir -p /data/ingest \
     && chown -R appuser:appuser /data
-
-# Application source. In dev compose these paths are overridden by bind
-# mounts, so the COPY'd files are only used for standalone production builds.
-COPY src/ /app/src/
-COPY requirements.txt /app/requirements.txt
-COPY alembic.ini /app/alembic.ini
-COPY scripts/ /app/scripts/
 
 # ── Optional: Microsoft ODBC Driver 18 for SQL Server ────────────────────────
 # Uncomment the block below to enable SQL Server connectivity (msodbcsql18).
@@ -81,6 +81,14 @@ COPY scripts/ /app/scripts/
 # Stage 3a — runtime-minimal: backend_api, email_worker
 # =============================================================================
 FROM base AS runtime-minimal
+
+# Application source — copied LAST so source-only changes don't bust the
+# layer cache of the (much heavier) apt installs in sibling stages.
+# In dev compose these paths are overridden by bind mounts.
+COPY src/ /app/src/
+COPY requirements.txt /app/requirements.txt
+COPY alembic.ini /app/alembic.ini
+COPY scripts/ /app/scripts/
 
 USER appuser
 EXPOSE 8000
@@ -103,6 +111,12 @@ RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
         texlive-latex-base texlive-latex-recommended texlive-latex-extra \
         texlive-base texlive-fonts-recommended lmodern fonts-dejavu \
     && rm -rf /var/lib/apt/lists/*
+
+# Application source — copied LAST (see runtime-minimal note).
+COPY src/ /app/src/
+COPY requirements.txt /app/requirements.txt
+COPY alembic.ini /app/alembic.ini
+COPY scripts/ /app/scripts/
 
 USER appuser
 # Default command; override per service/queue in docker-compose.
@@ -134,6 +148,12 @@ RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
 
 ENV PUPPETEER_SKIP_DOWNLOAD=1 \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Application source — copied LAST (see runtime-minimal note).
+COPY src/ /app/src/
+COPY requirements.txt /app/requirements.txt
+COPY alembic.ini /app/alembic.ini
+COPY scripts/ /app/scripts/
 
 USER appuser
 EXPOSE 8001

@@ -15,6 +15,7 @@ Tools:
     trellix_edr_search                       — Generic v1/v2 search dispatcher.
     trellix_edr_search_files                 — File hunt by name/hash + host.
     trellix_edr_search_network               — Network flow hunt.
+    trellix_edr_search_processes             — Process hunt (Processes/ProcessHistory).
     trellix_edr_quarantine_host              — Host (un)quarantine by hostname/IP.
     trellix_edr_get_host_quarantine_status   — Read quarantine state per host.
 

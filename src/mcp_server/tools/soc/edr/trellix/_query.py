@@ -375,6 +375,166 @@ def build_network_payload(
     }
 
 
+# Reputation buckets considered "suspicious" (lower scores in Trellix scale).
+# See Processes.process_reputation field documentation.
+SUSPICIOUS_REPUTATIONS: tuple[str, ...] = (
+    "Known Malicious",
+    "Most Likely Malicious",
+    "Might Be Malicious",
+)
+
+PROCESS_EXECUTION_MODES: tuple[str, ...] = (
+    "Interactive",
+    "Unknown",
+    "File",
+    "Commandline",
+    "Mar_child",
+)
+
+ProcessCollector = Literal["Processes", "ProcessHistory"]
+
+
+def build_processes_payload(
+    *,
+    collector: ProcessCollector = "Processes",
+    process_name_contains: Optional[str] = None,
+    process_name_equals: Optional[str] = None,
+    cmdline_contains: Optional[str] = None,
+    parent_cmdline_contains: Optional[str] = None,
+    parent_name_equals: Optional[str] = None,
+    parent_name_not_equals: Optional[str] = None,
+    user_equals: Optional[str] = None,
+    hash_type: Optional[HashType] = None,
+    hash_value: Optional[str] = None,
+    imagepath_contains: Optional[str] = None,
+    execution_mode: Optional[str] = None,
+    suspicious_reputation_only: bool = False,
+    started_after: Optional[str] = None,
+    started_before: Optional[str] = None,
+    hostname_contains: Optional[str] = None,
+    hostname_equals: Optional[str] = None,
+    include_host_info: bool = False,
+    include_powershell_content: bool = False,
+) -> dict:
+    """Build a v1 search payload for the Processes / ProcessHistory collector.
+
+    When ``include_host_info`` is False (default), the projection contains
+    only the process collector — Trellix returns one aggregated row per
+    distinct process tuple, ideal for fleet-wide hunting (e.g. "list every
+    SHA1 of running processes in the org").  When True, ``HostInfo`` is
+    added to the projection and rows are duplicated per host, which can
+    exceed API limits if no narrow filter is applied.
+
+    All filters are optional — an empty payload is allowed and returns the
+    full inventory aggregated by process attributes (intended for hunting).
+
+    Note: ``parent_cmdline`` is only available on the ``Processes`` collector,
+    not on ``ProcessHistory``.  Passing ``parent_cmdline_contains`` with
+    ``collector='ProcessHistory'`` is the caller's responsibility.
+    """
+    conditions: list[dict] = []
+
+    def _add(output: str, op: str, value: Any) -> None:
+        conditions.append({"name": collector, "output": output, "op": op, "value": value})
+
+    if process_name_contains:
+        _add("name", "CONTAINS", process_name_contains)
+    if process_name_equals:
+        _add("name", "EQUALS", process_name_equals)
+    if cmdline_contains:
+        _add("cmdline", "CONTAINS", cmdline_contains)
+    if parent_cmdline_contains and collector == "Processes":
+        _add("parent_cmdline", "CONTAINS", parent_cmdline_contains)
+    if parent_name_equals:
+        _add("parentname", "EQUALS", parent_name_equals)
+    if parent_name_not_equals:
+        _add("parentname", "NOT_EQUALS", parent_name_not_equals)
+    if user_equals:
+        _add("user", "EQUALS", user_equals)
+    if hash_type and hash_value:
+        _add(hash_type, "EQUALS", hash_value)
+    if imagepath_contains:
+        _add("imagepath", "CONTAINS", imagepath_contains)
+    if execution_mode:
+        _add("execution_mode", "EQUALS", execution_mode)
+    if started_after:
+        # Trellix v1 supports GREATER_EQUAL on timestamp fields (ISO 8601).
+        _add("started_at", "GREATER_EQUAL", started_after)
+    if started_before:
+        _add("started_at", "LESS_EQUAL", started_before)
+    if suspicious_reputation_only:
+        # Reputation is a single-valued string; OR it across the suspicious
+        # buckets within the same AND group is not expressible — the caller
+        # gets an OR-block of AND-conditions instead (see condition assembly
+        # below).  We attach a marker handled by the assembler.
+        pass
+
+    if hostname_contains:
+        conditions.append(
+            {"name": "HostInfo", "output": "hostname", "op": "CONTAINS", "value": hostname_contains}
+        )
+    if hostname_equals:
+        conditions.append(
+            {"name": "HostInfo", "output": "hostname", "op": "EQUALS", "value": hostname_equals}
+        )
+
+    base_outputs = [
+        "name",
+        "id",
+        "cmdline",
+        "parentname",
+        "parentid",
+        "parentimagepath",
+        "imagepath",
+        "user",
+        "user_id",
+        "md5",
+        "sha1",
+        "sha256",
+        "process_reputation",
+        "file_reputation",
+        "execution_mode",
+        "started_at",
+        "finished_at",
+        "size",
+        "threadcount",
+    ]
+    if collector == "Processes":
+        base_outputs.append("parent_cmdline")
+    if collector == "ProcessHistory":
+        base_outputs.append("status")
+    if include_powershell_content:
+        base_outputs.extend(["content", "content_size", "content_file"])
+
+    projections: list[dict] = []
+    if include_host_info:
+        projections.append(
+            {"name": "HostInfo", "outputs": ["hostname", "ip_address", "os_name"]}
+        )
+    projections.append({"name": collector, "outputs": base_outputs})
+
+    # Build the top-level condition.  When suspicious_reputation_only is set,
+    # we OR together one AND-block per reputation bucket so each block has
+    # the same (AND) filters plus a different reputation EQUALS condition.
+    if suspicious_reputation_only:
+        and_blocks: list[dict] = []
+        for rep in SUSPICIOUS_REPUTATIONS:
+            block = list(conditions) + [
+                {
+                    "name": collector,
+                    "output": "process_reputation",
+                    "op": "EQUALS",
+                    "value": rep,
+                }
+            ]
+            and_blocks.append({"and": block})
+        condition: dict = {"or": and_blocks}
+    else:
+        condition = {"or": [{"and": conditions}]} if conditions else {"or": [{"and": []}]}
+
+    return {"projections": projections, "condition": condition}
+
+
 def build_host_locator_payload(
     *,
     hostname: Optional[str] = None,
