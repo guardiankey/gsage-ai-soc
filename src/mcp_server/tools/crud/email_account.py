@@ -34,6 +34,8 @@ _SAFE_UPDATE_FIELDS = {
     "imap_host", "imap_port", "imap_use_tls", "imap_username",
     "imap_folder", "imap_idle_supported",
     "smtp_host", "smtp_port", "smtp_use_tls", "smtp_username",
+    "auth_method", "oauth_tenant_id", "oauth_client_id",
+    "oauth_token_endpoint", "oauth_scope",
 }
 
 _REQUIRED_CREATE_FIELDS = {
@@ -60,6 +62,11 @@ def _serialize(acc: GSageEmailAccount) -> dict:
         "smtp_port": acc.smtp_port,
         "smtp_use_tls": acc.smtp_use_tls,
         "smtp_username": acc.smtp_username,
+        "auth_method": acc.auth_method,
+        "oauth_tenant_id": acc.oauth_tenant_id,
+        "oauth_client_id": acc.oauth_client_id,
+        "oauth_token_endpoint": acc.oauth_token_endpoint,
+        "oauth_scope": acc.oauth_scope,
         "created_at": acc.created_at.isoformat(),
     }
 
@@ -119,6 +126,15 @@ class EmailAccountCrudTool(CrudBaseTool):
             "smtp_port": {"type": "integer", "description": "[create/update] SMTP port (default 587)."},
             "smtp_use_tls": {"type": "boolean", "description": "[create/update] Use TLS for SMTP."},
             "smtp_username": {"type": "string", "description": "[create/update] SMTP username."},
+            "auth_method": {
+                "type": "string",
+                "enum": ["basic", "oauth2"],
+                "description": "[create/update] 'basic' (LOGIN with password) or 'oauth2' (Microsoft 365 client-credentials XOAUTH2).",
+            },
+            "oauth_tenant_id": {"type": "string", "description": "[create/update] (oauth2) Azure AD tenant ID."},
+            "oauth_client_id": {"type": "string", "description": "[create/update] (oauth2) Azure AD app client_id."},
+            "oauth_token_endpoint": {"type": "string", "description": "[create/update] (oauth2) Override token endpoint URL (defaults to MS standard)."},
+            "oauth_scope": {"type": "string", "description": "[create/update] (oauth2) Override scope (default: https://outlook.office365.com/.default)."},
         },
     }
 

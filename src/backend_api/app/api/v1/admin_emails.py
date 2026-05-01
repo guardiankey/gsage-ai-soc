@@ -63,6 +63,12 @@ def _account_to_out(acc: GSageEmailAccount) -> EmailAccountOut:
         unknown_sender_folder=acc.unknown_sender_folder,
         max_email_size_bytes=acc.max_email_size_bytes,
         polling_interval_seconds=acc.polling_interval_seconds,
+        auth_method=acc.auth_method,
+        oauth_tenant_id=acc.oauth_tenant_id,
+        oauth_client_id=acc.oauth_client_id,
+        oauth_token_endpoint=acc.oauth_token_endpoint,
+        oauth_scope=acc.oauth_scope,
+        oauth_client_secret_set=bool(acc._oauth_client_secret_encrypted),
         created_at=acc.created_at,
         updated_at=acc.updated_at,
     )
@@ -122,10 +128,18 @@ async def create_email_account(
         unknown_sender_folder=payload.unknown_sender_folder,
         max_email_size_bytes=payload.max_email_size_bytes,
         polling_interval_seconds=payload.polling_interval_seconds,
+        auth_method=payload.auth_method,
+        oauth_tenant_id=payload.oauth_tenant_id,
+        oauth_client_id=payload.oauth_client_id,
+        oauth_token_endpoint=payload.oauth_token_endpoint,
+        oauth_scope=payload.oauth_scope,
     )
-    acc.imap_password = payload.imap_password  # encrypts via property setter
+    if payload.imap_password:
+        acc.imap_password = payload.imap_password  # encrypts via property setter
     if payload.smtp_password:
         acc.smtp_password = payload.smtp_password  # encrypts via property setter
+    if payload.oauth_client_secret:
+        acc.oauth_client_secret = payload.oauth_client_secret  # encrypts via property setter
     # else: leave smtp_password_encrypted as None (unauthenticated relay)
 
     db.add(acc)
@@ -184,6 +198,7 @@ async def update_email_account(
     # Handle encrypted fields separately (don't use setattr for them)
     imap_password = data.pop("imap_password", None)
     smtp_password = data.pop("smtp_password", None)
+    oauth_client_secret = data.pop("oauth_client_secret", None)
 
     for key, value in data.items():
         setattr(acc, key, value)
@@ -192,6 +207,8 @@ async def update_email_account(
         acc.imap_password = imap_password
     if smtp_password is not None:
         acc.smtp_password = smtp_password
+    if oauth_client_secret is not None:
+        acc.oauth_client_secret = oauth_client_secret
 
     await db.commit()
     await db.refresh(acc)
@@ -259,14 +276,24 @@ async def test_email_account(
 async def _test_imap(acc: GSageEmailAccount) -> tuple[bool, str | None]:
     """Non-blocking IMAP login test with 5-second timeout."""
     import asyncio
-    import imaplib
 
     try:
-        loop = asyncio.get_event_loop()
-        await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: _imap_login(acc)),
-            timeout=5.0,
-        )
+        # OAuth2 path is async (httpx for token); basic uses thread pool.
+        if acc.auth_method == "oauth2":
+            from src.shared.services.oauth_token import get_access_token
+
+            token = await asyncio.wait_for(get_access_token(acc), timeout=10.0)
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: _imap_login_oauth2(acc, token)),
+                timeout=5.0,
+            )
+        else:
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: _imap_login(acc)),
+                timeout=5.0,
+            )
         return True, None
     except asyncio.TimeoutError:
         return False, "Connection timed out after 5 seconds"
@@ -295,16 +322,51 @@ def _imap_login(acc: GSageEmailAccount) -> None:
             pass
 
 
+def _imap_login_oauth2(acc: GSageEmailAccount, token: str) -> None:
+    """IMAP XOAUTH2 login (Microsoft 365 client-credentials)."""
+    import imaplib
+    import ssl
+    from src.shared.services.oauth_token import build_xoauth2_string
+
+    if acc.imap_use_tls:
+        ssl_ctx = ssl.create_default_context()
+        if not acc.imap_verify_ssl:
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+        conn = imaplib.IMAP4_SSL(acc.imap_host, acc.imap_port, ssl_context=ssl_ctx)
+    else:
+        conn = imaplib.IMAP4(acc.imap_host, acc.imap_port)
+    try:
+        sasl = build_xoauth2_string(acc.imap_username or acc.email, token)
+        conn.authenticate("XOAUTH2", lambda _challenge: sasl.encode("utf-8"))
+        conn.logout()
+    finally:
+        try:
+            conn.shutdown()
+        except Exception:
+            pass
+
+
 async def _test_smtp(acc: GSageEmailAccount) -> tuple[bool, str | None]:
     """Non-blocking SMTP login test with 5-second timeout."""
     import asyncio
 
     try:
-        loop = asyncio.get_event_loop()
-        await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: _smtp_login(acc)),
-            timeout=5.0,
-        )
+        if acc.auth_method == "oauth2":
+            from src.shared.services.oauth_token import get_access_token
+
+            token = await asyncio.wait_for(get_access_token(acc), timeout=10.0)
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: _smtp_login_oauth2(acc, token)),
+                timeout=5.0,
+            )
+        else:
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: _smtp_login(acc)),
+                timeout=5.0,
+            )
         return True, None
     except asyncio.TimeoutError:
         return False, "Connection timed out after 5 seconds"
@@ -331,6 +393,40 @@ def _smtp_login(acc: GSageEmailAccount) -> None:
     try:
         if acc.smtp_username:  # skip login for unauthenticated relay
             conn.login(acc.smtp_username, acc.smtp_password)
+    finally:
+        try:
+            conn.quit()
+        except Exception:
+            pass
+
+
+def _smtp_login_oauth2(acc: GSageEmailAccount, token: str) -> None:
+    """SMTP XOAUTH2 login (Microsoft 365 client-credentials)."""
+    import base64
+    import smtplib
+    import ssl
+    from src.shared.services.oauth_token import build_xoauth2_string
+
+    ssl_ctx: ssl.SSLContext | None = None
+    if acc.smtp_use_tls and not acc.smtp_verify_ssl:
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+    if acc.smtp_use_tls and acc.smtp_port == 465:
+        conn = smtplib.SMTP_SSL(acc.smtp_host, acc.smtp_port, timeout=5, context=ssl_ctx)
+    elif acc.smtp_use_tls:
+        conn = smtplib.SMTP(acc.smtp_host, acc.smtp_port, timeout=5)
+        conn.ehlo()
+        conn.starttls(context=ssl_ctx)
+        conn.ehlo()
+    else:
+        conn = smtplib.SMTP(acc.smtp_host, acc.smtp_port, timeout=5)
+    try:
+        sasl = build_xoauth2_string(acc.smtp_username or acc.email, token)
+        sasl_b64 = base64.b64encode(sasl.encode("utf-8")).decode("ascii")
+        code, msg = conn.docmd("AUTH", f"XOAUTH2 {sasl_b64}")
+        if code < 200 or code >= 300:
+            raise RuntimeError(f"SMTP XOAUTH2 failed: {code} {msg!r}")
     finally:
         try:
             conn.quit()

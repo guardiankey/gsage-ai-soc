@@ -276,6 +276,12 @@ export interface EmailAccountOut {
   unknown_sender_folder: string
   max_email_size_bytes: number
   polling_interval_seconds: number
+  auth_method: 'basic' | 'oauth2'
+  oauth_tenant_id: string | null
+  oauth_client_id: string | null
+  oauth_token_endpoint: string | null
+  oauth_scope: string | null
+  oauth_client_secret_set: boolean
   created_at: string
   updated_at: string
 }
@@ -290,7 +296,7 @@ export interface EmailAccountCreate {
   imap_use_tls?: boolean
   imap_verify_ssl?: boolean
   imap_username: string
-  imap_password: string
+  imap_password?: string | null
   imap_folder?: string
   imap_idle_supported?: boolean
   smtp_host: string
@@ -305,6 +311,12 @@ export interface EmailAccountCreate {
   unknown_sender_folder?: string
   max_email_size_bytes?: number
   polling_interval_seconds?: number
+  auth_method?: 'basic' | 'oauth2'
+  oauth_tenant_id?: string | null
+  oauth_client_id?: string | null
+  oauth_client_secret?: string | null
+  oauth_token_endpoint?: string | null
+  oauth_scope?: string | null
 }
 
 export interface EmailAccountUpdate {
@@ -331,6 +343,12 @@ export interface EmailAccountUpdate {
   unknown_sender_folder?: string
   max_email_size_bytes?: number
   polling_interval_seconds?: number
+  auth_method?: 'basic' | 'oauth2'
+  oauth_tenant_id?: string | null
+  oauth_client_id?: string | null
+  oauth_client_secret?: string | null
+  oauth_token_endpoint?: string | null
+  oauth_scope?: string | null
 }
 
 export interface EmailConnectionTestResult {

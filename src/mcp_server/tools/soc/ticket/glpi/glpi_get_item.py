@@ -42,9 +42,30 @@ _ITEMTYPES = [
 ]
 
 # Sub-item types supported per parent type
-_TICKET_SUBITEM_TYPES = ["TicketFollowup", "ITILSolution", "TicketTask", "Item_Ticket", "Log"]
+_TICKET_SUBITEM_TYPES = [
+    "TicketFollowup",
+    "ITILSolution",
+    "TicketTask",
+    "Item_Ticket",
+    "Ticket_User",
+    "Group_Ticket",
+    "Supplier_Ticket",
+    "TicketValidation",
+    "Ticket_Ticket",
+    "Log",
+]
 _COMPUTER_SUBITEM_TYPES = ["Item_Line", "Log", "NetworkPort"]
 _GENERIC_SUBITEM_TYPES = ["Log", "Document_Item"]
+
+# CommonITILActor type codes (GLPI core).
+_ACTOR_REQUESTER = 1
+_ACTOR_ASSIGN = 2
+_ACTOR_OBSERVER = 3
+_ACTOR_ROLE_NAMES: dict[int, str] = {
+    _ACTOR_REQUESTER: "requester",
+    _ACTOR_ASSIGN: "assign",
+    _ACTOR_OBSERVER: "observer",
+}
 
 # Compact-mode field whitelists per itemtype.
 # Returned as a small, LLM-friendly subset of the full GLPI item record
@@ -56,10 +77,14 @@ _COMPACT_FIELDS: dict[str, list[str]] = {
         "itilcategories_id", "requesttypes_id",
         "date", "date_creation", "date_mod", "solvedate", "closedate",
         "time_to_resolve", "time_to_own",
+        "actiontime", "waiting_duration", "close_delay_stat", "solve_delay_stat",
+        "slas_id_ttr", "slas_id_tto", "olas_id_ttr", "olas_id_tto",
+        "global_validation", "validation_percent",
         "content",
         "users_id_recipient", "users_id_lastupdater",
         "_users_id_assign", "_groups_id_assign",
         "_users_id_requester", "_groups_id_requester",
+        "_suppliers_id_assign",
         "entities_id", "locations_id",
     ],
     "User": [
@@ -110,6 +135,71 @@ def _compact_item(itemtype: str, item: dict) -> dict:
     if whitelist:
         return {k: item[k] for k in whitelist if k in item}
     return {k: v for k, v in item.items() if k not in _COMPACT_DROP_KEYS}
+
+
+def _summarize_actors(
+    ticket_users: list[dict] | None,
+    group_tickets: list[dict] | None,
+    supplier_tickets: list[dict] | None = None,
+) -> dict:
+    """Build a normalised actors view from Ticket_User / Group_Ticket /
+    Supplier_Ticket rows.
+
+    Output shape::
+
+        {
+          "requester": {"users": [...], "groups": [...], "suppliers": [...]},
+          "assign":    {"users": [...], "groups": [...], "suppliers": [...]},
+          "observer":  {"users": [...], "groups": [...], "suppliers": [...]},
+        }
+
+    Each entry is ``{"id": int|None, "name": str|None}``.
+    GLPI returns ids as numeric strings when ``expand_dropdowns=false`` and as
+    display names when ``expand_dropdowns=true``; we surface both.
+    """
+    buckets: dict[str, dict[str, list[dict]]] = {
+        role: {"users": [], "groups": [], "suppliers": []}
+        for role in _ACTOR_ROLE_NAMES.values()
+    }
+
+    def _role(row: dict) -> str | None:
+        try:
+            return _ACTOR_ROLE_NAMES.get(int(row.get("type", 0)))
+        except (TypeError, ValueError):
+            return None
+
+    def _split_id_name(raw: object) -> tuple[int | None, str | None]:
+        if raw in (None, "", "0"):
+            return None, None
+        try:
+            return int(raw), None  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None, str(raw)
+
+    for row in ticket_users or []:
+        role = _role(row)
+        if role is None:
+            continue
+        uid, name = _split_id_name(row.get("users_id"))
+        if not name and row.get("alternative_email"):
+            name = row["alternative_email"]
+        buckets[role]["users"].append({"id": uid, "name": name})
+
+    for row in group_tickets or []:
+        role = _role(row)
+        if role is None:
+            continue
+        gid, name = _split_id_name(row.get("groups_id"))
+        buckets[role]["groups"].append({"id": gid, "name": name})
+
+    for row in supplier_tickets or []:
+        role = _role(row)
+        if role is None:
+            continue
+        sid, name = _split_id_name(row.get("suppliers_id"))
+        buckets[role]["suppliers"].append({"id": sid, "name": name})
+
+    return buckets
 
 
 class GlpiGetItemTool(BaseTool):
@@ -340,6 +430,52 @@ class GlpiGetItemTool(BaseTool):
                         )
                         sub_item_results[sub_type] = []
 
+                # For Tickets, also fetch the actor lists so the response
+                # always exposes who the ticket is assigned to (the bare
+                # Ticket record from GLPI does NOT include assignees).
+                ticket_actors: dict | None = None
+                if itemtype == "Ticket":
+                    tu_rows: list[dict] = sub_item_results.get("Ticket_User") or []
+                    gt_rows: list[dict] = sub_item_results.get("Group_Ticket") or []
+                    st_rows: list[dict] = sub_item_results.get("Supplier_Ticket") or []
+                    if not tu_rows:
+                        try:
+                            tu_rows = await client.get_sub_items(
+                                "Ticket", item_id, "Ticket_User",
+                                range="0-99", expand_dropdowns=expand_dropdowns,
+                            )
+                        except GLPIError as exc:
+                            log.warning(
+                                "glpi_get_item: Ticket_User fetch failed id=%d err=%s",
+                                item_id, exc,
+                            )
+                            tu_rows = []
+                    if not gt_rows:
+                        try:
+                            gt_rows = await client.get_sub_items(
+                                "Ticket", item_id, "Group_Ticket",
+                                range="0-99", expand_dropdowns=expand_dropdowns,
+                            )
+                        except GLPIError as exc:
+                            log.warning(
+                                "glpi_get_item: Group_Ticket fetch failed id=%d err=%s",
+                                item_id, exc,
+                            )
+                            gt_rows = []
+                    if not st_rows:
+                        try:
+                            st_rows = await client.get_sub_items(
+                                "Ticket", item_id, "Supplier_Ticket",
+                                range="0-99", expand_dropdowns=expand_dropdowns,
+                            )
+                        except GLPIError as exc:
+                            log.warning(
+                                "glpi_get_item: Supplier_Ticket fetch failed id=%d err=%s",
+                                item_id, exc,
+                            )
+                            st_rows = []
+                    ticket_actors = _summarize_actors(tu_rows, gt_rows, st_rows)
+
         except GLPIError as exc:
             elapsed = int((time.monotonic() - t0) * 1000)
             return self._failure(
@@ -360,5 +496,7 @@ class GlpiGetItemTool(BaseTool):
         result: dict = {"itemtype": itemtype, "id": item_id, "item": item}
         if sub_item_results:
             result["sub_items"] = sub_item_results
+        if ticket_actors is not None:
+            result["assignees"] = ticket_actors
 
         return self._success(data=result, execution_time_ms=elapsed)

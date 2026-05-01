@@ -44,6 +44,89 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+
+def _patch_agno_unknown_tool_message() -> None:
+    """Replace Agno's generic "tool does not exist" error with a hint that
+    routes the LLM to the proxy executors.
+
+    Agno's stock message ("Error: The requested tool does not exist or is
+    not available.") gives the model no clue that discoverable tools are
+    only callable through ``run_discovered_tool`` / ``run_approved_tool``.
+    When the model hallucinates a bare-name call (e.g. ``send_email_direct``
+    instead of ``run_discovered_tool(tool_name="send_email_direct", ...)``),
+    the message we return here lets it self-correct on the next turn.
+    """
+    from agno.models import base as _agno_base
+    from agno.models.message import Message as _AgnoMessage
+    from agno.tools.function import FunctionCall as _FunctionCall
+    from agno.utils.tools import get_function_call_for_tool_call
+
+    if getattr(_agno_base.Model.get_function_calls_to_run, "_gsage_patched", False):
+        return
+
+    _orig = _agno_base.Model.get_function_calls_to_run
+
+    def _patched(self, assistant_message, messages, functions=None):  # type: ignore[no-untyped-def]
+        function_calls_to_run: list[_FunctionCall] = []
+        if assistant_message.tool_calls is not None:
+            for tool_call in assistant_message.tool_calls:
+                _tool_call_id = tool_call.get("id")
+                _fn = tool_call.get("function", {}) or {}
+                _tool_call_name = _fn.get("name") or ""
+                _function_call = get_function_call_for_tool_call(tool_call, functions)
+                if _function_call is None:
+                    is_proxy = _tool_call_name in (
+                        "run_discovered_tool",
+                        "run_approved_tool",
+                        "search_tools",
+                    )
+                    if is_proxy:
+                        hint = (
+                            f"Error: tool '{_tool_call_name}' is not registered for this agent."
+                        )
+                    else:
+                        hint = (
+                            f"Error: '{_tool_call_name}' is not a directly callable function. "
+                            "Discoverable tools (anything found via `search_tools`) MUST be "
+                            "invoked through the proxy executors. Retry like this:\n"
+                            "  • If requires_approval=false → "
+                            f"run_discovered_tool(tool_name=\"{_tool_call_name}\", params={{...}})\n"
+                            "  • If requires_approval=true  → "
+                            f"run_approved_tool(tool_name=\"{_tool_call_name}\", "
+                            "params={..., \"_approval_summary\": \"...\"})\n"
+                            f"If you have not yet fetched the schema, call "
+                            f"search_tools(query=\"{_tool_call_name}\") first."
+                        )
+                    messages.append(
+                        _AgnoMessage(
+                            role=self.tool_message_role,
+                            tool_call_id=_tool_call_id,
+                            tool_name=_tool_call_name,
+                            content=hint,
+                        )
+                    )
+                    continue
+                if _function_call.error is not None:
+                    messages.append(
+                        _AgnoMessage(
+                            role=self.tool_message_role,
+                            tool_call_id=_tool_call_id,
+                            tool_name=_tool_call_name,
+                            content=_function_call.error,
+                        )
+                    )
+                    continue
+                function_calls_to_run.append(_function_call)
+        return function_calls_to_run
+
+    _patched._gsage_patched = True  # type: ignore[attr-defined]
+    _agno_base.Model.get_function_calls_to_run = _patched  # type: ignore[assignment]
+    log.info("agno patch installed: helpful unknown-tool message")
+
+
+_patch_agno_unknown_tool_message()
+
+
 # ---------------------------------------------------------------------------
 # Mermaid diagram instructions — shared across channels that support rendering
 # ---------------------------------------------------------------------------
@@ -332,7 +415,7 @@ def _resolve_system_prompt(
     # -- 2. Org additions
     org_extra = (org.system_prompt or "").strip() if org else ""
     if org_extra:
-        base = f"{base}\n\n# Organisation-specific instructions\n{org_extra}"
+        base = f"{base}\n\n# Organization-specific instructions\n{org_extra}"
 
     # -- 3. User preferences
     user_extra = (user.ai_instructions or "").strip() if user else ""

@@ -148,14 +148,53 @@ async def send_reply(
         "use_tls": use_ssl,
         "validate_certs": account.smtp_verify_ssl,
     }
-    # Only authenticate when credentials are configured (username = '' means relay).
-    if account.smtp_username:
-        smtp_kwargs["username"] = account.smtp_username
-        smtp_kwargs["password"] = account.smtp_password
     if use_starttls:
         smtp_kwargs["start_tls"] = True
 
-    await aiosmtplib.send(msg, **smtp_kwargs)
+    if getattr(account, "auth_method", "basic") == "oauth2":
+        # OAuth2 / XOAUTH2.  ``aiosmtplib.send()`` only knows about LOGIN
+        # auth, so we drive the protocol manually: connect, EHLO,
+        # STARTTLS (if required), then issue the SASL XOAUTH2 command.
+        from src.shared.services.oauth_token import (
+            build_xoauth2_string,
+            get_access_token,
+        )
+        import base64
+
+        try:
+            token = await get_access_token(account)
+        except Exception as exc:
+            raise RuntimeError(
+                f"OAuth2 token acquisition failed for {account.email}: {exc}"
+            ) from exc
+
+        sasl = build_xoauth2_string(account.smtp_username or account.email, token)
+        sasl_b64 = base64.b64encode(sasl.encode("utf-8")).decode("ascii")
+
+        smtp = aiosmtplib.SMTP(**smtp_kwargs)
+        await smtp.connect()
+        try:
+            await smtp.ehlo()
+            code, message = await smtp.execute_command(
+                b"AUTH", b"XOAUTH2", sasl_b64.encode("ascii"),
+            )
+            if code < 200 or code >= 300:
+                raise RuntimeError(
+                    f"SMTP XOAUTH2 authentication failed: {code} {message!r}"
+                )
+            await smtp.send_message(msg)
+        finally:
+            try:
+                await smtp.quit()
+            except Exception:
+                pass
+    else:
+        # Only authenticate when credentials are configured (username = '' means relay).
+        if account.smtp_username:
+            smtp_kwargs["username"] = account.smtp_username
+            smtp_kwargs["password"] = account.smtp_password
+
+        await aiosmtplib.send(msg, **smtp_kwargs)
 
     logger.info(
         "smtp_sender.send_reply: sent — message_id=%s to=%s",

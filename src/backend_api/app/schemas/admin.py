@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +348,12 @@ class EmailAccountOut(BaseModel):
     unknown_sender_folder: str
     max_email_size_bytes: int
     polling_interval_seconds: int
+    auth_method: str  # 'basic' | 'oauth2'
+    oauth_tenant_id: Optional[str] = None
+    oauth_client_id: Optional[str] = None
+    oauth_token_endpoint: Optional[str] = None
+    oauth_scope: Optional[str] = None
+    oauth_client_secret_set: bool = False  # Only expose whether secret is set
     created_at: datetime
     updated_at: datetime
 
@@ -364,7 +370,7 @@ class EmailAccountCreate(BaseModel):
     imap_use_tls: bool = True
     imap_verify_ssl: bool = True
     imap_username: str = Field(..., min_length=1, max_length=255)
-    imap_password: str = Field(..., min_length=1)
+    imap_password: Optional[str] = Field(default=None, min_length=1)
     imap_folder: str = Field(default="INBOX", max_length=100)
     imap_idle_supported: bool = True
     smtp_host: str = Field(..., min_length=1, max_length=255)
@@ -379,6 +385,36 @@ class EmailAccountCreate(BaseModel):
     unknown_sender_folder: str = Field(default="Unknown-Senders", max_length=100)
     max_email_size_bytes: int = Field(default=5242880, ge=1024)
     polling_interval_seconds: int = Field(default=60, ge=10, le=3600)
+    # Authentication method (default 'basic' to preserve legacy behaviour)
+    auth_method: str = Field(default="basic", pattern="^(basic|oauth2)$")
+    oauth_tenant_id: Optional[str] = Field(default=None, max_length=255)
+    oauth_client_id: Optional[str] = Field(default=None, max_length=255)
+    oauth_client_secret: Optional[str] = Field(default=None, min_length=1)
+    oauth_token_endpoint: Optional[str] = Field(default=None, max_length=500)
+    oauth_scope: Optional[str] = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _validate_auth_method(self) -> "EmailAccountCreate":
+        if self.auth_method == "oauth2":
+            missing = [
+                name
+                for name, value in (
+                    ("oauth_tenant_id", self.oauth_tenant_id),
+                    ("oauth_client_id", self.oauth_client_id),
+                    ("oauth_client_secret", self.oauth_client_secret),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    f"auth_method='oauth2' requires: {', '.join(missing)}"
+                )
+        else:  # basic
+            if not self.imap_password:
+                raise ValueError(
+                    "auth_method='basic' requires imap_password"
+                )
+        return self
 
 
 class EmailAccountUpdate(BaseModel):
@@ -405,6 +441,13 @@ class EmailAccountUpdate(BaseModel):
     unknown_sender_folder: Optional[str] = Field(default=None, max_length=100)
     max_email_size_bytes: Optional[int] = Field(default=None, ge=1024)
     polling_interval_seconds: Optional[int] = Field(default=None, ge=10, le=3600)
+    # OAuth2 fields (only update if provided)
+    auth_method: Optional[str] = Field(default=None, pattern="^(basic|oauth2)$")
+    oauth_tenant_id: Optional[str] = Field(default=None, max_length=255)
+    oauth_client_id: Optional[str] = Field(default=None, max_length=255)
+    oauth_client_secret: Optional[str] = None
+    oauth_token_endpoint: Optional[str] = Field(default=None, max_length=500)
+    oauth_scope: Optional[str] = Field(default=None, max_length=500)
 
 
 class EmailConnectionTestResult(BaseModel):

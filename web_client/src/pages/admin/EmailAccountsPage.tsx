@@ -269,6 +269,12 @@ function EmailAccountForm({ onSubmit, onCancel, departments, isLoading }: {
     smtp_use_tls: true,
     smtp_verify_ssl: true,
     is_active: true,
+    auth_method: 'basic',
+    oauth_tenant_id: '',
+    oauth_client_id: '',
+    oauth_client_secret: '',
+    oauth_token_endpoint: '',
+    oauth_scope: '',
   })
   const [deptId, setDeptId] = useState<string>('__org__')
 
@@ -277,7 +283,20 @@ function EmailAccountForm({ onSubmit, onCancel, departments, isLoading }: {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSubmit({ ...form, dept_id: deptId === '__org__' ? null : deptId })
+    const payload: EmailAccountCreate = { ...form, dept_id: deptId === '__org__' ? null : deptId }
+    // Strip irrelevant fields based on auth_method so the backend
+    // validator does not complain about missing/extra credentials.
+    if (payload.auth_method === 'oauth2') {
+      payload.imap_password = null
+      payload.smtp_password = null
+    } else {
+      payload.oauth_tenant_id = null
+      payload.oauth_client_id = null
+      payload.oauth_client_secret = null
+      payload.oauth_token_endpoint = null
+      payload.oauth_scope = null
+    }
+    onSubmit(payload)
   }
 
   return (
@@ -304,6 +323,69 @@ function EmailAccountForm({ onSubmit, onCancel, departments, isLoading }: {
           </SelectContent>
         </Select>
       </div>
+      {/* ── Authentication method ────────────────────────────────── */}
+      <div className="space-y-1.5">
+        <Label>{t('admin.emailAccounts.authMethod')}</Label>
+        <Select
+          value={form.auth_method ?? 'basic'}
+          onValueChange={(v) => setForm((p) => ({ ...p, auth_method: v as 'basic' | 'oauth2' }))}
+        >
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="basic">{t('admin.emailAccounts.authMethodBasic')}</SelectItem>
+            <SelectItem value="oauth2">{t('admin.emailAccounts.authMethodOAuth2')}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {form.auth_method === 'oauth2' && (
+        <div className="space-y-3 rounded border border-border/60 p-3">
+          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {t('admin.emailAccounts.sectionOAuth2')}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>{t('admin.emailAccounts.oauthTenantId')}</Label>
+              <Input
+                value={form.oauth_tenant_id ?? ''}
+                onChange={(e) => setForm((p) => ({ ...p, oauth_tenant_id: e.target.value }))}
+                placeholder="00000000-0000-0000-0000-000000000000"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t('admin.emailAccounts.oauthClientId')}</Label>
+              <Input
+                value={form.oauth_client_id ?? ''}
+                onChange={(e) => setForm((p) => ({ ...p, oauth_client_id: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t('admin.emailAccounts.oauthClientSecret')}</Label>
+            <Input
+              type="password"
+              value={form.oauth_client_secret ?? ''}
+              onChange={(e) => setForm((p) => ({ ...p, oauth_client_secret: e.target.value }))}
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t('admin.emailAccounts.oauthTokenEndpoint')}</Label>
+            <Input
+              value={form.oauth_token_endpoint ?? ''}
+              onChange={(e) => setForm((p) => ({ ...p, oauth_token_endpoint: e.target.value }))}
+              placeholder={t('admin.emailAccounts.oauthTokenEndpointPlaceholder')}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t('admin.emailAccounts.oauthScope')}</Label>
+            <Input
+              value={form.oauth_scope ?? ''}
+              onChange={(e) => setForm((p) => ({ ...p, oauth_scope: e.target.value }))}
+              placeholder="https://outlook.office365.com/.default"
+            />
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
           <Label>{t('admin.emailAccounts.imapHost')}</Label>
@@ -319,10 +401,12 @@ function EmailAccountForm({ onSubmit, onCancel, departments, isLoading }: {
           <Label>{t('admin.emailAccounts.imapUsername')}</Label>
           <Input required value={form.imap_username} onChange={set('imap_username')} autoComplete="username" />
         </div>
-        <div className="space-y-1.5">
-          <Label>{t('admin.emailAccounts.imapPassword')}</Label>
-          <Input type="password" value={form.imap_password} onChange={set('imap_password')} autoComplete="new-password" />
-        </div>
+        {form.auth_method !== 'oauth2' && (
+          <div className="space-y-1.5">
+            <Label>{t('admin.emailAccounts.imapPassword')}</Label>
+            <Input type="password" value={form.imap_password ?? ''} onChange={set('imap_password')} autoComplete="new-password" />
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap gap-x-6 gap-y-2">
         <div className="flex items-center gap-2">
@@ -359,10 +443,12 @@ function EmailAccountForm({ onSubmit, onCancel, departments, isLoading }: {
           <Label>{t('admin.emailAccounts.smtpUsername')}</Label>
           <Input value={form.smtp_username ?? ''} onChange={set('smtp_username')} autoComplete="username" placeholder={t('admin.emailAccounts.smtpNoAuthPlaceholder')} />
         </div>
-        <div className="space-y-1.5">
-          <Label>{t('admin.emailAccounts.smtpPassword')}</Label>
-          <Input type="password" value={form.smtp_password ?? ''} onChange={set('smtp_password')} autoComplete="new-password" placeholder={t('admin.emailAccounts.smtpNoAuthPlaceholder')} />
-        </div>
+        {form.auth_method !== 'oauth2' && (
+          <div className="space-y-1.5">
+            <Label>{t('admin.emailAccounts.smtpPassword')}</Label>
+            <Input type="password" value={form.smtp_password ?? ''} onChange={set('smtp_password')} autoComplete="new-password" placeholder={t('admin.emailAccounts.smtpNoAuthPlaceholder')} />
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap gap-x-6 gap-y-2">
         <div className="flex items-center gap-2">
@@ -421,10 +507,16 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
     max_email_size_bytes: initial.max_email_size_bytes,
     polling_interval_seconds: initial.polling_interval_seconds,
     is_active: initial.is_active,
+    auth_method: initial.auth_method,
+    oauth_tenant_id: initial.oauth_tenant_id,
+    oauth_client_id: initial.oauth_client_id,
+    oauth_token_endpoint: initial.oauth_token_endpoint,
+    oauth_scope: initial.oauth_scope,
   })
   const [deptId, setDeptId] = useState<string>(initial.dept_id ?? '__org__')
   const [imapPassword, setImapPassword] = useState('')
   const [smtpPassword, setSmtpPassword] = useState('')
+  const [oauthClientSecret, setOauthClientSecret] = useState('')
 
   const set = (key: keyof EmailAccountUpdate) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -440,6 +532,7 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
     const payload: EmailAccountUpdate = { ...form, dept_id: deptId === '__org__' ? null : deptId }
     if (imapPassword) payload.imap_password = imapPassword
     if (smtpPassword) payload.smtp_password = smtpPassword
+    if (oauthClientSecret) payload.oauth_client_secret = oauthClientSecret
     onSubmit(payload)
   }
 
@@ -462,6 +555,75 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
         </Select>
       </div>
 
+      {/* ── Authentication method ────────────────────────────────── */}
+      <div className="space-y-1.5">
+        <Label>{t('admin.emailAccounts.authMethod')}</Label>
+        <Select
+          value={form.auth_method ?? 'basic'}
+          onValueChange={(v) => setForm((p) => ({ ...p, auth_method: v as 'basic' | 'oauth2' }))}
+        >
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="basic">{t('admin.emailAccounts.authMethodBasic')}</SelectItem>
+            <SelectItem value="oauth2">{t('admin.emailAccounts.authMethodOAuth2')}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {form.auth_method === 'oauth2' && (
+        <div className="space-y-3 rounded border border-border/60 p-3">
+          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {t('admin.emailAccounts.sectionOAuth2')}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>{t('admin.emailAccounts.oauthTenantId')}</Label>
+              <Input
+                value={form.oauth_tenant_id ?? ''}
+                onChange={(e) => setForm((p) => ({ ...p, oauth_tenant_id: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t('admin.emailAccounts.oauthClientId')}</Label>
+              <Input
+                value={form.oauth_client_id ?? ''}
+                onChange={(e) => setForm((p) => ({ ...p, oauth_client_id: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>
+              {t('admin.emailAccounts.oauthClientSecret')}
+              {initial.oauth_client_secret_set && (
+                <Badge variant="outline" className="ml-2 text-xs">{t('admin.emailAccounts.passwordSet')}</Badge>
+              )}
+            </Label>
+            <Input
+              type="password"
+              value={oauthClientSecret}
+              onChange={(e) => setOauthClientSecret(e.target.value)}
+              placeholder={t('admin.emailAccounts.passwordChangePlaceholder')}
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t('admin.emailAccounts.oauthTokenEndpoint')}</Label>
+            <Input
+              value={form.oauth_token_endpoint ?? ''}
+              onChange={(e) => setForm((p) => ({ ...p, oauth_token_endpoint: e.target.value }))}
+              placeholder={t('admin.emailAccounts.oauthTokenEndpointPlaceholder')}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t('admin.emailAccounts.oauthScope')}</Label>
+            <Input
+              value={form.oauth_scope ?? ''}
+              onChange={(e) => setForm((p) => ({ ...p, oauth_scope: e.target.value }))}
+              placeholder="https://outlook.office365.com/.default"
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── IMAP ─────────────────────────────────────────────────── */}
       <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">
         {t('admin.emailAccounts.sectionImap')}
@@ -480,21 +642,23 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
         <Label>{t('admin.emailAccounts.imapUsername')}</Label>
         <Input value={form.imap_username ?? ''} onChange={set('imap_username')} autoComplete="username" />
       </div>
-      <div className="space-y-1.5">
-        <Label>
-          {t('admin.emailAccounts.imapPassword')}
-          {initial.imap_password_set && (
-            <Badge variant="outline" className="ml-2 text-xs">{t('admin.emailAccounts.passwordSet')}</Badge>
-          )}
-        </Label>
-        <Input
-          type="password"
-          value={imapPassword}
-          onChange={(e) => setImapPassword(e.target.value)}
-          placeholder={t('admin.emailAccounts.passwordChangePlaceholder')}
-          autoComplete="new-password"
-        />
-      </div>
+      {form.auth_method !== 'oauth2' && (
+        <div className="space-y-1.5">
+          <Label>
+            {t('admin.emailAccounts.imapPassword')}
+            {initial.imap_password_set && (
+              <Badge variant="outline" className="ml-2 text-xs">{t('admin.emailAccounts.passwordSet')}</Badge>
+            )}
+          </Label>
+          <Input
+            type="password"
+            value={imapPassword}
+            onChange={(e) => setImapPassword(e.target.value)}
+            placeholder={t('admin.emailAccounts.passwordChangePlaceholder')}
+            autoComplete="new-password"
+          />
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label>{t('admin.emailAccounts.imapFolder')}</Label>
@@ -558,21 +722,23 @@ function EmailAccountEditForm({ initial, onSubmit, onCancel, departments, isLoad
           placeholder={t('admin.emailAccounts.smtpNoAuthPlaceholder')}
         />
       </div>
-      <div className="space-y-1.5">
-        <Label>
-          {t('admin.emailAccounts.smtpPassword')}
-          {initial.smtp_password_set && (
-            <Badge variant="outline" className="ml-2 text-xs">{t('admin.emailAccounts.passwordSet')}</Badge>
-          )}
-        </Label>
-        <Input
-          type="password"
-          value={smtpPassword}
-          onChange={(e) => setSmtpPassword(e.target.value)}
-          placeholder={t('admin.emailAccounts.passwordChangePlaceholder')}
-          autoComplete="new-password"
-        />
-      </div>
+      {form.auth_method !== 'oauth2' && (
+        <div className="space-y-1.5">
+          <Label>
+            {t('admin.emailAccounts.smtpPassword')}
+            {initial.smtp_password_set && (
+              <Badge variant="outline" className="ml-2 text-xs">{t('admin.emailAccounts.passwordSet')}</Badge>
+            )}
+          </Label>
+          <Input
+            type="password"
+            value={smtpPassword}
+            onChange={(e) => setSmtpPassword(e.target.value)}
+            placeholder={t('admin.emailAccounts.passwordChangePlaceholder')}
+            autoComplete="new-password"
+          />
+        </div>
+      )}
       <div className="flex flex-wrap gap-x-6 gap-y-2">
         <div className="flex items-center gap-2">
           <input

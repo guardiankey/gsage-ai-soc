@@ -42,6 +42,15 @@ _GROUP_FIELD_ID = 2
 _GROUP_FIELD_COMPLETENAME = 16
 _GROUP_FIELD_NAME = 1
 
+# searchOption field IDs for User (used as a fallback to Group_User).
+# field 2  = ID, field 13 = Group (linked via Group_User N:N or default
+# groups_id, depending on GLPI version).  Some installations populate the
+# direct ``users.groups_id`` field instead of the ``glpi_groups_users``
+# join table — in that case the search engine still returns the user but
+# the ``GET /Group/{id}/Group_User`` endpoint is empty.
+_USER_FIELD_ID = 2
+_USER_FIELD_GROUP = 13
+
 _MAX_MEMBERS_HARD_LIMIT = 200
 # Cap concurrent per-user GETs to avoid hammering GLPI.
 _USER_FETCH_CONCURRENCY = 8
@@ -236,6 +245,12 @@ class GlpiGetGroupMembersTool(BaseTool):
                         )
 
                 # Collect distinct user IDs from Group_User across all target groups.
+                # Some GLPI deployments populate the direct ``users.groups_id``
+                # field instead of (or in addition to) the ``glpi_groups_users``
+                # N:N join table.  We therefore query both sources and merge:
+                #   1. ``GET /Group/{id}/Group_User``  → N:N join
+                #   2. ``search/User`` with field 13   → search engine view
+                #      (covers users linked via either path)
                 user_ids: list[int] = []
                 seen: set[int] = set()
                 for gid in group_ids:
@@ -250,11 +265,25 @@ class GlpiGetGroupMembersTool(BaseTool):
                             "glpi_get_group_members: Group_User lookup failed for group %d: %s",
                             gid, exc,
                         )
-                        continue
+                        rows = []
                     for row in rows:
                         if not isinstance(row, dict):
                             continue
                         uid = _coerce_int(row.get("users_id"))
+                        if uid and uid not in seen:
+                            seen.add(uid)
+                            user_ids.append(uid)
+
+                    # Fallback / augmentation via search engine (field 13 = Group).
+                    try:
+                        search_uids = await _search_user_ids_by_group(client, gid)
+                    except GLPIError as exc:
+                        log.warning(
+                            "glpi_get_group_members: search/User fallback failed for group %d: %s",
+                            gid, exc,
+                        )
+                        search_uids = []
+                    for uid in search_uids:
                         if uid and uid not in seen:
                             seen.add(uid)
                             user_ids.append(uid)
@@ -311,6 +340,34 @@ class GlpiGetGroupMembersTool(BaseTool):
 
 
 # ── Module-level helpers ───────────────────────────────────────────────────
+
+
+async def _search_user_ids_by_group(client: GLPIClient, group_id: int) -> list[int]:
+    """Resolve user IDs by querying ``search/User`` with field=Group=group_id.
+
+    This complements ``GET /Group/{id}/Group_User``: GLPI's search engine
+    consults both the N:N ``glpi_groups_users`` join and the user's direct
+    ``groups_id`` field, so it returns a superset of the sub-items endpoint
+    on installs where membership is recorded only via the direct field.
+    """
+    result = await client.search_items(
+        "User",
+        [
+            {"field": _USER_FIELD_GROUP, "searchtype": "equals", "value": group_id},
+        ],
+        range="0-499",
+        forcedisplay=[_USER_FIELD_ID],
+    )
+    rows = result.get("data") or []
+    out: list[int] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        # GLPI keys forcedisplay columns by their stringified field id.
+        uid = _coerce_int(row.get(str(_USER_FIELD_ID)) or row.get(_USER_FIELD_ID) or row.get("id"))
+        if uid:
+            out.append(uid)
+    return out
 
 
 async def _fetch_user_details(client: GLPIClient, user_id: int) -> Optional[dict]:

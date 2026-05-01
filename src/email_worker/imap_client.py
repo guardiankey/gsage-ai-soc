@@ -84,7 +84,22 @@ class IMAPClientWrapper:
             )
 
         await self._client.wait_hello_from_server()
-        response = await self._client.login(acc.imap_username, acc.imap_password)
+
+        # Authentication: OAuth2 (XOAUTH2) for Microsoft 365 / Exchange
+        # Online and any provider that disabled basic auth, otherwise
+        # plain LOGIN with the stored password.
+        if getattr(acc, "auth_method", "basic") == "oauth2":
+            from src.shared.services.oauth_token import get_access_token
+
+            try:
+                token = await get_access_token(acc)
+            except Exception as exc:
+                raise ConnectionError(
+                    f"OAuth2 token acquisition failed for {acc.email}: {exc}"
+                ) from exc
+            response = await self._client.xoauth2(acc.imap_username, token)
+        else:
+            response = await self._client.login(acc.imap_username, acc.imap_password)
         if response.result != "OK":
             raise ConnectionError(
                 f"IMAP login failed for {acc.email}: {response.lines}"

@@ -69,7 +69,10 @@ class EmailAccountsPanel(Widget):
         account = getattr(self, "_accounts", {}).get(aid, {})
         if account:
             if not self._reveal:
-                display = {k: ("****" if "password" in k else v) for k, v in account.items()}
+                display = {
+                    k: ("****" if ("password" in k or "secret" in k) else v)
+                    for k, v in account.items()
+                }
             else:
                 display = account
             self.query_one("#email-detail", KVPanel).update(display, title=account.get("email", ""))

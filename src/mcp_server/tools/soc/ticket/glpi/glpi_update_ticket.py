@@ -42,7 +42,8 @@ class GlpiUpdateTicketTool(BaseTool):
     | ``update``         | Modify ticket fields (status, priority, category, etc.)  |
     | ``add_followup``   | Append a follow-up comment (public or private)           |
     | ``add_solution``   | Record the resolution and mark ticket as Solved          |
-    | ``assign``         | Assign ticket to a technician user and/or group          |
+    | ``assign``         | Add a technician user and/or group as assignee           |
+    | ``unassign``       | Remove a technician user and/or group from the assignees |
     | ``close``          | Close the ticket (status → CLOSED)                       |
     | ``escalate_priority`` | Raise priority by one level (capped at 6 = Major)    |
 
@@ -53,6 +54,9 @@ class GlpiUpdateTicketTool(BaseTool):
     *add_solution*: ``solution_content`` (required), ``solution_type_id`` (optional GLPI SolutionType ID)
 
     *assign*: at least one of ``assigned_user_id`` or ``assigned_group_id``
+
+    *unassign*: at least one of ``assigned_user_id`` or ``assigned_group_id`` —
+    removes only the specified actor(s); other assignees are preserved.
 
     *close*: no extra params (optionally provide ``solution_content`` to add a solution first)
 
@@ -96,6 +100,7 @@ class GlpiUpdateTicketTool(BaseTool):
                     "add_followup",
                     "add_solution",
                     "assign",
+                    "unassign",
                     "close",
                     "escalate_priority",
                 ],
@@ -185,17 +190,18 @@ class GlpiUpdateTicketTool(BaseTool):
                 "type": "integer",
                 "minimum": 1,
                 "description": (
-                    "GLPI User ID of the technician to assign. "
-                    "Used by action='assign'. At least one of assigned_user_id / "
-                    "assigned_group_id is required."
+                    "GLPI User ID. "
+                    "Used by action='assign' to add the user as assignee, or "
+                    "action='unassign' to remove the user from the assignees. "
+                    "At least one of assigned_user_id / assigned_group_id is required."
                 ),
             },
             "assigned_group_id": {
                 "type": "integer",
                 "minimum": 1,
                 "description": (
-                    "GLPI Group ID to assign the ticket to. "
-                    "Used by action='assign'."
+                    "GLPI Group ID. "
+                    "Used by action='assign' or 'unassign'."
                 ),
             },
         },
@@ -278,6 +284,8 @@ class GlpiUpdateTicketTool(BaseTool):
             return await self._action_add_solution(client, ticket_id, params)
         if action == "assign":
             return await self._action_assign(client, ticket_id, params)
+        if action == "unassign":
+            return await self._action_unassign(client, ticket_id, params)
         if action == "close":
             return await self._action_close(client, ticket_id, params)
         if action == "escalate_priority":
@@ -343,6 +351,11 @@ class GlpiUpdateTicketTool(BaseTool):
     async def _action_assign(
         self, client: GLPIClient, ticket_id: int, params: dict
     ) -> dict:
+        # GLPI CommonITILActor::ASSIGN = 2 (technician assignee).
+        # We add rows to Ticket_User / Group_Ticket so existing assignees
+        # are preserved — using the Ticket._actors API would replace them.
+        _ASSIGN_TYPE = 2
+
         user_id = params.get("assigned_user_id")
         group_id = params.get("assigned_group_id")
         if not user_id and not group_id:
@@ -350,17 +363,121 @@ class GlpiUpdateTicketTool(BaseTool):
                 "At least one of assigned_user_id or assigned_group_id is required "
                 "for action='assign'."
             )
-        assignees: list[dict] = []
+
+        added: list[dict] = []
+        already_present: list[dict] = []
+
         if user_id:
-            assignees.append({"items_id": int(user_id), "itemtype": "User"})
+            try:
+                user_res = await client.add_item(
+                    "Ticket_User",
+                    {
+                        "tickets_id": ticket_id,
+                        "users_id": int(user_id),
+                        "type": _ASSIGN_TYPE,
+                    },
+                )
+                added.append({"kind": "user", "id": int(user_id), "response": user_res})
+            except GLPIError as exc:
+                # GLPI returns an error when the (ticket, user, type) tuple
+                # already exists — surface it as an idempotent no-op instead
+                # of failing the whole action.
+                msg = (str(exc) or "").lower()
+                if "already" in msg or "duplicate" in msg or exc.status_code == 400:
+                    already_present.append({"kind": "user", "id": int(user_id)})
+                else:
+                    raise
+
         if group_id:
-            assignees.append({"items_id": int(group_id), "itemtype": "Group"})
-        result = await client.update_item(
-            "Ticket",
-            ticket_id,
-            {"id": ticket_id, "_actors": {"assign": assignees}},
-        )
-        return {"assigned": True, "response": result}
+            try:
+                group_res = await client.add_item(
+                    "Group_Ticket",
+                    {
+                        "tickets_id": ticket_id,
+                        "groups_id": int(group_id),
+                        "type": _ASSIGN_TYPE,
+                    },
+                )
+                added.append({"kind": "group", "id": int(group_id), "response": group_res})
+            except GLPIError as exc:
+                msg = (str(exc) or "").lower()
+                if "already" in msg or "duplicate" in msg or exc.status_code == 400:
+                    already_present.append({"kind": "group", "id": int(group_id)})
+                else:
+                    raise
+
+        return {
+            "assigned": bool(added),
+            "added": added,
+            "already_present": already_present,
+        }
+
+    async def _action_unassign(
+        self, client: GLPIClient, ticket_id: int, params: dict
+    ) -> dict:
+        # Mirror of _action_assign — removes the matching Ticket_User /
+        # Group_Ticket rows (type=2 = ASSIGN) instead of adding them.
+        # Uses force_purge so the row is removed immediately (these pivot
+        # tables don't support trash/recycle).
+        _ASSIGN_TYPE = 2
+
+        user_id = params.get("assigned_user_id")
+        group_id = params.get("assigned_group_id")
+        if not user_id and not group_id:
+            raise ValueError(
+                "At least one of assigned_user_id or assigned_group_id is required "
+                "for action='unassign'."
+            )
+
+        removed: list[dict] = []
+        not_found: list[dict] = []
+
+        async def _find_pivot_id(
+            sub_itemtype: str, owner_field: str, owner_id: int
+        ) -> Optional[int]:
+            rows = await client.get_sub_items(
+                "Ticket",
+                ticket_id,
+                sub_itemtype,
+                range="0-99",
+                expand_dropdowns=False,
+            )
+            for row in rows:
+                try:
+                    if (
+                        int(row.get("type", 0)) == _ASSIGN_TYPE
+                        and int(row.get(owner_field, 0)) == owner_id
+                    ):
+                        return int(row["id"])
+                except (TypeError, ValueError):
+                    continue
+            return None
+
+        if user_id:
+            pivot_id = await _find_pivot_id("Ticket_User", "users_id", int(user_id))
+            if pivot_id is None:
+                not_found.append({"kind": "user", "id": int(user_id)})
+            else:
+                await client.delete_item("Ticket_User", pivot_id, force_purge=True)
+                removed.append(
+                    {"kind": "user", "id": int(user_id), "pivot_id": pivot_id}
+                )
+
+        if group_id:
+            pivot_id = await _find_pivot_id("Group_Ticket", "groups_id", int(group_id))
+            if pivot_id is None:
+                not_found.append({"kind": "group", "id": int(group_id)})
+            else:
+                await client.delete_item("Group_Ticket", pivot_id, force_purge=True)
+                removed.append(
+                    {"kind": "group", "id": int(group_id), "pivot_id": pivot_id}
+                )
+
+        return {
+            "unassigned": bool(removed),
+            "removed": removed,
+            "not_found": not_found,
+        }
 
     async def _action_close(
         self, client: GLPIClient, ticket_id: int, params: dict

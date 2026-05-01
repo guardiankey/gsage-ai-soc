@@ -448,6 +448,33 @@ class GLPIClient:
             return result
         return {}
 
+    async def delete_item(
+        self,
+        itemtype: str,
+        item_id: int,
+        *,
+        force_purge: bool = False,
+    ) -> dict:
+        """Delete an item.
+
+        By default GLPI moves the item to trash; pass ``force_purge=True`` to
+        permanently purge it (required for pivot tables like
+        ``Ticket_User`` / ``Group_Ticket`` that don't support soft-delete).
+
+        Returns the GLPI delete result dict.
+        """
+        params: dict[str, Any] = {}
+        if force_purge:
+            params["force_purge"] = "true"
+        result = await self._request(
+            "DELETE", f"{itemtype}/{item_id}", params=params or None
+        )
+        if isinstance(result, list) and result:
+            return result[0]
+        if isinstance(result, dict):
+            return result
+        return {}
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers

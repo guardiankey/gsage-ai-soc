@@ -70,11 +70,11 @@ class GSageEmailAccount(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="Verify TLS certificate on IMAP connection. Set False for self-signed certs.",
     )
     imap_username: Mapped[str] = mapped_column(String(255), nullable=False)
-    _imap_password_encrypted: Mapped[bytes] = mapped_column(
+    _imap_password_encrypted: Mapped[Optional[bytes]] = mapped_column(
         "imap_password_encrypted",
         LargeBinary,
-        nullable=False,
-        comment="AES-256-GCM encrypted IMAP password",
+        nullable=True,
+        comment="AES-256-GCM encrypted IMAP password (NULL for OAuth2 accounts)",
     )
     imap_folder: Mapped[str] = mapped_column(String(100), default="INBOX", nullable=False)
     imap_idle_supported: Mapped[bool] = mapped_column(
@@ -140,6 +140,53 @@ class GSageEmailAccount(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="Fallback polling interval when IDLE not supported",
     )
 
+    # Authentication method
+    auth_method: Mapped[str] = mapped_column(
+        String(20),
+        default="basic",
+        server_default="basic",
+        nullable=False,
+        comment="Authentication mode: 'basic' (LOGIN with password) or 'oauth2' (XOAUTH2 client-credentials)",
+    )
+
+    # OAuth2 (Microsoft 365 / Exchange Online client-credentials flow).
+    # When auth_method='oauth2', these fields take precedence over the
+    # *_password fields and the worker fetches an access token via the
+    # /oauth2/v2.0/token endpoint.
+    oauth_tenant_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Azure AD tenant ID (UUID) for OAuth2 token endpoint.",
+    )
+    oauth_client_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Azure AD app client_id (the registered application).",
+    )
+    _oauth_client_secret_encrypted: Mapped[Optional[bytes]] = mapped_column(
+        "oauth_client_secret_encrypted",
+        LargeBinary,
+        nullable=True,
+        comment="AES-256-GCM encrypted OAuth2 client_secret.",
+    )
+    oauth_token_endpoint: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment=(
+            "Override OAuth2 token endpoint. Defaults to "
+            "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token "
+            "when NULL."
+        ),
+    )
+    oauth_scope: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment=(
+            "OAuth2 scope. Defaults to "
+            "'https://outlook.office365.com/.default' when NULL."
+        ),
+    )
+
     # Relationships
     organization: Mapped[GSageOrganization] = relationship(
         "GSageOrganization",
@@ -153,13 +200,18 @@ class GSageEmailAccount(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     @property
     def imap_password(self) -> str:
-        """Decrypt and return IMAP password."""
+        """Decrypt and return IMAP password, or empty string when not set (OAuth2)."""
+        if not self._imap_password_encrypted:
+            return ""
         return get_encryption().decrypt(self._imap_password_encrypted)
 
     @imap_password.setter
     def imap_password(self, value: str) -> None:
-        """Encrypt and store IMAP password."""
-        self._imap_password_encrypted = get_encryption().encrypt(value)
+        """Encrypt and store IMAP password. Empty string clears the stored credential."""
+        if not value:
+            self._imap_password_encrypted = None
+        else:
+            self._imap_password_encrypted = get_encryption().encrypt(value)
 
     @property
     def smtp_password(self) -> str:
@@ -175,6 +227,21 @@ class GSageEmailAccount(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             self._smtp_password_encrypted = None
         else:
             self._smtp_password_encrypted = get_encryption().encrypt(value)
+
+    @property
+    def oauth_client_secret(self) -> str:
+        """Decrypt and return OAuth2 client_secret, or empty string when not set."""
+        if not self._oauth_client_secret_encrypted:
+            return ""
+        return get_encryption().decrypt(self._oauth_client_secret_encrypted)
+
+    @oauth_client_secret.setter
+    def oauth_client_secret(self, value: str) -> None:
+        """Encrypt and store OAuth2 client_secret. Empty string clears it."""
+        if not value:
+            self._oauth_client_secret_encrypted = None
+        else:
+            self._oauth_client_secret_encrypted = get_encryption().encrypt(value)
 
     def __repr__(self) -> str:
         return f"<GSageEmailAccount(id={self.id}, email={self.email}, org_id={self.org_id})>"

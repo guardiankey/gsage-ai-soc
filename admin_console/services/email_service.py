@@ -52,6 +52,11 @@ def _account_to_dict(a: Any, reveal: bool = False) -> dict[str, Any]:
         "smtp_use_tls": a.smtp_use_tls,
         "smtp_username": a.smtp_username,
         "sender_name": a.sender_name,
+        "auth_method": getattr(a, "auth_method", "basic"),
+        "oauth_tenant_id": getattr(a, "oauth_tenant_id", None),
+        "oauth_client_id": getattr(a, "oauth_client_id", None),
+        "oauth_token_endpoint": getattr(a, "oauth_token_endpoint", None),
+        "oauth_scope": getattr(a, "oauth_scope", None),
         "created_at": a.created_at.isoformat() if a.created_at else "",
     }
     if reveal:
@@ -64,7 +69,10 @@ def _account_to_dict(a: Any, reveal: bool = False) -> dict[str, Any]:
                 d["imap_password"] = enc.decrypt(a._imap_password_encrypted)
             if a._smtp_password_encrypted:
                 d["smtp_password"] = enc.decrypt(a._smtp_password_encrypted)
+            if getattr(a, "_oauth_client_secret_encrypted", None):
+                d["oauth_client_secret"] = enc.decrypt(a._oauth_client_secret_encrypted)
         except Exception:
             d["imap_password"] = "••••••"
             d["smtp_password"] = "••••••"
+            d["oauth_client_secret"] = "••••••"
     return d
