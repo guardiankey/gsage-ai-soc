@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Optional
 import uuid
 
 from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.shared.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -83,6 +83,21 @@ class GSageChannelConversation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=0,
         server_default="0",
         comment="Total messages exchanged in this conversation",
+    )
+
+    # Bot Framework conversation reference (Microsoft Teams).
+    # Stored verbatim from TurnContext.get_conversation_reference(activity).
+    # Required to send proactive messages (continue_conversation) outside
+    # of an inbound turn — e.g. SOC alerts triggered by SIEM ingestion.
+    # Other channels (telegram, slack) leave this NULL.
+    conversation_reference: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment=(
+            "Channel-specific reference for proactive outbound messaging. "
+            "Currently used by Microsoft Teams to store the Bot Framework "
+            "ConversationReference."
+        ),
     )
 
     # Relationships

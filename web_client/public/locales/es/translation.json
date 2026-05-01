@@ -479,6 +479,8 @@
       "resetOtpDesc": "¿Está seguro de que desea restablecer el OTP de {{email}}?",
       "telegramId": "ID de Telegram",
       "telegramIdPlaceholder": "ID numérico del usuario en Telegram (opcional)",
+      "teamsAadObjectId": "Microsoft Teams AAD Object ID",
+      "teamsAadObjectIdPlaceholder": "Azure AD Object ID — detectado automáticamente en el primer mensaje si está vacío",
       "secondaryEmails": "Correos Secundarios",
       "secondaryEmailsPlaceholder": "uno@ejemplo.com\ndos@ejemplo.com",
       "aiInstructions": "Instrucciones de IA",

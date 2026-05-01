@@ -353,6 +353,7 @@ function EditUserForm({ user, onSubmit, onCancel, isLoading }: { user: AdminUser
     is_active: user.is_active,
     role: user.role_in_org,
     telegram_id: user.telegram_id ?? '',
+    teams_aad_object_id: user.teams_aad_object_id ?? '',
     secondary_emails: user.secondary_emails ?? '',
     ai_instructions: user.ai_instructions ?? '',
     otp_enabled: user.otp_enabled,
@@ -382,6 +383,14 @@ function EditUserForm({ user, onSubmit, onCancel, isLoading }: { user: AdminUser
             value={form.telegram_id ?? ''}
             onChange={(e) => setForm((p) => ({ ...p, telegram_id: e.target.value || null }))}
             placeholder={t('admin.users.telegramIdPlaceholder')}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>{t('admin.users.teamsAadObjectId')}</Label>
+          <Input
+            value={form.teams_aad_object_id ?? ''}
+            onChange={(e) => setForm((p) => ({ ...p, teams_aad_object_id: e.target.value || null }))}
+            placeholder={t('admin.users.teamsAadObjectIdPlaceholder')}
           />
         </div>
         <div className="space-y-1.5">

@@ -28,7 +28,7 @@ import {
   type AdminUserOut,
 } from '@/api/admin'
 
-const INTERFACES = ['web', 'email', 'telegram', 'whatsapp', 'slack', 'api', 'cli']
+const INTERFACES = ['web', 'email', 'telegram', 'teams', 'whatsapp', 'slack', 'api', 'cli']
 
 export default function InterfacesPage() {
   const { t } = useTranslation()

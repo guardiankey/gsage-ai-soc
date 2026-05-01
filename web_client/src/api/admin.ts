@@ -147,6 +147,7 @@ export interface AdminUserOut {
   group_ids: string[]
   dept_ids: string[]
   telegram_id: string | null
+  teams_aad_object_id: string | null
   secondary_emails: string | null
   ai_instructions: string | null
   created_at: string
@@ -165,6 +166,7 @@ export interface AdminUserUpdate {
   is_active?: boolean
   role?: string
   telegram_id?: string | null
+  teams_aad_object_id?: string | null
   secondary_emails?: string | null
   ai_instructions?: string | null
   otp_enabled?: boolean

@@ -15,6 +15,10 @@ httpx>=0.27,<1
 bcrypt>=4.2,<5
 PyJWT>=2.8,<3
 python-telegram-bot>=21.0,<22
+# Microsoft Bot Framework + MSAL — used by the Teams channel handler
+botbuilder-core>=4.16,<5
+botbuilder-schema>=4.16,<5
+msal>=1.28,<2
 pydantic[email]>=2.7,<3
 pydantic-settings>=2.2,<3
 psycopg2-binary>=2.9,<3

@@ -16,6 +16,7 @@ from src.backend_api.app.api.v1 import (
     approvals,
     auth,
     background_tasks,
+    channels_teams,
     chat,
     datastores,
     departments,
@@ -33,6 +34,12 @@ api_router = APIRouter()
 # Routes that do NOT require tenant auth (no rate limiting)
 api_router.include_router(health.router, prefix="/v1", tags=["Health"])
 api_router.include_router(auth.router, prefix="/v1/auth", tags=["Auth"])
+
+# Microsoft Teams webhook — auth is enforced by Bot Framework JWT validation
+# inside ``BotFrameworkAdapter.process_activity`` (not gsage tenant auth).
+# Mounted without rate-limiting and without org admin gating; multi-tenant
+# isolation is achieved via the ``profile_id`` path parameter.
+api_router.include_router(channels_teams.router, tags=["Teams"])
 
 # Org-scoped routes — rate-limited via check_rate_limit dependency
 # FastAPI resolves get_tenant_context (sub-dep of check_rate_limit) first;

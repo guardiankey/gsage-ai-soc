@@ -94,6 +94,19 @@ class GSageUser(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="Telegram numeric user ID (as string) for bot sender resolution",
     )
 
+    # Microsoft Teams integration
+    teams_aad_object_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+        comment=(
+            "Azure AD Object ID (GUID) used to resolve a Teams sender to a "
+            "GSageUser. Populated either manually by an admin or automatically "
+            "by the Teams handler on first contact via Microsoft Graph email "
+            "lookup."
+        ),
+    )
+
     # OTP / TOTP (RFC 6238)
     _otp_secret_encrypted: Mapped[Optional[bytes]] = mapped_column(
         "otp_secret_encrypted",

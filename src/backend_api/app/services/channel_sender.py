@@ -37,6 +37,8 @@ async def deliver_response(
     try:
         if source == "telegram":
             await _deliver_telegram(session, text, db)
+        elif source == "teams":
+            await _deliver_teams(session, text, db)
         elif source == "web":
             await _deliver_web(session, text, db)
         elif source == "scheduled":
@@ -152,6 +154,116 @@ async def _deliver_telegram(
     log.info(
         "channel_sender[telegram]: sent %d chunk(s) to chat=%s session=%s",
         len(chunks), chat_id, session.id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Microsoft Teams: proactive message via Bot Framework continue_conversation
+# ---------------------------------------------------------------------------
+
+async def _deliver_teams(
+    session: GSageTenantSession,
+    text: str,
+    db: AsyncSession,
+) -> None:
+    """Send *text* to the Teams conversation linked to *session*.
+
+    Uses the Bot Framework ``continue_conversation`` flow with the
+    ``ConversationReference`` previously persisted on
+    ``GSageChannelConversation.conversation_reference``.
+    """
+    from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, MessageFactory
+    from botbuilder.schema import ConversationReference
+
+    from src.shared.models.channel_conversation import GSageChannelConversation
+    from src.shared.models.interface_profile import GSageInterfaceProfile
+    from src.teams_handler.formatting import DEFAULT_MAX_LEN, split_text
+
+    # 1. Locate the Teams conversation for this session.
+    conv_result = await db.execute(
+        select(GSageChannelConversation).where(
+            GSageChannelConversation.session_id == session.id,
+            GSageChannelConversation.channel == "teams",
+        )
+    )
+    conversation = conv_result.scalar_one_or_none()
+    if conversation is None:
+        log.warning(
+            "channel_sender[teams]: no ChannelConversation for session=%s",
+            session.id,
+        )
+        return
+
+    ref_dict = conversation.conversation_reference or {}
+    if not ref_dict:
+        log.warning(
+            "channel_sender[teams]: conversation %s has no stored "
+            "ConversationReference (proactive delivery requires one)",
+            conversation.id,
+        )
+        return
+
+    # 2. Resolve the Azure Bot credentials. We prefer the profile id stashed
+    # by conversation_manager, falling back to the org's only active Teams
+    # profile.
+    profile_id_str = ref_dict.get("_gsage_profile_id")
+    profile: Optional[GSageInterfaceProfile] = None
+    if profile_id_str:
+        try:
+            profile = await db.get(
+                GSageInterfaceProfile, uuid.UUID(profile_id_str)
+            )
+        except (ValueError, TypeError):
+            profile = None
+    if profile is None:
+        prof_result = await db.execute(
+            select(GSageInterfaceProfile).where(
+                GSageInterfaceProfile.org_id == session.org_id,
+                GSageInterfaceProfile.interface == "teams",
+                GSageInterfaceProfile.is_active == True,  # noqa: E712
+            )
+        )
+        profile = prof_result.scalars().first()
+    if profile is None:
+        log.warning(
+            "channel_sender[teams]: no active teams profile for org=%s",
+            session.org_id,
+        )
+        return
+
+    cfg = profile.interface_config or {}
+    app_id = (cfg.get("app_id") or "").strip()
+    app_password = (cfg.get("app_password") or "").strip()
+    if not (app_id and app_password):
+        log.warning(
+            "channel_sender[teams]: profile %s missing credentials",
+            profile.id,
+        )
+        return
+
+    # 3. Build the adapter and replay-send via continue_conversation.
+    bf_settings = BotFrameworkAdapterSettings(
+        app_id=app_id, app_password=app_password
+    )
+    adapter = BotFrameworkAdapter(bf_settings)
+    # Drop our private key before deserializing into ConversationReference,
+    # otherwise botbuilder will reject the unknown attribute.
+    clean_ref_dict = {k: v for k, v in ref_dict.items() if not k.startswith("_gsage_")}
+    reference = ConversationReference().deserialize(clean_ref_dict)
+
+    chunks = split_text(text, DEFAULT_MAX_LEN)
+
+    async def _callback(turn_context):
+        for chunk in chunks:
+            msg = MessageFactory.text(chunk)
+            msg.text_format = "markdown"
+            await turn_context.send_activity(msg)
+
+    await adapter.continue_conversation(reference, _callback, app_id)
+
+    log.info(
+        "channel_sender[teams]: sent %d chunk(s) to conv=%s session=%s",
+        len(chunks), conversation.id, session.id,
     )
 
 

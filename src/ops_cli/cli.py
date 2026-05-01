@@ -11,6 +11,7 @@ import sys
 from typing import Sequence
 
 from src.ops_cli.channels import email as email_cmd
+from src.ops_cli.channels import teams as teams_cmd
 from src.ops_cli.channels import telegram as telegram_cmd
 
 
@@ -22,7 +23,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="group", required=True)
 
     # ── channels ──────────────────────────────────────────────
-    ch = sub.add_parser("channels", help="Configure external channels (email, telegram)")
+    ch = sub.add_parser("channels", help="Configure external channels (email, telegram, teams)")
     ch_sub = ch.add_subparsers(dest="channel", required=True)
 
     email_parser = ch_sub.add_parser("email", help="Manage email accounts")
@@ -30,6 +31,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     telegram_parser = ch_sub.add_parser("telegram", help="Manage telegram interface profiles")
     telegram_cmd.register(telegram_parser)
+
+    teams_parser = ch_sub.add_parser("teams", help="Manage Microsoft Teams interface profiles")
+    teams_cmd.register(teams_parser)
 
     return parser
 

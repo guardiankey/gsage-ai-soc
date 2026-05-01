@@ -180,6 +180,7 @@ class AdminUserOut(BaseModel):
     group_ids: list[uuid.UUID]
     dept_ids: list[uuid.UUID]
     telegram_id: Optional[str] = None
+    teams_aad_object_id: Optional[str] = None
     secondary_emails: Optional[str] = None
     ai_instructions: Optional[str] = None
     created_at: datetime
@@ -214,6 +215,7 @@ class AdminUserUpdate(BaseModel):
     is_active: Optional[bool] = None
     role: Optional[str] = Field(default=None, pattern=r"^(owner|admin|member|viewer)$")
     telegram_id: Optional[str] = Field(default=None, max_length=50)
+    teams_aad_object_id: Optional[str] = Field(default=None, max_length=64)
     secondary_emails: Optional[str] = None
     ai_instructions: Optional[str] = None
     otp_enabled: Optional[bool] = None
@@ -294,7 +296,7 @@ class InterfaceProfileOut(BaseModel):
 
 class InterfaceProfileCreate(BaseModel):
     dept_id: Optional[uuid.UUID] = None
-    interface: str = Field(..., pattern=r"^(web|email|telegram|whatsapp|slack|api|cli)$")
+    interface: str = Field(..., pattern=r"^(web|email|telegram|teams|whatsapp|slack|api|cli)$")
     user_id: Optional[uuid.UUID] = None
     is_active: bool = True
     description: Optional[str] = None

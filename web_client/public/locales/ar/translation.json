@@ -479,6 +479,8 @@
       "resetOtpDesc": "هل أنت متأكد أنك تريد إعادة تعيين OTP لـ {{email}}؟",
       "telegramId": "معرّف Telegram",
       "telegramIdPlaceholder": "معرّف المستخدم الرقمي على Telegram (اختياري)",
+      "teamsAadObjectId": "Microsoft Teams AAD Object ID",
+      "teamsAadObjectIdPlaceholder": "معرّف الكائن في Azure AD — يُكتشف تلقائيًا عند أول رسالة إذا كان فارغًا",
       "secondaryEmails": "البريد الإلكتروني الثانوي",
       "secondaryEmailsPlaceholder": "one@example.com\ntwo@example.com",
       "aiInstructions": "تعليمات الذكاء الاصطناعي",

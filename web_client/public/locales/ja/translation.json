@@ -479,6 +479,8 @@
       "resetOtpDesc": "{{email}} のOTPをリセットしてもよろしいですか？",
       "telegramId": "Telegram ID",
       "telegramIdPlaceholder": "TelegramユーザーのID（数値、任意）",
+      "teamsAadObjectId": "Microsoft Teams AAD Object ID",
+      "teamsAadObjectIdPlaceholder": "Azure AD Object ID — 空欄の場合は最初のメッセージで自動検出されます",
       "secondaryEmails": "サブメールアドレス",
       "secondaryEmailsPlaceholder": "one@example.com\ntwo@example.com",
       "aiInstructions": "AI指示",

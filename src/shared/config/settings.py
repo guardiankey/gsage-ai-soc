@@ -251,6 +251,22 @@ class Settings(BaseSettings):
     # and perform hot-reload of bots. 0 = disable hot-reload.
     telegram_reload_interval: int = 300
 
+    # ── Microsoft Teams Channel ───────────────────────────────────────────
+    # Rate limits for the Teams channel (all values per UTC window).
+    teams_rate_limit_org_daily: int = 200
+    teams_rate_limit_user_hourly: int = 30
+    # Microsoft Teams hard limit on a single text activity is 28 KB.
+    # We chunk above this to be safe with markdown overhead.
+    teams_max_message_length: int = 25_000
+    # Microsoft Bot Framework public OpenID configuration URL — used to
+    # validate inbound JWTs. Override only for sovereign/gov clouds.
+    teams_bot_openid_metadata_url: str = (
+        "https://login.botframework.com/v1/.well-known/openidconfiguration"
+    )
+    # Cache TTL (seconds) for AAD-Object-ID → email lookups via Microsoft
+    # Graph (only used for first-contact resolution).
+    teams_graph_email_cache_ttl: int = 86_400
+
     # ── Email Worker ──────────────────────────────────────────────────────
     # Rate limits for the Email channel (all values per UTC window).
     # Org-level: max inbound emails processed per organization per calendar day.

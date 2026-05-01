@@ -100,6 +100,7 @@ async def _build_user_out(
         role_in_org=role_in_org,
         group_ids=group_ids,
         telegram_id=user.telegram_id,
+        teams_aad_object_id=user.teams_aad_object_id,
         ai_instructions=user.ai_instructions,
         secondary_emails=user.secondary_emails,
         dept_ids=dept_ids,
