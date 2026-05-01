@@ -273,7 +273,18 @@ def _diff_filename_parts(col: Collection, filename: str) -> tuple[str, bool]:
 @router.get("/{slug}/differentials/", response_class=HTMLResponse)
 async def list_diff_years(slug: str, session: AsyncSession = Depends(get_db)) -> HTMLResponse:
     col = await _load_collection_or_404(slug, session)
-    window = await _window_or_404(session, col)
+    window = await get_collection_window(session, col.id)
+
+    title = f"Index of /lists/{slug}/differentials/"
+
+    if window is None:
+        body = (
+            "<p class='meta'>No differential data yet — the collection has no items.</p>"
+            "<table><tr><th>Year</th><th></th></tr>\n"
+            f"<tr><td><a href='/lists/{slug}/'>../</a></td><td class='meta'></td></tr>\n"
+            "</table>"
+        )
+        return HTMLResponse(_html_page(title, body))
 
     rows = (
         f"<tr><td><a href='/lists/{slug}/'>../</a></td><td class='meta'></td></tr>\n"
@@ -290,7 +301,7 @@ async def list_diff_years(slug: str, session: AsyncSession = Depends(get_db)) ->
         "</p>"
     )
     body = info + "<table><tr><th>Year</th><th></th></tr>\n" + rows + "</table>"
-    return HTMLResponse(_html_page(f"Index of /lists/{slug}/differentials/", body))
+    return HTMLResponse(_html_page(title, body))
 
 
 @router.get("/{slug}/differentials/{year}/", response_class=HTMLResponse)

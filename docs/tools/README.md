@@ -93,6 +93,7 @@ framework (audience: developers).
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `glpi` | 5 | `glpi:read`, `glpi:write` | ✓ | ✓ | — | [soc/ticket/glpi.md](soc/ticket/glpi.md) |
+| `rt` | 4 | `rt:read`, `rt:write` | ✓ | ✓ | — | [soc/ticket/rt.md](soc/ticket/rt.md) |
 
 ## kb
 

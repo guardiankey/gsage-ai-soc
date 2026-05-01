@@ -57,53 +57,14 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 ### `curator_lists`
 
 - **`list_collections`** — list all reputation list collections
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `active_only` | `boolean` | — | Used with list_collections. If true, return only active collections (default: false). |
-
 - **`view_items`** — query items inside a specific collection (requires collection_id)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `collection_id` | `integer` | — | Collection ID. Required for view_items. |
-  | `value` | `string` | — | Used with view_items. Filter by exact value (IP address, domain, hash, etc.). |
-  | `item_type` | `string` | — | Used with view_items. Filter by item type: blocklist, allowlist, or suspected. |
-
 
 ### `curator_manage`
 
 - **`add_items`** — add one or more entries to a collection (requires collection_id, items)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `collection_id` | `integer` | — | Target collection ID. Required for add_items, del_item, and update_collection. Use curator_lists action=list_collections to discover IDs. |
-  | `items` | `array` | — | List of items to add. Required for add_items. Each item must have 'value' and 'item_type'. Optionally 'public_reference', 'reference', 'expire_days'. |
-
 - **`del_item`** — remove an entry from a collection (requires collection_id, value, item_type)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `collection_id` | `integer` | — | Target collection ID. Required for add_items, del_item, and update_collection. Use curator_lists action=list_collections to discover IDs. |
-  | `value` | `string` | — | Entry value to remove. Required for del_item. |
-  | `item_type` | `string` | — | Item type to remove. Required for del_item. |
-
 - **`create_collection`** — create a new reputation list (requires short_description, collection_type)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `short_description` | `string` | — | Short label for the collection (max 100 chars). Required for create_collection. Together with subtype and collection_type this forms the auto-generated slug. |
-  | `collection_type` | `string` | — | Type of entries this collection holds. Required for create_collection. Valid values: ip, cidr, domain, url, domain_regex, file_hash_md5, file_hash_sha1, file_hash_sha256, email, asn, ja3, ja4. |
-  | `subtype` | `string` | — | Optional subtype label (max 20 chars). Used for create_collection. Example: 'smtp_servers', 'exit_nodes', 'tor'. Included in slug generation. |
-
 - **`update_collection`** — update collection metadata (requires collection_id)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `collection_id` | `integer` | — | Target collection ID. Required for add_items, del_item, and update_collection. Use curator_lists action=list_collections to discover IDs. |
-  | `description` | `string` | — | Detailed description of the collection. Used for create/update_collection. |
-  | `active` | `boolean` | — | Whether the collection is active (default: true). Inactive collections are not dumped. Used for create/update_collection. |
-
 
 ## Permissions required
 

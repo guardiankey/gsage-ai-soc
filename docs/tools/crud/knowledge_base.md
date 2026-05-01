@@ -24,35 +24,9 @@ _No configuration-derived environment variables._
 ### `knowledge_base`
 
 - **`create`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `content` | `string` | — | [create] Text to remember (required for create). |
-  | `tags` | `array` | — | [create] Optional tags for categorization. |
-  | `user_scoped` | `boolean` | — | [create/search/list] true = user-level entry; false = org-wide entry visible to all users. |
-  | `expires_at` | `string` | — | [create] Optional ISO-8601 expiration date (UTC). |
-
 - **`search`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `user_scoped` | `boolean` | — | [create/search/list] true = user-level entry; false = org-wide entry visible to all users. |
-  | `query` | `string` | — | [search] Text to search for. |
-
 - **`list`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `user_scoped` | `boolean` | — | [create/search/list] true = user-level entry; false = org-wide entry visible to all users. |
-  | `limit` | `integer` | — | [list] Maximum number of entries to return (max 100). |
-  | `offset` | `integer` | — | [list] Pagination offset. |
-
 - **`delete`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `entry_id` | `string` | — | [delete] UUID of the entry to soft-delete. |
-
 
 ## Permissions required
 

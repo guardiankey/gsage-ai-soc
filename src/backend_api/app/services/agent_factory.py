@@ -777,6 +777,20 @@ class ApprovalAwareMCPTools(MCPTools):
                     )
                 )
 
+            # Symmetric guard: a call that reached run_approved_tool MUST
+            # carry ``_approval_summary``.  The proxy schema already enforces
+            # this at the LLM-provider level, but we re-check here so a
+            # misconfigured / non-conformant provider cannot bypass it after
+            # the human approval step (where the failure would be silent).
+            if require_approval and not (params or {}).get("_approval_summary"):
+                return ToolResult(
+                    content=(
+                        f"Error: tool '{tool_name}' is missing the required "
+                        "_approval_summary parameter.  Re-issue the call with "
+                        "a concise summary of the action, target and reason."
+                    )
+                )
+
             active_session = await mcp_tools_instance.get_session_for_run(
                 run_context=run_context, agent=agent, team=team,
             )
@@ -889,6 +903,48 @@ class ApprovalAwareMCPTools(MCPTools):
             "additionalProperties": False,
         }
 
+        # Stricter schema for run_approved_tool — *every* approval-required
+        # tool has ``_approval_summary`` auto-injected into its params_schema
+        # (see ``BaseTool.input_schema``).  Forcing the field at the proxy
+        # level lets the LLM provider reject a missing-summary call BEFORE
+        # the run is paused for human approval.  Without this guard we have
+        # observed the LLM occasionally omitting the field — the user then
+        # approves the call and the MCP tool only fails *after* approval
+        # with a MISSING_PARAM error, which is not always surfaced cleanly
+        # in the chat (the run stays in ``PAUSED`` with no items added).
+        _APPROVED_PROXY_PARAMS_SCHEMA: dict[str, Any] = {
+            "type": "object",
+            "required": ["tool_name", "params"],
+            "properties": {
+                "tool_name": {
+                    "type": "string",
+                    "description": (
+                        "Exact tool name from search_tools result."
+                    ),
+                },
+                "params": {
+                    "type": "object",
+                    "required": ["_approval_summary"],
+                    "properties": {
+                        "_approval_summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": (
+                                "Human-readable summary shown to the approver. "
+                                "MUST describe the action, the target, and the "
+                                "reason in the user's language."
+                            ),
+                        },
+                    },
+                    "description": (
+                        "Tool parameters matching the target tool's "
+                        "params_schema. MUST include _approval_summary."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+        }
+
         # ── run_discovered_tool (no HITL) ─────────────────────────────────
         self.functions["run_discovered_tool"] = Function(
             name="run_discovered_tool",
@@ -911,7 +967,7 @@ class ApprovalAwareMCPTools(MCPTools):
                 "requires_approval=true. The params MUST include "
                 "_approval_summary."
             ),
-            parameters=_PROXY_PARAMS_SCHEMA,
+            parameters=_APPROVED_PROXY_PARAMS_SCHEMA,
             entrypoint=self._make_proxy_entrypoint(require_approval=True),
             skip_entrypoint_processing=True,
             requires_confirmation=True,

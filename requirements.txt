@@ -62,4 +62,6 @@ IP2Location>=8.10,<9     # IP2Location BIN database reader (IP2LOCATION-LITE-DB1
 zabbix-utils>=2.0.2,<3   # Official Zabbix SIA Python API client (used by zabbix_query tool)
 polars>=1.0,<2           # DataFrame engine used by core CSV tools (csv_describe / csv_query / csv_soc)
 duckdb>=1.0,<2           # In-process SQL engine used by core CSV tools (csv_query, SELECT-only)
+pyarrow>=16,<22          # Required by polars.DataFrame.to_arrow() in csv_query (zero-copy DuckDB register)
 chardet>=5.2,<6          # Encoding auto-detection for CSV loader
+rt>=3,<4                 # Request Tracker REST 2.0 client used by RT tools (rt.rest2.AsyncRt)

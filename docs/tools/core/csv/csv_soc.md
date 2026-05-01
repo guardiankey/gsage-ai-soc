@@ -19,45 +19,14 @@ The variables below are derived automatically from each tool's `config_schema`. 
 
 _No configuration-derived environment variables._
 
-**Other environment variables** (read directly from the source — not part of `config_schema`):
-
-| Variable | Default in code |
-| --- | --- |
-| `GEOIP_ASN_DB_PATH` | `"/app/dbs/geoip/GeoLite2-ASN.mmdb"` |
-| `GEOIP_CITY_DB_PATH` | `"/app/dbs/geoip/GeoLite2-City.mmdb"` |
-| `GEOIP_COUNTRY_DB_PATH` | `"/app/dbs/geoip/GeoLite2-Country.mmdb"` |
-
 ## Operations
 
 ### `csv_soc`
 
 - **`ip_in_cidr`** — filter rows by CIDR membership.
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `column` | `string` | — | IP column name. Required for ip_in_cidr, ip_classify, and geoip_enrich. |
-  | `cidrs` | `array` | — | CIDR ranges (e.g. '10.0.0.0/8', '2001:db8::/32'). Required for ip_in_cidr. |
-  | `invert` | `boolean` | — | When true, return rows that do NOT match any CIDR. Used by ip_in_cidr only. Default false. |
-
 - **`ip_classify`** — tag each IP as public/private/loopback/...
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `column` | `string` | — | IP column name. Required for ip_in_cidr, ip_classify, and geoip_enrich. |
-  | `output_column` | `string` | — | Name of the column to add for ip_classify (default 'ip_class'). |
-
 - **`extract_iocs`** — scan text columns for IPs/domains/URLs/emails/MD5/SHA1/SHA256.
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `columns` | `array` | — | Text columns to scan. Required for extract_iocs. |
-
 - **`geoip_enrich`** — append ASN + (when available) country.
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `column` | `string` | — | IP column name. Required for ip_in_cidr, ip_classify, and geoip_enrich. |
-
 
 ## Permissions required
 

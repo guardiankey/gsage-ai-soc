@@ -58,101 +58,23 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 ### `gz_endpoints`
 
 - **`list`** — paginate endpoints (supports filters, up to 1000/page via API v1.1)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `is_managed` | `boolean` | — | Filter by managed status (action=list only).  true=only managed, false=only unmanaged, omit=all. |
-  | `page` | `integer` | — | First page to retrieve (action=list, default: 1). |
-  | `max_pages` | `integer` | — | Maximum pages to fetch for action=list (default: 5). |
-
 - **`details`** — full record for one endpoint_id
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `endpoint_id` | `string` | — | Endpoint object ID.  Required for action=details. |
-
 
 ### `gz_management`
 
 - **`add_to_blocklist`** — add hash/path/connection rules (requires blocklist_type, rules)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `blocklist_type` | `string` | — | Type of blocklist rule to add. Required for add_to_blocklist. - hash: block by file hash (MD5 or SHA256) - path: block by file path - connection: block by network connection details |
-  | `rules` | `array` | — | Array of rule objects to add to the blocklist (add_to_blocklist).  For blocklist_type=hash, each rule requires:   { "algorithm": "sha256" \| "md5", "hash": "<hex>", "note": "<reason>" }  For blocklist_type=path, each rule requires:   { "path": "<file_path>", "note": "<reason>" }  For blocklist_type=connection, each rule requires:   { "rule_name": "<name>", "command_line": "<cmd>",     "protocol": "<tcp\|udp>", "direction": "<in\|out\|both>",     "ip_version": "<4\|6>", "local_address": "<cidr>",     "remote_address": "<cidr>", "operating_system": "<os>" } |
-  | `recursive` | `boolean` | — | Apply blocklist rule recursively to sub-companies (add_to_blocklist, default: true). |
-
 - **`remove_from_blocklist`** — remove entries by ID (requires blocklist_item_ids)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `blocklist_item_ids` | `array` | — | Array of blocklist entry IDs to remove. Required for remove_from_blocklist. Obtain IDs from gz_security action=blocklist_items. |
-
 - **`isolate_endpoint`** — isolate endpoint from network (requires endpoint_id)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `endpoint_id` | `string` | — | Endpoint ID. Required for isolate_endpoint and restore_isolation. |
-
 - **`restore_isolation`** — restore isolated endpoint (requires endpoint_id)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `endpoint_id` | `string` | — | Endpoint ID. Required for isolate_endpoint and restore_isolation. |
-
 - **`change_incident_status`** — update status (requires incident_type, incident_id, status)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `incident_type` | `string` | — | Incident API namespace. Required for change_incident_status and update_incident_note. - incidents: standard security incidents - extendedIncidents: XDR/advanced incidents |
-  | `incident_id` | `string` | — | Incident ID. Required for change_incident_status and update_incident_note. |
-  | `status` | `string` | — | New incident status. Required for change_incident_status. |
-
 - **`update_incident_note`** — add/update note (requires incident_type, incident_id, note)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `incident_type` | `string` | — | Incident API namespace. Required for change_incident_status and update_incident_note. - incidents: standard security incidents - extendedIncidents: XDR/advanced incidents |
-  | `incident_id` | `string` | — | Incident ID. Required for change_incident_status and update_incident_note. |
-  | `note` | `string` | — | Note text to attach to the incident (max 50 000 chars). Required for update_incident_note. |
-
 
 ### `gz_security`
 
 - **`blocklist_items`** — list all blocklist entries (hash/path/connection)
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `company_id` | `string` | — | Company (organization) ID.  Required for all phasr_* actions. |
-  | `search_string` | `string` | — | Search/filter string for phasr_resources and phasr_identities. |
-  | `categories` | `array` | — | Filter PHASR recommendations by threat category (action=phasr_recommendations only).  Values: tampering_tool, hack_tool, remote_tool, miner, lol_bin. |
-  | `action_taken` | `array` | — | Filter PHASR recommendations by applied status (action=phasr_recommendations only).  Values: action_needed, applied, partially_applied. |
-  | `recommendation_type` | `string` | — | Filter PHASR recommendations by type (action=phasr_recommendations only).  Values: allow_access, restrict_access, allow_access_request. |
-  | `sort` | `string` | — | Sort PHASR recommendations by field (default: created_on). |
-  | `dir` | `string` | — | Sort direction for PHASR recommendations (default: DESC). |
-  | `page` | `integer` | — | Page number (default: 1). |
-  | `per_page` | `integer` | — | Items per page (max 100, default: 30). |
-
 - **`phasr_recommendations`** — PHASR recommendations for a company
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `categories` | `array` | — | Filter PHASR recommendations by threat category (action=phasr_recommendations only).  Values: tampering_tool, hack_tool, remote_tool, miner, lol_bin. |
-  | `action_taken` | `array` | — | Filter PHASR recommendations by applied status (action=phasr_recommendations only).  Values: action_needed, applied, partially_applied. |
-  | `recommendation_type` | `string` | — | Filter PHASR recommendations by type (action=phasr_recommendations only).  Values: allow_access, restrict_access, allow_access_request. |
-
 - **`phasr_resources`** — behavioral profile resources for a company
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `search_string` | `string` | — | Search/filter string for phasr_resources and phasr_identities. |
-
 - **`phasr_identities`** — behavioral profile identities for a company
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `search_string` | `string` | — | Search/filter string for phasr_resources and phasr_identities. |
-
 
 ## Permissions required
 

@@ -10,9 +10,10 @@ express in plain SQL:
                        ``public``.
 * ``extract_iocs``  — scan one or more text columns for IPs, domains, URLs,
                        email addresses and MD5/SHA1/SHA256 hashes.
-* ``geoip_enrich``  — append ``asn`` / ``asn_org`` columns from
-                       ``GeoLite2-ASN.mmdb`` (and country fields if a
-                       GeoLite2 city/country DB is available).
+* ``geoip_enrich``  — append ``asn`` / ``asn_org`` / ``country_code`` /
+                       ``country`` columns by reusing the ``ip_geolocate``
+                       tool's offline databases (GeoLite2-ASN +
+                       IP2Location DB11).  No extra configuration needed.
 
 Permission: ``core:csv_soc``
 """
@@ -22,11 +23,9 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
-import os
 import re
-import threading
 import time
-from typing import ClassVar, Optional
+from typing import Any, Callable, ClassVar, Optional
 
 import polars as pl
 
@@ -62,60 +61,39 @@ _MD5_RE = re.compile(r"\b[a-fA-F0-9]{32}\b")
 _SHA1_RE = re.compile(r"\b[a-fA-F0-9]{40}\b")
 _SHA256_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
 
-# ── GeoIP DB paths (mirror ip_geolocate tool conventions) ──────────────────
-_GEOIP_ASN_PATH: str = os.environ.get(
-    "GEOIP_ASN_DB_PATH", "/app/dbs/geoip/GeoLite2-ASN.mmdb"
-)
-_GEOIP_CITY_PATH: str = os.environ.get(
-    "GEOIP_CITY_DB_PATH", "/app/dbs/geoip/GeoLite2-City.mmdb"
-)
-_GEOIP_COUNTRY_PATH: str = os.environ.get(
-    "GEOIP_COUNTRY_DB_PATH", "/app/dbs/geoip/GeoLite2-Country.mmdb"
-)
+# ── GeoIP — reuse the ip_geolocate tool's offline DBs (GeoLite2-ASN +
+#         IP2Location DB11). Imported lazily so this module still loads
+#         when geoip2 / IP2Location are unavailable.
+_geoip_lookup: Optional[Callable[[str], dict[str, Any]]] = None
+_geoip_import_error: Optional[str] = None
 
-_geoip_lock = threading.Lock()
-_asn_reader = None  # type: ignore[var-annotated]
-_country_reader = None  # type: ignore[var-annotated]
-
-
-def _open_reader(path: str):
-    """Open a MaxMind reader if the file exists, otherwise return None."""
-    if not os.path.isfile(path):
-        return None
-    try:
-        import geoip2.database  # type: ignore[import-untyped]
-
-        return geoip2.database.Reader(path)
-    except Exception as exc:
-        logger.warning("csv_soc: failed to open %s: %s", path, exc)
-        return None
+try:
+    from src.mcp_server.tools.soc.network.ip_geolocate import (
+        _get_asn_reader as _ipgeo_get_asn,  # type: ignore[attr-defined]
+        _get_ip2loc as _ipgeo_get_ip2loc,  # type: ignore[attr-defined]
+        _lookup_single as _ipgeo_lookup_single,  # type: ignore[attr-defined]
+    )
+    _geoip_lookup = _ipgeo_lookup_single
+except Exception as exc:  # pragma: no cover - import-time guard
+    _ipgeo_get_asn = None  # type: ignore[assignment]
+    _ipgeo_get_ip2loc = None  # type: ignore[assignment]
+    _geoip_import_error = f"{type(exc).__name__}: {exc}"
+    logger.warning("csv_soc: ip_geolocate helpers unavailable: %s", _geoip_import_error)
 
 
-def _get_asn_reader():
-    global _asn_reader  # noqa: PLW0603
-    if _asn_reader is not None:
-        return _asn_reader
-    with _geoip_lock:
-        if _asn_reader is None:
-            _asn_reader = _open_reader(_GEOIP_ASN_PATH)
-        return _asn_reader
+def _geoip_status() -> tuple[bool, bool, Optional[str]]:
+    """Return ``(asn_db_available, ip2location_db_available, error)``.
 
-
-def _get_country_reader():
-    """Return a Reader that exposes ``.country()`` lookups, if available.
-
-    Tries the city DB first (it provides ``.country()`` too) then falls
-    back to the country-only DB.
+    The lookup is functional whenever at least one of the readers is open.
     """
-    global _country_reader  # noqa: PLW0603
-    if _country_reader is not None:
-        return _country_reader
-    with _geoip_lock:
-        if _country_reader is None:
-            _country_reader = _open_reader(_GEOIP_CITY_PATH) or _open_reader(
-                _GEOIP_COUNTRY_PATH
-            )
-        return _country_reader
+    if _geoip_lookup is None or _ipgeo_get_asn is None or _ipgeo_get_ip2loc is None:
+        return (False, False, _geoip_import_error or "ip_geolocate helpers not importable")
+    try:
+        asn_ok = _ipgeo_get_asn() is not None
+        ip2loc_ok = _ipgeo_get_ip2loc() is not None
+    except Exception as exc:  # pragma: no cover - defensive
+        return (False, False, f"{type(exc).__name__}: {exc}")
+    return (asn_ok, ip2loc_ok, None)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -272,11 +250,12 @@ def _action_geoip_enrich(df: pl.DataFrame, *, column: str) -> dict:
     if column not in df.columns:
         raise ValueError(f"Column {column!r} not found.")
 
-    asn_reader = _get_asn_reader()
-    country_reader = _get_country_reader()
-    if asn_reader is None and country_reader is None:
+    asn_ok, ip2loc_ok, err = _geoip_status()
+    if _geoip_lookup is None or (not asn_ok and not ip2loc_ok):
         raise ValueError(
-            "No GeoIP database available (neither ASN nor Country/City)."
+            "GeoIP enrichment unavailable: "
+            + (err or "neither GeoLite2-ASN nor IP2Location databases are loaded.")
+            + "  This action reuses the offline databases of the ip_geolocate tool."
         )
 
     # Cache lookups per unique IP to amortise over duplicates.
@@ -289,50 +268,21 @@ def _action_geoip_enrich(df: pl.DataFrame, *, column: str) -> dict:
     country_map: dict[str, Optional[str]] = {}
 
     for ip in unique_ips:
-        # Skip private / invalid before hitting the readers.
         try:
-            addr = ipaddress.ip_address(ip)
-        except ValueError:
+            rec = _geoip_lookup(ip)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("csv_soc: ip_geolocate lookup failed for %s: %s", ip, exc)
             asn_map[ip] = None
             asn_org_map[ip] = None
             cc_map[ip] = None
             country_map[ip] = None
             continue
-        if (
-            addr.is_private
-            or addr.is_loopback
-            or addr.is_link_local
-            or addr.is_reserved
-        ):
-            asn_map[ip] = None
-            asn_org_map[ip] = None
-            cc_map[ip] = None
-            country_map[ip] = None
-            continue
-
-        if asn_reader is not None:
-            try:
-                rec = asn_reader.asn(ip)
-                asn_map[ip] = rec.autonomous_system_number
-                asn_org_map[ip] = rec.autonomous_system_organization
-            except Exception:
-                asn_map[ip] = None
-                asn_org_map[ip] = None
-        else:
-            asn_map[ip] = None
-            asn_org_map[ip] = None
-
-        if country_reader is not None:
-            try:
-                rec = country_reader.country(ip)
-                cc_map[ip] = rec.country.iso_code
-                country_map[ip] = rec.country.name
-            except Exception:
-                cc_map[ip] = None
-                country_map[ip] = None
-        else:
-            cc_map[ip] = None
-            country_map[ip] = None
+        # ip_geolocate returns null geo fields for invalid/private IPs
+        # and skips the network call for them — no extra handling needed.
+        asn_map[ip] = rec.get("asn")
+        asn_org_map[ip] = rec.get("asn_org")
+        cc_map[ip] = rec.get("country_code")
+        country_map[ip] = rec.get("country")
 
     asn_series = pl.Series(
         "asn", [asn_map.get(v or "") for v in ip_values], dtype=pl.Int64
@@ -349,8 +299,8 @@ def _action_geoip_enrich(df: pl.DataFrame, *, column: str) -> dict:
 
     enriched = df.with_columns([asn_series, asn_org_series, cc_series, country_series])
     return {
-        "asn_db_available": asn_reader is not None,
-        "country_db_available": country_reader is not None,
+        "asn_db_available": asn_ok,
+        "ip2location_db_available": ip2loc_ok,
         "unique_ips_resolved": len(unique_ips),
         "result": _build_payload(enriched),
     }

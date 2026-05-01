@@ -125,7 +125,9 @@ def _run_duckdb_query(arrow_table, sql: str) -> tuple[list[str], list[list]]:
         con.execute("SET disabled_filesystems='LocalFileSystem'")
         con.execute(f"SET memory_limit='{_MEMORY_LIMIT}'")
         con.execute("SET threads TO 2")
-        con.execute(f"SET statement_timeout='{int(_QUERY_TIMEOUT_SECONDS * 1000)}ms'")
+        # DuckDB has no SQL-level query timeout setting.  Wall-clock protection
+        # is provided by the tool's timeout_seconds class attribute, which
+        # wraps the call in a background thread with a hard deadline.
         con.register("csv", arrow_table)
 
         cur = con.execute(sql)
@@ -152,7 +154,8 @@ class CsvQueryTool(BaseTool):
 
     * ``SET disabled_filesystems='LocalFileSystem'`` — no host file access.
     * ``memory_limit=256MB`` — bounded RAM per query.
-    * ``statement_timeout=10s`` — wall-clock cap on execution.
+    * ``timeout_seconds=30`` (class-level) — wall-clock cap enforced by the
+      tool runner; DuckDB itself has no SQL-level timeout setting.
     * Up to 5 000 result rows are returned; anything beyond is truncated.
 
     Use ``csv_describe`` first to discover columns; this tool returns rows

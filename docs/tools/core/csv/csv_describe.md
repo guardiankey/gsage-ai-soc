@@ -24,37 +24,9 @@ _No configuration-derived environment variables._
 ### `csv_describe`
 
 - **`schema`** — per-column dtype, null count, unique count.
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `file_id` | `string` | ✓ | UUID of the CSV file (GSageFile.id). |
-  | `n` | `integer` | — | Number of rows to return for action=head/sample. Default 10. Ignored otherwise. |
-  | `column` | `string` | — | Column name. Required when action=value_counts. |
-  | `top` | `integer` | — | Number of top values to return for action=value_counts. Default 20. |
-  | `seed` | `integer` | — | Random seed for action=sample (reproducible). |
-  | `delimiter` | `string` | — | Override delimiter detection. Allowed values: ',', ';', '\t', '\|'. Omit for auto-detect. |
-  | `encoding` | `string` | — | Override encoding detection (e.g. 'utf-8', 'latin-1'). Omit for auto-detect. |
-
 - **`head`** — first N rows in file order.
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `n` | `integer` | — | Number of rows to return for action=head/sample. Default 10. Ignored otherwise. |
-
 - **`sample`** — random N rows.
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `n` | `integer` | — | Number of rows to return for action=head/sample. Default 10. Ignored otherwise. |
-  | `seed` | `integer` | — | Random seed for action=sample (reproducible). |
-
 - **`value_counts`** — top values + frequency for one column.
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `column` | `string` | — | Column name. Required when action=value_counts. |
-  | `top` | `integer` | — | Number of top values to return for action=value_counts. Default 20. |
-
 
 ## Permissions required
 

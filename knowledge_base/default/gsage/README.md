@@ -58,6 +58,8 @@ See more examples in [PROMPT_EXAMPLES.md](PROMPT_EXAMPLES.md).
 
 ## Tools and integrations
 
+**You can find tool documentation to use and configure at** [docs/tools/README.md](docs/tools/README.md).
+
 The platform is designed to make new integrations straightforward to add. See [docs/dev/TOOLS.md](docs/dev/TOOLS.md) for the list of implemented tools and guidance for building new ones.
 
 In the repository [guardiankey/gsage-soc-ai-tools](https://github.com/guardiankey/gsage-ai-soc), you can find a collection of community-contributed tools and integrations that can be used with this platform.

@@ -24,30 +24,8 @@ _No configuration-derived environment variables._
 ### `zip_tool`
 
 - **`zip`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `file_ids` | `array` | — | [action=zip] List of file UUIDs to compress. Obtain IDs from 'read_file' (list mode) or from previous tool results. |
-  | `file_id` | `string` | — | [action=list, action=unzip] UUID of the ZIP file to inspect or extract. |
-  | `output_filename` | `string` | — | [action=zip] Base name for the resulting ZIP (without extension). Defaults to 'files'. |
-  | `entries` | `array` | — | [action=unzip] Names of specific entries inside the ZIP to extract. If omitted, all non-directory entries are extracted. |
-  | `output_prefix` | `string` | — | [action=unzip] Optional prefix prepended to every extracted filename (e.g. 'invoice_' → 'invoice_report.pdf'). |
-
 - **`list`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `file_ids` | `array` | — | [action=zip] List of file UUIDs to compress. Obtain IDs from 'read_file' (list mode) or from previous tool results. |
-  | `file_id` | `string` | — | [action=list, action=unzip] UUID of the ZIP file to inspect or extract. |
-
 - **`unzip`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `file_id` | `string` | — | [action=list, action=unzip] UUID of the ZIP file to inspect or extract. |
-  | `entries` | `array` | — | [action=unzip] Names of specific entries inside the ZIP to extract. If omitted, all non-directory entries are extracted. |
-  | `output_prefix` | `string` | — | [action=unzip] Optional prefix prepended to every extracted filename (e.g. 'invoice_' → 'invoice_report.pdf'). |
-
 
 ## Permissions required
 

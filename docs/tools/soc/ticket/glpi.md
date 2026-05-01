@@ -64,88 +64,17 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 ### `glpi_search`
 
 - **`search`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `itemtype` | `string` | ✓ | GLPI itemtype to search. Use 'Ticket' for incidents/requests, 'Computer' / 'NetworkEquipment' / 'Software' for assets, 'User' / 'Group' for people, 'KnowbaseItem' for the knowledge base. |
-  | `quick_search` | `string` | — | Simple free-text search: searches the given string across multiple relevant fields for the itemtype using OR/contains logic. No need to know field IDs. Ticket/Problem/Change/KnowbaseItem: searches name and full description. Computer/asset types: searches name and serial number. User: searches name and email. Cannot be combined with 'keyword' or 'criteria'. |
-  | `keyword` | `string` | — | Full-text search on item name/title only (field 1). Convenience shortcut — equivalent to a 'contains' criterion on field 1. For broader multi-field search, use 'quick_search' instead. |
-  | `criteria` | `array` | — | Raw GLPI search criteria array for advanced queries. Use the 'list_fields' action first to discover valid field IDs. Each object: {field (int), searchtype (string), value (string), link (optional: AND/OR/AND NOT/OR NOT)}. Cannot be combined with 'quick_search'. |
-  | `user` | `string` | — | Filter assets by the assigned user's login name (field 70). Applies to Computer, Monitor, NetworkEquipment, Peripheral, Phone, Printer. Uses 'contains' matching — partial names work. Example: user='heles' finds all computers assigned to any user whose login contains 'heles'. Cannot be combined with 'quick_search'. |
-  | `group` | `string` | — | Filter assets by the assigned group name (field 71). Applies to Computer, Monitor, NetworkEquipment, Peripheral, Phone, Printer. Uses 'contains' matching. Cannot be combined with 'quick_search'. |
-  | `technician` | `string` | — | Ticket filter: assigned technician (field 5 = Ticket_User type=2). Only applies when itemtype='Ticket'. Accepts a user login (e.g. 'raquel.cardoso') — resolved to user_id automatically — or a numeric user_id string. Combine with status='open' to see what a technician still needs to handle. Cannot be combined with 'quick_search'. |
-  | `requester` | `string` | — | Ticket filter: requester / reporter (field 4 = Ticket_User type=1). Only applies when itemtype='Ticket'. Accepts a user login or numeric user_id. Cannot be combined with 'quick_search'. |
-  | `watcher` | `string` | — | Ticket filter: observer / watcher (field 22 = Ticket_User type=3). Only applies when itemtype='Ticket'. Accepts a user login or numeric user_id. Cannot be combined with 'quick_search'. |
-  | `technician_group` | `string` | — | Ticket filter: assigned technician group (field 8). Only applies when itemtype='Ticket'. Accepts a group completename or numeric group_id. Cannot be combined with 'quick_search'. |
-  | `requester_group` | `string` | — | Ticket filter: requester group (field 71). Only applies when itemtype='Ticket'. Accepts a group completename or numeric group_id. Cannot be combined with 'quick_search'. |
-  | `sort_field` | `integer` | — | ID of the searchOption to sort results by (default: 19 = date_mod descending for Ticket, 1 = name for others). Use 'list_fields' to discover valid sort field IDs. |
-  | `fields` | `array` | — | Extra searchOption field IDs to include in each result row (merged with the default forcedisplay set). Useful to fetch additional fields without a follow-up get_item call. Example for User: [1, 9, 34, 5] (login, realname, email, phone). Use action='list_fields' to discover valid IDs for the itemtype. |
-
 - **`list_fields`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `criteria` | `array` | — | Raw GLPI search criteria array for advanced queries. Use the 'list_fields' action first to discover valid field IDs. Each object: {field (int), searchtype (string), value (string), link (optional: AND/OR/AND NOT/OR NOT)}. Cannot be combined with 'quick_search'. |
-  | `sort_field` | `integer` | — | ID of the searchOption to sort results by (default: 19 = date_mod descending for Ticket, 1 = name for others). Use 'list_fields' to discover valid sort field IDs. |
-  | `fields` | `array` | — | Extra searchOption field IDs to include in each result row (merged with the default forcedisplay set). Useful to fetch additional fields without a follow-up get_item call. Example for User: [1, 9, 34, 5] (login, realname, email, phone). Use action='list_fields' to discover valid IDs for the itemtype. |
-
 
 ### `glpi_update_ticket`
 
 - **`update`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `status` | `integer` | — | New ticket status: 1=New, 2=Assigned, 3=Planned, 4=Waiting, 5=Solved, 6=Closed. Used by action='update'. |
-  | `priority` | `integer` | — | New priority (1–6). Used by action='update' or 'escalate_priority'. |
-  | `urgency` | `integer` | — | New urgency (1–5). Used by action='update'. |
-  | `impact` | `integer` | — | New impact (1–5). Used by action='update'. |
-  | `category_id` | `integer` | — | GLPI ITILCategory ID. Used by action='update'. |
-  | `name` | `string` | — | New ticket title. Used by action='update'. |
-  | `content` | `string` | — | New ticket description. Used by action='update'. |
-
 - **`add_followup`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `followup_content` | `string` | — | Text of the follow-up comment to add. Required for action='add_followup'. |
-  | `is_private` | `boolean` | — | Whether the follow-up is visible only to technicians. Used by action='add_followup'. Default: false (public). |
-
 - **`add_solution`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `solution_content` | `string` | — | Description of the resolution. Required for action='add_solution'. Also used by action='close' to record a solution before closing. |
-  | `solution_type_id` | `integer` | — | GLPI SolutionType ID. Optional for action='add_solution'. Common IDs vary by GLPI install — query /SolutionType to discover. |
-
 - **`assign`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `status` | `integer` | — | New ticket status: 1=New, 2=Assigned, 3=Planned, 4=Waiting, 5=Solved, 6=Closed. Used by action='update'. |
-  | `assigned_user_id` | `integer` | — | GLPI User ID. Used by action='assign' to add the user as assignee, or action='unassign' to remove the user from the assignees. At least one of assigned_user_id / assigned_group_id is required. |
-  | `assigned_group_id` | `integer` | — | GLPI Group ID. Used by action='assign' or 'unassign'. |
-
 - **`unassign`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `assigned_user_id` | `integer` | — | GLPI User ID. Used by action='assign' to add the user as assignee, or action='unassign' to remove the user from the assignees. At least one of assigned_user_id / assigned_group_id is required. |
-  | `assigned_group_id` | `integer` | — | GLPI Group ID. Used by action='assign' or 'unassign'. |
-
 - **`close`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `status` | `integer` | — | New ticket status: 1=New, 2=Assigned, 3=Planned, 4=Waiting, 5=Solved, 6=Closed. Used by action='update'. |
-  | `solution_content` | `string` | — | Description of the resolution. Required for action='add_solution'. Also used by action='close' to record a solution before closing. |
-
 - **`escalate_priority`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `priority` | `integer` | — | New priority (1–6). Used by action='update' or 'escalate_priority'. |
-
 
 ## Permissions required
 
