@@ -183,8 +183,15 @@ async def add_item(
     existing_item = (await db.execute(stmt)).scalar_one_or_none()
 
     if existing_item is not None:
-        # Update only dates and references
-        existing_item.created_at = now
+        # If the item had been soft-deleted, re-activate it preserving the
+        # original created_at (so past differential history is not rewritten).
+        # The re_added_at marker yields a '+' event for today's diff.
+        if existing_item.deleted_at is not None:
+            existing_item.deleted_at = None
+            existing_item.re_added_at = now
+        else:
+            # Active row being refreshed: bump re_added_at to mark a logical re-add.
+            existing_item.re_added_at = now
         existing_item.expire_at = expire_at
         if payload.public_reference is not None:
             existing_item.public_reference = payload.public_reference
@@ -244,6 +251,7 @@ async def del_item(
             .where(Item.collection_id == collection_id)
             .where(Item.cidr == canonical)
             .where(Item.type == payload.type)
+            .where(Item.deleted_at.is_(None))
         )
     else:
         stmt = (
@@ -251,14 +259,18 @@ async def del_item(
             .where(Item.collection_id == collection_id)
             .where(Item.value == canonical)
             .where(Item.type == payload.type)
+            .where(Item.deleted_at.is_(None))
         )
 
     items = (await db.execute(stmt)).scalars().all()
     if not items:
         raise HTTPException(status_code=404, detail="Item not found")
 
+    now = datetime.now(tz=timezone.utc)
     for it in items:
-        await db.delete(it)
+        # Soft-delete: preserves '-' event for today's differential and the
+        # _purge_loop physically removes the row after DIFF_RETENTION_DAYS.
+        it.deleted_at = now
 
     prev_status = c.status
     if prev_status == "idle":

@@ -9,6 +9,7 @@ gSage AI stack.
 | Script | What it does | Main parameters |
 |---|---|---|
 | `generate_env_defaults.py` | Regenerates the auto-generated tool and auth provider sections in `.env.example` | `--dry-run` |
+| `generate_tools_docs.py` | Regenerates operator-facing Markdown docs under `docs/tools/` plus a derived `.env.tools.example` | `--actions-depth`, `--check`, `--only`, `--output-dir`, `--env-file` |
 | `get_admin.py` | Retrieves or creates the bootstrap admin API key and can also reset the bootstrap admin password | `--reset-password [NEW_PASSWORD]` |
 | `init-elasticsearch.py` | Creates Elasticsearch ILM policies and index templates used by the application | None |
 | `manage_otp.py` | Lists or changes OTP / TOTP state for users directly in the database | `list`, `disable`, `reset`, `clear-devices` |
@@ -51,6 +52,49 @@ python scripts/generate_env_defaults.py --dry-run
 - This script does not use `argparse`; it only checks whether `--dry-run` is present in `sys.argv`.
 - Use it after adding or changing tool `config_defaults` / `config_schema` or auth provider config declarations.
 - If the expected markers are missing from `.env.example`, the script warns and skips that section.
+
+### `generate_tools_docs.py`
+
+Regenerates operator-facing Markdown documentation for every MCP tool. Output:
+
+- One Markdown file per tool group under `docs/tools/`. Tools sharing a
+  `config_namespace` (e.g. all Trellix EDR tools) are merged into a single
+  page; standalone tools get their own page next to the source folder.
+- An index `docs/tools/README.md` listing every group.
+- A consolidated `.env.tools.example` at the repo root with every
+  configuration-derived environment variable. Sensitive values are
+  emitted with the placeholder `__SET_ME__` and a security comment.
+
+The source of truth is each tool's Python source — ClassVars, `config_schema`,
+`config_defaults`, `params_schema`, plus module/class docstrings. Generated
+files carry an auto-generated banner and **must not be edited by hand**.
+
+### Usage
+
+```bash
+python scripts/generate_tools_docs.py
+python scripts/generate_tools_docs.py --actions-depth medium
+python scripts/generate_tools_docs.py --check               # CI guard
+python scripts/generate_tools_docs.py --only "trellix.*"   # debug
+```
+
+### Parameters
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--actions-depth {brief,medium}` | No | Detail level for action-driven tools. `brief` (default) lists actions only; `medium` adds a per-action parameter table |
+| `--output-dir PATH` | No | Override the output directory (default: `docs/tools/`) |
+| `--env-file PATH` | No | Override the consolidated env-vars file (default: `.env.tools.example`) |
+| `--only REGEX` | No | Restrict generation to tools whose name matches the regex |
+| `--check` | No | Dry-run mode. Exits with status `1` if any output would change — useful for CI guards |
+
+### Notes
+
+- Idempotent — running twice in a row produces zero diff.
+- Reuses the discovery helper from `generate_env_defaults.py`, so it picks up
+  exactly the same set of tools.
+- Run it after adding/removing tools, changing `config_schema`, `permissions`,
+  `params_schema`, or any docstring intended for operators.
 
 ### `get_admin.py`
 

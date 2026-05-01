@@ -10,6 +10,12 @@ Optional variables:
     CURATOR_WAIT_TIME     — seconds to accumulate changes before dumping files (default: 10)
     CURATOR_EXPIRY_CHECK_INTERVAL — seconds between expired-item cleanup runs (default: 3600)
     CURATOR_DATA_DIR      — directory where list files are written (default: /data)
+
+Module-level constants (intentionally not env-driven):
+    DIFF_RETENTION_DAYS   — soft-deleted items younger than this are kept so daily/monthly
+                            differential files can still be (re)computed; older rows are
+                            physically purged. Differential listings expose only the last
+                            DIFF_RETENTION_DAYS days.
 """
 
 from __future__ import annotations
@@ -17,6 +23,9 @@ from __future__ import annotations
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Hardcoded — adjust here if a longer history is ever needed.
+DIFF_RETENTION_DAYS = 30
 
 
 class Settings(BaseSettings):

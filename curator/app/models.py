@@ -121,7 +121,13 @@ class Item(Base):
         nullable=False,
         server_default=func.now(),
     )
+    # Set when an item that had been soft-deleted is re-added; preserves original
+    # created_at so the differential history of the original add is not rewritten.
+    re_added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Soft-delete timestamp. NULL = active. Items are physically purged
+    # by the curator background loop after CURATOR_DIFF_RETENTION_DAYS.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     collection: Mapped[Collection] = relationship("Collection", back_populates="items")
 
@@ -130,4 +136,6 @@ class Item(Base):
         UniqueConstraint("collection_id", "cidr", "type", name="uq_item_collection_cidr_type"),
         UniqueConstraint("collection_id", "value", "type", name="uq_item_collection_value_type"),
         Index("ix_curator_items_expire_at", "expire_at"),
+        Index("ix_curator_items_deleted_at", "deleted_at"),
+        Index("ix_curator_items_re_added_at", "re_added_at"),
     )
