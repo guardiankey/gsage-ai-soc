@@ -1,0 +1,107 @@
+{
+  "name": "NetworkInterfaces",
+  "page_title": "NetworkInterfaces collector",
+  "summary": "The NetworkInterfaces collector lists network interfaces on managed devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "bssid",
+      "type": "String",
+      "description": "The BSSID where the interface is connected."
+    },
+    {
+      "name": "displayname",
+      "type": "String",
+      "description": "The interface's short name on the operating system."
+    },
+    {
+      "name": "gwipaddress",
+      "type": "IP",
+      "description": "The IP address of the gateway where the interface is connected."
+    },
+    {
+      "name": "gwmacaddress",
+      "type": "String",
+      "description": "The MAC address of the gateway where the interface is connected."
+    },
+    {
+      "name": "ipaddress",
+      "type": "IP",
+      "description": "The interface's IP address."
+    },
+    {
+      "name": "ipprefix",
+      "type": "Number",
+      "description": "The IP prefix for the interface's IP address."
+    },
+    {
+      "name": "macaddress",
+      "type": "String",
+      "description": "The interface's MAC address."
+    },
+    {
+      "name": "name",
+      "type": "String",
+      "description": "The interface's name."
+    },
+    {
+      "name": "ssid",
+      "type": "String",
+      "description": "The SSID where the interface is connected."
+    },
+    {
+      "name": "type",
+      "type": "String",
+      "description": "The interface's type."
+    },
+    {
+      "name": "wifisecurity",
+      "type": "String",
+      "description": "The WiFi security algorithm used by the interface on the current connection."
+    }
+  ],
+  "examples": [],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all NetworkInterfaces entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "NetworkInterfaces",
+              "outputs": [
+                "bssid",
+                "displayname",
+                "gwipaddress",
+                "gwmacaddress",
+                "ipaddress",
+                "ipprefix",
+                "macaddress",
+                "name",
+                "ssid",
+                "type",
+                "wifisecurity"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-929e651d-9783-d666-74c7-211a2d4be70e.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

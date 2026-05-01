@@ -29,7 +29,7 @@ from typing import ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.soc.edr.trellix import _query as Q
-from src.mcp_server.tools.soc.edr.trellix._artifacts import maybe_export
+from src.mcp_server.tools.soc.edr.trellix._artifacts import build_agent_payload
 from src.mcp_server.tools.soc.edr.trellix._client import TrellixEDRError
 from src.shared.security.context import AgentContext
 
@@ -237,8 +237,24 @@ class TrellixEdrSearchProcessesTool(BaseTool):
                 "maximum": Q.HARD_MAX_ROWS,
                 "default": Q.DEFAULT_MAX_ROWS,
             },
-            "export_csv": {"type": "boolean", "default": False},
-            "export_json": {"type": "boolean", "default": False},
+            "export_csv": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Persist all rows as a CSV file artifact. PREFER CSV "
+                    "over JSON for tabular results. When the caller asks "
+                    "to save/export/download without specifying a format, "
+                    "set this to true."
+                ),
+            },
+            "export_json": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Persist all rows as JSON. Only when the user "
+                    "explicitly asks for JSON — otherwise use 'export_csv'."
+                ),
+            },
         },
         "additionalProperties": False,
     }
@@ -409,7 +425,7 @@ class TrellixEdrSearchProcessesTool(BaseTool):
             if query_ids
             else "trellix_edr_processes"
         )
-        artifacts = await maybe_export(
+        agent_payload = await build_agent_payload(
             self,
             rows=all_rows,
             export_csv=export_csv,
@@ -446,9 +462,13 @@ class TrellixEdrSearchProcessesTool(BaseTool):
             "total_count": meta_combined["total_count"],
             "total_hosts": meta_combined["total_hosts"],
             "truncated": truncated_any,
+            "artifacts": agent_payload["artifacts"],
+            "rows_total": agent_payload["rows_total"],
+            "rows_overflow": agent_payload["rows_overflow"],
+            "agent_hint": agent_payload["agent_hint"],
+            "rows_preview_limit": Q.AGENT_PREVIEW_ROWS,
             "summary": summary,
-            "rows": all_rows,
-            "artifacts": artifacts,
+            "rows": agent_payload["rows_preview"],
         }
         if warnings:
             result_data["warnings"] = warnings

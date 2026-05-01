@@ -56,17 +56,51 @@ async def has_active_bg_tasks(
     return bool(result.scalar())
 
 
+_BG_RESULT_TRUNCATE_BYTES = 8000
+# Top-level keys that we always preserve uncut after the bulk truncation, so the
+# agent never loses references to downloadable artifacts when the row data is
+# large. Keep this list short and agent-relevant.
+_BG_RESULT_PRESERVE_KEYS = (
+    "artifacts",
+    "file",
+    "files",
+    "rows_total",
+    "rows_overflow",
+    "rows_preview_limit",
+    "total_count",
+    "truncated",
+)
+
+
 def build_bg_context_block(tasks: list[GSageBackgroundTask]) -> str:
-    """Build the [BACKGROUND_TASKS_COMPLETED] injection block."""
+    """Build the [BACKGROUND_TASKS_COMPLETED] injection block.
+
+    The ``data`` payload of each finished task is JSON-serialized and clipped
+    to :data:`_BG_RESULT_TRUNCATE_BYTES` characters to keep the prompt small.
+    Keys listed in :data:`_BG_RESULT_PRESERVE_KEYS` (artifact descriptors,
+    overflow flags, totals) are appended uncut after the truncated block so
+    the agent never loses the download links / counts when row data is large.
+    """
     lines = ["[BACKGROUND_TASKS_COMPLETED]"]
     for task in tasks:
         lines.append(f"- task_id={task.id} | tool={task.tool_name}")
         if task.result:
             data = task.result.get("data") or {}
             summary = json.dumps(data, ensure_ascii=False, default=str)
-            if len(summary) > 8000:
-                summary = summary[:8000] + "... [truncated]"
+            if len(summary) > _BG_RESULT_TRUNCATE_BYTES:
+                summary = summary[:_BG_RESULT_TRUNCATE_BYTES] + "... [truncated]"
             lines.append(f"  result_data: {summary}")
+            # Re-emit small, agent-critical keys uncut so they survive any
+            # truncation that may have hidden them above.
+            if isinstance(data, dict):
+                preserved: dict = {
+                    k: data[k] for k in _BG_RESULT_PRESERVE_KEYS if k in data
+                }
+                if preserved:
+                    lines.append(
+                        "  result_meta: "
+                        + json.dumps(preserved, ensure_ascii=False, default=str)
+                    )
         if task.error_message:
             lines.append(f"  error: {task.error_message[:200]}")
     lines.append("[/BACKGROUND_TASKS_COMPLETED]")

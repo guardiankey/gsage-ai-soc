@@ -1,0 +1,220 @@
+{
+  "name": "TwinFiles",
+  "page_title": "TwinFiles collector",
+  "summary": "The TwinFiles collector returns same file names and directories with different case from folders with case-sensitivity enabled on Windows 10.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": null,
+    "macos": null
+  },
+  "fields": [
+    {
+      "name": "name",
+      "type": "String",
+      "description": "The file name."
+    },
+    {
+      "name": "dir",
+      "type": "String",
+      "description": "The directory path where the file is located."
+    },
+    {
+      "name": "full_name",
+      "type": "String",
+      "description": "The fully qualified file name, including its path."
+    },
+    {
+      "name": "size",
+      "type": "Number",
+      "description": "File size in bytes."
+    },
+    {
+      "name": "last_write",
+      "type": "Timestamp",
+      "description": "The last time the operating system wrote the file."
+    },
+    {
+      "name": "md5",
+      "type": "String",
+      "description": "The file's content, in MD5 format."
+    },
+    {
+      "name": "sha1",
+      "type": "String",
+      "description": "The file's content, in SHA-1 format."
+    },
+    {
+      "name": "sha256",
+      "type": "String",
+      "description": "The file's content, in SHA-256 format."
+    },
+    {
+      "name": "created_at",
+      "type": "Timestamp",
+      "description": "Time stamp when the file was created."
+    },
+    {
+      "name": "deleted_at",
+      "type": "Timestamp",
+      "description": "Time stamp when the file was deleted."
+    },
+    {
+      "name": "status",
+      "type": "String",
+      "description": "Shows current for files that are currently on the file system, or deleted for files that were removed from the file system."
+    },
+    {
+      "name": "create_process_pid",
+      "type": "Number",
+      "description": "Process ID of the process that created the file."
+    },
+    {
+      "name": "create_process_sha256",
+      "type": "String",
+      "description": "SHA-256 hash of the process that created the file."
+    },
+    {
+      "name": "create_process_full_path",
+      "type": "String",
+      "description": "Full path of the process that created the file."
+    },
+    {
+      "name": "modify_process_pid",
+      "type": "Number",
+      "description": "Process ID of the process that modified the file."
+    },
+    {
+      "name": "modify_process_sha256",
+      "type": "String",
+      "description": "SHA-256 hash of the process that modified the file."
+    },
+    {
+      "name": "modify_process_full_path",
+      "type": "String",
+      "description": "Full path of the process that modified the file."
+    },
+    {
+      "name": "delete_process_pid",
+      "type": "Number",
+      "description": "Process ID of the process that deleted the file."
+    },
+    {
+      "name": "delete_process_sha256",
+      "type": "String",
+      "description": "SHA-256 hash of the process that deleted the file."
+    },
+    {
+      "name": "delete_process_full_path",
+      "type": "String",
+      "description": "Full path of the process that deleted the file."
+    },
+    {
+      "name": "create_user_domain",
+      "type": "String",
+      "description": "Domain name of the user executing the process that created the file."
+    },
+    {
+      "name": "create_user_name",
+      "type": "String",
+      "description": "Name of the user executing the process that created the file."
+    },
+    {
+      "name": "create_user_id",
+      "type": "String",
+      "description": "ID of the user executing the process that created the file."
+    },
+    {
+      "name": "modify_user_domain",
+      "type": "String",
+      "description": "Domain name of the user executing the process that modified the file."
+    },
+    {
+      "name": "modify_user_name",
+      "type": "String",
+      "description": "Name of the user executing the process that modified the file."
+    },
+    {
+      "name": "modify_user_id",
+      "type": "String",
+      "description": "ID of the user executing the process that modified the file."
+    },
+    {
+      "name": "delete_user_domain",
+      "type": "String",
+      "description": "Domain name of the user executing the process that deleted the file."
+    },
+    {
+      "name": "delete_user_name",
+      "type": "String",
+      "description": "Name of the user executing the process that deleted the file."
+    },
+    {
+      "name": "delete_user_id",
+      "type": "String",
+      "description": "ID of the user executing the process that deleted the file."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show TwinFiles cmd.txt, Cmd.txt, and cMd.txt when searched with cmd.txt",
+      "v2_query": "HostInfo and TwinFiles full_name where HostInfo hostname contains \"<endpoint_hostname>\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all TwinFiles entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "TwinFiles",
+              "outputs": [
+                "name",
+                "dir",
+                "full_name",
+                "size",
+                "last_write",
+                "md5",
+                "sha1",
+                "sha256",
+                "created_at",
+                "deleted_at",
+                "status",
+                "create_process_pid",
+                "create_process_sha256",
+                "create_process_full_path",
+                "modify_process_pid",
+                "modify_process_sha256",
+                "modify_process_full_path",
+                "delete_process_pid",
+                "delete_process_sha256",
+                "delete_process_full_path",
+                "create_user_domain",
+                "create_user_name",
+                "create_user_id",
+                "modify_user_domain",
+                "modify_user_name",
+                "modify_user_id",
+                "delete_user_domain",
+                "delete_user_name",
+                "delete_user_id"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-9abeeb1c-ff66-e939-0bb1-d1ccd1dad934.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

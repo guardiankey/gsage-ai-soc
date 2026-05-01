@@ -83,3 +83,71 @@ async def maybe_export(
             log.warning("trellix_edr: JSON export failed: %s", exc)
 
     return artifacts
+
+
+async def build_agent_payload(
+    tool: BaseTool,
+    *,
+    rows: list[dict],
+    export_csv: bool,
+    export_json: bool,
+    filename_prefix: str,
+    agent_context: AgentContext,
+) -> dict:
+    """Prepare the per-tool agent-facing payload for a Trellix search.
+
+    Caps the inline ``rows`` shipped to the agent at
+    :data:`Q.AGENT_PREVIEW_ROWS` (100). When the full result set exceeds that
+    cap, a CSV artifact is **always** generated (regardless of the
+    ``export_csv`` parameter) so the agent can hand the user a downloadable
+    file with the complete data. Returns a dict with stable keys ready to be
+    merged into ``result_data``::
+
+        {
+            "artifacts": {"csv_file": {...} | None, "json_file": {...} | None},
+            "rows_preview": [...],   # first 100 rows
+            "rows_total": int,        # full row count before truncation
+            "rows_overflow": bool,    # True if rows_total > 100
+        }
+    """
+    rows_total = len(rows)
+    rows_overflow = rows_total > Q.AGENT_PREVIEW_ROWS
+
+    # When the full result set exceeds the agent preview cap we force CSV
+    # generation so the user always has a way to download the complete data.
+    effective_export_csv = export_csv or rows_overflow
+
+    artifacts = await maybe_export(
+        tool,
+        rows=rows,
+        export_csv=effective_export_csv,
+        export_json=export_json,
+        filename_prefix=filename_prefix,
+        agent_context=agent_context,
+    )
+
+    rows_preview = rows[: Q.AGENT_PREVIEW_ROWS] if rows_overflow else rows
+
+    agent_hint: Optional[str] = None
+    if rows_overflow:
+        csv_info = artifacts.get("csv_file") or {}
+        download_path = csv_info.get("download_path")
+        file_id = csv_info.get("file_id")
+        agent_hint = (
+            f"Result has {rows_total} rows; only the first "
+            f"{Q.AGENT_PREVIEW_ROWS} are inlined in 'rows'. The full result "
+            "has been saved as a CSV artifact — present the download link "
+            "to the user instead of trying to enumerate every row in chat."
+        )
+        if download_path:
+            agent_hint += f" download_path={download_path}"
+        elif file_id:
+            agent_hint += f" file_id={file_id}"
+
+    return {
+        "artifacts": artifacts,
+        "rows_preview": rows_preview,
+        "rows_total": rows_total,
+        "rows_overflow": rows_overflow,
+        "agent_hint": agent_hint,
+    }

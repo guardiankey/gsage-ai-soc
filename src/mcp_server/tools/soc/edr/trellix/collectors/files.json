@@ -1,0 +1,228 @@
+{
+  "name": "Files",
+  "page_title": "Files collector",
+  "summary": "The Files collector gathers data about managed devices' file systems.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "name",
+      "type": "String",
+      "description": "The file name."
+    },
+    {
+      "name": "dir",
+      "type": "String",
+      "description": "The directory path where the file is located."
+    },
+    {
+      "name": "full_name",
+      "type": "String",
+      "description": "The fully qualified file name, including its path."
+    },
+    {
+      "name": "size",
+      "type": "Number",
+      "description": "File size in bytes."
+    },
+    {
+      "name": "last_write",
+      "type": "Timestamp",
+      "description": "The last time the operating system wrote the file."
+    },
+    {
+      "name": "md5",
+      "type": "String",
+      "description": "The file's content, in MD5 format."
+    },
+    {
+      "name": "sha1",
+      "type": "String",
+      "description": "The file's content, in SHA-1 format."
+    },
+    {
+      "name": "sha256",
+      "type": "String",
+      "description": "The file's content, in SHA-256 format."
+    },
+    {
+      "name": "created_at",
+      "type": "Timestamp",
+      "description": "Time stamp when the file was created."
+    },
+    {
+      "name": "deleted_at",
+      "type": "Timestamp",
+      "description": "Time stamp when the file was deleted."
+    },
+    {
+      "name": "status",
+      "type": "String",
+      "description": "Shows current for files that are currently on the file system, or deleted for files that were removed from the file system."
+    },
+    {
+      "name": "create_process_pid",
+      "type": "Number",
+      "description": "Process ID of the process that created the file."
+    },
+    {
+      "name": "create_process_sha256",
+      "type": "String",
+      "description": "SHA-256 hash of the process that created the file."
+    },
+    {
+      "name": "create_process_full_path",
+      "type": "String",
+      "description": "Full path of the process that created the file."
+    },
+    {
+      "name": "modify_process_pid",
+      "type": "Number",
+      "description": "Process ID of the process that modified the file."
+    },
+    {
+      "name": "modify_process_sha256",
+      "type": "String",
+      "description": "SHA-256 hash of the process that modified the file."
+    },
+    {
+      "name": "modify_process_full_path",
+      "type": "String",
+      "description": "Full path of the process that modified the file."
+    },
+    {
+      "name": "delete_process_pid",
+      "type": "Number",
+      "description": "Process ID of the process that deleted the file."
+    },
+    {
+      "name": "delete_process_sha256",
+      "type": "String",
+      "description": "SHA-256 hash of the process that deleted the file."
+    },
+    {
+      "name": "delete_process_full_path",
+      "type": "String",
+      "description": "Full path of the process that deleted the file."
+    },
+    {
+      "name": "create_user_domain",
+      "type": "String",
+      "description": "Domain name of the user executing the process that created the file."
+    },
+    {
+      "name": "create_user_name",
+      "type": "String",
+      "description": "Name of the user executing the process that created the file."
+    },
+    {
+      "name": "create_user_id",
+      "type": "String",
+      "description": "ID of the user executing the process that created the file."
+    },
+    {
+      "name": "modify_user_domain",
+      "type": "String",
+      "description": "Domain name of the user executing the process that modified the file."
+    },
+    {
+      "name": "modify_user_name",
+      "type": "String",
+      "description": "Name of the user executing the process that modified the file."
+    },
+    {
+      "name": "modify_user_id",
+      "type": "String",
+      "description": "ID of the user executing the process that modified the file."
+    },
+    {
+      "name": "delete_user_domain",
+      "type": "String",
+      "description": "Domain name of the user executing the process that deleted the file."
+    },
+    {
+      "name": "delete_user_name",
+      "type": "String",
+      "description": "Name of the user executing the process that deleted the file."
+    },
+    {
+      "name": "delete_user_id",
+      "type": "String",
+      "description": "ID of the user executing the process that deleted the file."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show files in the C:\\Windows\\Boot\\DVD\\EVE\\ path.",
+      "v2_query": "Files where Files dir equals \"c:\\windows\\boot\\dvd\\eve\\\""
+    },
+    {
+      "title": "Discover if the DLP extension is installed",
+      "v2_query": "Files created_at, last_write, name\n     WHERE Files full_name contains \"hddjhjcbioambdhjejhdlobijkdnbggp\""
+    },
+    {
+      "title": "Hunting for Indicators Of Compromise - IoCs: hashes",
+      "v2_query": "Files sha256, created_at, name\n    WHERE Files sha256 equals \"af0555109dfa352a7aafb70c3f63e8411b6cf8efe3398f99de55365efb34688e\"\n        OR Files sha256 equals \"fa11c41dbec328a4b75aaf7e6b349c872948203e0109aea6ba6686780b34c85f\"\n        OR Files sha256 equals \"1d2bae6f14d7cdeaa2ee1819d352eca0978538387ae174e52ef2228034f362c3\"\n        OR Files sha256 equals \"51d3563c7aa0c4752bc8ce9c1d6d18b5f2d61d91358c71a4de16803c5fa1f877\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all Files entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "Files",
+              "outputs": [
+                "name",
+                "dir",
+                "full_name",
+                "size",
+                "last_write",
+                "md5",
+                "sha1",
+                "sha256",
+                "created_at",
+                "deleted_at",
+                "status",
+                "create_process_pid",
+                "create_process_sha256",
+                "create_process_full_path",
+                "modify_process_pid",
+                "modify_process_sha256",
+                "modify_process_full_path",
+                "delete_process_pid",
+                "delete_process_sha256",
+                "delete_process_full_path",
+                "create_user_domain",
+                "create_user_name",
+                "create_user_id",
+                "modify_user_domain",
+                "modify_user_name",
+                "modify_user_id",
+                "delete_user_domain",
+                "delete_user_name",
+                "delete_user_id"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-834218ff-2612-a141-7b6d-ac7b0a0588e5.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2026-01-02T00:00:00Z"
+  }
+}

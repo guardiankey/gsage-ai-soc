@@ -1,0 +1,58 @@
+{
+  "name": "HostEntries",
+  "page_title": "HostEntries collector",
+  "summary": "The HostEntries collector shows the IP addresses and host names from hosts file on Windows, Linux, and macOS devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "ipaddress",
+      "type": "IP",
+      "description": "An IP address set in the hosts file."
+    },
+    {
+      "name": "hostname",
+      "type": "String",
+      "description": "The host name mapping for the IP address."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Find devices whose hosts file configures access to www.malware.com.",
+      "v2_query": "HostEntries where HostEntries hostname equals \"www.malware.com\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all HostEntries entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "HostEntries",
+              "outputs": [
+                "ipaddress",
+                "hostname"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-40302f0a-9a12-21a2-553f-a7834bf995b5.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "name": "InstalledUpdates",
+  "page_title": "InstalledUpdates collector",
+  "summary": "The InstalledUpdates collector gathers data about installed updates, hotfixes, and security updates on Windows devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "description",
+      "type": "String",
+      "description": "The description for the update package."
+    },
+    {
+      "name": "hotfix_id",
+      "type": "String",
+      "description": "Microsoft knowledge base identifier for the update package."
+    },
+    {
+      "name": "install_date",
+      "type": "Timestamp",
+      "description": "The date when the package was installed."
+    },
+    {
+      "name": "installed_by",
+      "type": "String",
+      "description": "The user name that performed the installation, qualified by its namespace."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show which hotfix packages were installed by bad_user.",
+      "v2_query": "InstalledUpdates where InstalledUpdates description equals \"Hotfix\" and InstalledUpdates installed_by contains \"bad_user\""
+    },
+    {
+      "title": "What patches are installed",
+      "v2_query": "InstalledUpdates hotfix_id, install_date, installed_by, description"
+    },
+    {
+      "title": "Which patches are security updates",
+      "v2_query": "InstalledUpdates hotfix_id, install_date, installed_by, description\n    WHERE InstalledUpdates description equals \"Security Update\""
+    },
+    {
+      "title": "Which patches are hotfix updates",
+      "v2_query": "InstalledUpdates hotfix_id, install_date, installed_by, description\n    WHERE InstalledUpdates description equals \"HotFix\""
+    },
+    {
+      "title": "Which patches were not installed by NT authority",
+      "v2_query": "InstalledUpdates hotfix_id, install_date, installed_by, description\n    WHERE InstalledUpdates description equals \"HotFix\""
+    },
+    {
+      "title": "Specify - patch by KB number",
+      "v2_query": "InstalledUpdates hotfix_id, install_date, installed_by, description\n    WHERE InstalledUpdates hotfix_id equals \"KB3097992\""
+    },
+    {
+      "title": "Specify - patch by date installed",
+      "v2_query": "InstalledUpdates hotfix_id, install_date, installed_by, description\n    WHERE InstalledUpdates installed_date after \"2018-03-01\""
+    },
+    {
+      "title": "Specify - track a patch after a response date",
+      "v2_query": "InstalledUpdates hotfix_id, install_date, installed_by, description     \n    WHERE InstalledUpdates install_date after \"2018-03-01\"\n        AND InstalledUpdates hotfix_id ends with \"KB4012212\"\n            OR InstalledUpdates hotfix_id ends with \"KB4012215\"\n            OR InstalledUpdates hotfix_id ends with \"KB4012218\"\n            OR InstalledUpdates hotfix_id ends with \"KB4015549\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all InstalledUpdates entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "InstalledUpdates",
+              "outputs": [
+                "description",
+                "hotfix_id",
+                "install_date",
+                "installed_by"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-d8136688-bcc4-f430-869c-bb240af076c7.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "EnvironmentVariables",
+  "page_title": "EnvironmentVariables collector",
+  "summary": "This collector returns information about system environment variables, current user, and volatile and process variables.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "username",
+      "type": "String",
+      "description": "The owner of the process that is running on the environment where this variable is set."
+    },
+    {
+      "name": "process_id",
+      "type": "Number",
+      "description": "ID given by operating system to the process."
+    },
+    {
+      "name": "name",
+      "type": "String",
+      "description": "The variable's name."
+    },
+    {
+      "name": "value",
+      "type": "String",
+      "description": "Value set on the variable."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show the PATH environment variable set on device 192.168.0.5",
+      "v2_query": "EnvironmentVariables where EnvironmentVariables name equals \"PATH\" and HostInfo ip_address equals 192.168.0.5"
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all EnvironmentVariables entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "EnvironmentVariables",
+              "outputs": [
+                "username",
+                "process_id",
+                "name",
+                "value"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-87aeb893-82f0-981d-b4f4-c58b7f52b380.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

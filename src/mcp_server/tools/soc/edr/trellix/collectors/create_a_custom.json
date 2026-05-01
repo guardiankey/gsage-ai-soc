@@ -1,0 +1,18 @@
+{
+  "name": "Create a custom",
+  "page_title": "Create a custom collector",
+  "summary": "You can specify what data to collect from endpoints with custom collectors.",
+  "supported_os": {
+    "windows": null,
+    "linux": null,
+    "macos": null
+  },
+  "fields": [],
+  "examples": [],
+  "v1_payload_example": null,
+  "_source": {
+    "page_id": "UUID-2d4fe87d-1afa-4a7e-6168-2a62abb8d03a.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2023-12-31T00:00:00Z"
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "name": "NetworkFlow",
+  "page_title": "NetworkFlow collector",
+  "summary": "The NetworkFlow collector gathers historical data on network usage from managed devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "src_ip",
+      "type": "IPv4 or IPv6 address",
+      "description": "IP address of the source of the packet. Supports CIDR block notation."
+    },
+    {
+      "name": "src_port",
+      "type": "Number",
+      "description": "Port number originating the packet."
+    },
+    {
+      "name": "dst_ip",
+      "type": "IPv4 or IPv6 address",
+      "description": "IP address of the destination of the packet. Supports CIDR block notation."
+    },
+    {
+      "name": "dst_port",
+      "type": "Number",
+      "description": "Port number receiving the packet."
+    },
+    {
+      "name": "time",
+      "type": "Timestamp",
+      "description": "Date and time when the packet was collected."
+    },
+    {
+      "name": "status",
+      "type": "String",
+      "description": "The status of the TCP transaction (not available in UDP transactions). The TCP status must be interpreted as follows: On a TCP connection open operation, the CONNECTED value means that the source endpoint sent a SYN message and received an ACK,SYN message from the remote server. On a TCP connection close operation, the CLOSED value means that the source endpoint sent a SYN message and received an ACK,FIN message from the destination server. The final ACK message is ignored on both open and close operations. Important The TCP status must be interpreted as follows: On a TCP connection open operation, the CONNECTED value means that the source endpoint sent a SYN message and received an ACK,SYN message from the remote server. On a TCP connection close operation, the CLOSED value means that the source endpoint sent a SYN message and received an ACK,FIN message from the destination server. The final ACK message is ignored on both open and close operations."
+    },
+    {
+      "name": "process",
+      "type": "String",
+      "description": "The originating process image name."
+    },
+    {
+      "name": "process_id",
+      "type": "Number",
+      "description": "The originating process ID."
+    },
+    {
+      "name": "user",
+      "type": "String",
+      "description": "The user that owns the originating process."
+    },
+    {
+      "name": "user_id",
+      "type": "String",
+      "description": "The user ID of the process owning the socket."
+    },
+    {
+      "name": "proto",
+      "type": "String",
+      "description": "The packet's protocol: TCP or UDP."
+    },
+    {
+      "name": "direction",
+      "type": "String",
+      "description": "Specifies whether the packet came in to the managed device, or was sent out of the device."
+    },
+    {
+      "name": "ip_class",
+      "type": "Number",
+      "description": "Specifies the IP class used for the transaction: IPv4 returns 0 IPv6 returns 1 Unknown returns 2"
+    },
+    {
+      "name": "seq_number",
+      "type": "Number",
+      "description": "TCP transaction sequence number (not available in UDP transactions)."
+    },
+    {
+      "name": "src_mac",
+      "type": "String",
+      "description": "MAC address of originating device."
+    },
+    {
+      "name": "dst_mac",
+      "type": "String",
+      "description": "MAC address of destination device (Linux only)."
+    },
+    {
+      "name": "md5",
+      "type": "String",
+      "description": "The MD5 hash code for the source process."
+    },
+    {
+      "name": "sha1",
+      "type": "String",
+      "description": "The SHA-1 hash code for the source process."
+    },
+    {
+      "name": "sha256",
+      "type": "String",
+      "description": "The SHA-256 hash code for the source process (Windows, macOS only)."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show process IDs and image names for network flow originating on CIDR block 10.250.45.0/24 and targeting device 10.0.0.2.",
+      "v2_query": "NetworkFlow process, process_id where NetworkFlow src_ip contains 10.250.45.0/24 and NetworkFlow dst_ip equals 10.0.0.2"
+    },
+    {
+      "title": "Connections by dest port 53",
+      "v2_query": "NetworkFlow status, proto, direction, src_ip, src_port, dst_ip, dst_port\n    WHERE NetworkFlow dst_port equals \"53\""
+    },
+    {
+      "title": "Connections by OSI protocol - single",
+      "v2_query": "NetworkFlow status, proto, direction, src_ip, src_port, dst_ip, dst_port\n    WHERE NetworkFlow dst_port equals \"53\"\n        AND NetworkFlow proto equals \"tcp\""
+    },
+    {
+      "title": "Connections by OSI protocol - many",
+      "v2_query": "NetworkFlow status, proto, direction, src_ip, src_port, dst_ip, dst_port\n    WHERE NetworkFlow dst_port equals \"53\"\n        AND NetworkFlow proto equals \"tcp\"\n            OR NetworkFlow proto equals \"udp\""
+    },
+    {
+      "title": "Connections by dest port number - single",
+      "v2_query": "NetworkFlow status, proto, direction, src_ip, src_port, dst_ip, dst_port\n    WHERE NetworkFlow dst_port equals \"53\""
+    },
+    {
+      "title": "Connections by dest port number - many",
+      "v2_query": "NetworkFlow status, proto, direction, src_ip, src_port, dst_ip, dst_port\n    WHERE NetworkFlow dst_port equals \"53\"\n        OR NetworkFlow dst_port equals \"443\"\n        OR NetworkFlow dst_port equals \"80\""
+    },
+    {
+      "title": "Connections by dest IP and dest port 53 - single",
+      "v2_query": "NetworkFlow status, proto, direction, src_ip, src_port, dst_ip, dst_port\n    WHERE NetworkFlow dst_port equals \"53\"\n        AND NetworkFlow dst_ip equals \"10.0.0.1\""
+    },
+    {
+      "title": "Connections by dest IP and dest port 53 - many",
+      "v2_query": "NetworkFlow status, proto, direction, src_ip, src_port, dst_ip, dst_port\n    WHERE NetworkFlow dst_port equals \"53\"\n        AND NetworkFlow dst_ip equals \"10.0.0.1\"\n            OR NetworkFlow dst_ip equals \"10.0.0.2\"\n            OR NetworkFlow dst_ip equals \"10.0.0.3\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all NetworkFlow entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "NetworkFlow",
+              "outputs": [
+                "src_ip",
+                "src_port",
+                "dst_ip",
+                "dst_port",
+                "time",
+                "status",
+                "process",
+                "process_id",
+                "user",
+                "user_id",
+                "proto",
+                "direction",
+                "ip_class",
+                "seq_number",
+                "src_mac",
+                "dst_mac",
+                "md5",
+                "sha1",
+                "sha256"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-ec738932-cb91-6b38-a42d-9e9dac14b74e.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

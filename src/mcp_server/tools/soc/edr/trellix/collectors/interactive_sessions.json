@@ -1,0 +1,58 @@
+{
+  "name": "InteractiveSessions",
+  "page_title": "InteractiveSessions collector",
+  "summary": "The InteractiveSessions collector gathers information about live interactive sessions on managed devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "userid",
+      "type": "String",
+      "description": "The user name that is logged into the session."
+    },
+    {
+      "name": "name",
+      "type": "String",
+      "description": "The user's full name. Note This field is not reported for non-local users."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show interactive sessions for user 'owilde'",
+      "v2_query": "InteractiveSessions where InteractiveSessions userid equals \"owilde\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all InteractiveSessions entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "InteractiveSessions",
+              "outputs": [
+                "userid",
+                "name"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-86bdd07c-e34c-696d-c550-d1fddcbb589d.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "name": "LocalGroups",
+  "page_title": "LocalGroups collector",
+  "summary": "The LocalGroups collector gathers data on local system groups. Access Directory groups are not returned.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "groupname",
+      "type": "String",
+      "description": "The name of the group."
+    },
+    {
+      "name": "groupdomain",
+      "type": "String",
+      "description": "The domain name of the local group."
+    },
+    {
+      "name": "groupdescription",
+      "type": "String",
+      "description": "The description of the local group."
+    },
+    {
+      "name": "islocal",
+      "type": "String",
+      "description": "Confirms that the group is stored locally on the device."
+    },
+    {
+      "name": "sid",
+      "type": "String",
+      "description": "The security identifier for the group."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show local groups under the \"corp.sensitive\" domain.",
+      "v2_query": "LocalGroups where LocalGroups groupdomain contains \"corp.sensitive\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all LocalGroups entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "LocalGroups",
+              "outputs": [
+                "groupname",
+                "groupdomain",
+                "groupdescription",
+                "islocal",
+                "sid"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-962bb5a4-d6fb-af54-9a8d-20a57858a409.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

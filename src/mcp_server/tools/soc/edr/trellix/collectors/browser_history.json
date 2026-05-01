@@ -1,0 +1,149 @@
+{
+  "name": "BrowserHistory",
+  "page_title": "BrowserHistory collector",
+  "summary": "The BrowserHistory collector shows the BrowserHistory entries of a Windows operating system.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": null,
+    "macos": null
+  },
+  "fields": [
+    {
+      "name": "url",
+      "type": "String",
+      "description": "URL of the visited webpage."
+    },
+    {
+      "name": "title",
+      "type": "String",
+      "description": "Title of the visited webpage."
+    },
+    {
+      "name": "last_visit_time",
+      "type": "String",
+      "description": "Time of last visit. The string represents the FILETIME structure which is a 64-bit value representing the number of 100-nanosecond intervals since January 1, 1601 (UTC)."
+    },
+    {
+      "name": "visit_count",
+      "type": "int",
+      "description": "Number of times the URL was visited."
+    },
+    {
+      "name": "visit_from",
+      "type": "String",
+      "description": "The website from which this webpage was reached."
+    },
+    {
+      "name": "browser",
+      "type": "String",
+      "description": "Name of the browser which accessed this webpage. The possible values are: Google Chrome Mozilla Firefox Microsoft Edge Microsoft Internet Explorer",
+      "enum": [
+        "Google Chrome Mozilla Firefox Microsoft Edge Microsoft Internet Explorer"
+      ]
+    },
+    {
+      "name": "user_profile",
+      "type": "String",
+      "description": "The user profile used to access the webpage."
+    },
+    {
+      "name": "browser_profile",
+      "type": "String",
+      "description": "The browser profile used to access the webpage."
+    },
+    {
+      "name": "url_length",
+      "type": "int",
+      "description": "The length of the URL string."
+    },
+    {
+      "name": "typed_count",
+      "type": "int",
+      "description": "The number of times the address of the webpage was typed in the browser ."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show visited URLs that have the trellix.com domain",
+      "v2_query": "BrowserHistory where BrowserHistory url contains \"trellix.com\""
+    },
+    {
+      "title": "Hunting for indicators of attack - IoAs: http activity",
+      "v2_query": "BrowserHistory visit_count, url, browser\n    WHERE BrowserHistory url_length greater than \"255\"\n        AND BrowserHistory url contains \"pastebin.com\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all BrowserHistory entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "BrowserHistory",
+              "outputs": [
+                "url",
+                "title",
+                "last_visit_time",
+                "visit_count",
+                "visit_from",
+                "browser",
+                "user_profile",
+                "browser_profile",
+                "url_length",
+                "typed_count"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      },
+      {
+        "title": "BrowserHistory entries where browser equals \"Google Chrome Mozilla Firefox Microsoft Edge Microsoft Internet Explorer\"",
+        "payload": {
+          "projections": [
+            {
+              "name": "BrowserHistory",
+              "outputs": [
+                "url",
+                "title",
+                "last_visit_time",
+                "visit_count",
+                "visit_from",
+                "browser",
+                "user_profile",
+                "browser_profile",
+                "url_length",
+                "typed_count"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": [
+                  {
+                    "name": "BrowserHistory",
+                    "output": "browser",
+                    "op": "EQUALS",
+                    "value": "Google Chrome Mozilla Firefox Microsoft Edge Microsoft Internet Explorer"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-f72ed57d-f883-7df8-f255-a460cf769729.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

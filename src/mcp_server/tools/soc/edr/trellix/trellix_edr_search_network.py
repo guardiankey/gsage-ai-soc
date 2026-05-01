@@ -13,7 +13,7 @@ from typing import ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.soc.edr.trellix import _query as Q
-from src.mcp_server.tools.soc.edr.trellix._artifacts import maybe_export
+from src.mcp_server.tools.soc.edr.trellix._artifacts import build_agent_payload
 from src.mcp_server.tools.soc.edr.trellix._client import TrellixEDRError
 from src.shared.security.context import AgentContext
 
@@ -63,17 +63,27 @@ class TrellixEdrSearchNetworkTool(BaseTool):
         "properties": {
             "remote_ip": {
                 "type": "string",
-                "description": "Remote IP (NetworkFlow.remote_ip EQUALS).",
+                "description": (
+                    "IP that appears on either side of the flow. Internally "
+                    "matched as (NetworkFlow.src_ip EQUALS X) OR "
+                    "(NetworkFlow.dst_ip EQUALS X) so direction does not matter."
+                ),
             },
             "remote_port": {
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 65535,
-                "description": "Remote TCP/UDP port (NetworkFlow.remote_port EQUALS).",
+                "description": (
+                    "TCP/UDP port that appears on either side of the flow "
+                    "(matched against src_port and dst_port)."
+                ),
             },
             "process_name": {
                 "type": "string",
-                "description": "Substring match on process name (Processes.name CONTAINS).",
+                "description": (
+                    "Substring match on the originating process image name "
+                    "(NetworkFlow.process CONTAINS)."
+                ),
             },
             "hostname_contains": {
                 "type": "string",
@@ -90,8 +100,24 @@ class TrellixEdrSearchNetworkTool(BaseTool):
                 "maximum": Q.HARD_MAX_ROWS,
                 "default": Q.DEFAULT_MAX_ROWS,
             },
-            "export_csv": {"type": "boolean", "default": False},
-            "export_json": {"type": "boolean", "default": False},
+            "export_csv": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Persist all rows as a CSV file artifact. PREFER CSV "
+                    "over JSON for tabular results. When the caller asks "
+                    "to save/export/download without specifying a format, "
+                    "set this to true."
+                ),
+            },
+            "export_json": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Persist all rows as JSON. Only when the user "
+                    "explicitly asks for JSON — otherwise use 'export_csv'."
+                ),
+            },
         },
         "additionalProperties": False,
     }
@@ -151,12 +177,13 @@ class TrellixEdrSearchNetworkTool(BaseTool):
             rows,
             group_by=[
                 "HostInfo_hostname",
-                "NetworkFlow_remote_ip",
-                "NetworkFlow_remote_port",
-                "Processes_name",
+                "NetworkFlow_src_ip",
+                "NetworkFlow_dst_ip",
+                "NetworkFlow_dst_port",
+                "NetworkFlow_process",
             ],
         )
-        artifacts = await maybe_export(
+        agent_payload = await build_agent_payload(
             self,
             rows=rows,
             export_csv=export_csv,
@@ -180,9 +207,13 @@ class TrellixEdrSearchNetworkTool(BaseTool):
                 "total_count": meta.get("total_count", len(rows)),
                 "total_hosts": meta.get("total_hosts", 0),
                 "truncated": truncated,
+                "artifacts": agent_payload["artifacts"],
+                "rows_total": agent_payload["rows_total"],
+                "rows_overflow": agent_payload["rows_overflow"],
+                "agent_hint": agent_payload["agent_hint"],
+                "rows_preview_limit": Q.AGENT_PREVIEW_ROWS,
                 "summary": summary,
-                "rows": rows,
-                "artifacts": artifacts,
+                "rows": agent_payload["rows_preview"],
             },
             execution_time_ms=elapsed,
         )

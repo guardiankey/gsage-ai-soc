@@ -1,0 +1,207 @@
+{
+  "name": "BrowserDownload",
+  "page_title": "BrowserDownload collector",
+  "summary": "The BrowserDownload collector shows the BrowserDownload entries of a Windows operating system.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": null,
+    "macos": null
+  },
+  "fields": [
+    {
+      "name": "browser",
+      "type": "String",
+      "description": "Name of the browser used for downloading. The possible values are: Google Chrome Mozilla Firefox Microsoft Edge",
+      "enum": [
+        "Google Chrome Mozilla Firefox Microsoft Edge"
+      ]
+    },
+    {
+      "name": "browser_profile",
+      "type": "String",
+      "description": "The browser profile used for downloading."
+    },
+    {
+      "name": "end_time",
+      "type": "String",
+      "description": "Time when the download ended. The string represents the FILETIME structure which is 64-bit. This value represents the number of 100-nanosecond intervals since January 1, 1601 (UTC)."
+    },
+    {
+      "name": "file_path",
+      "type": "String",
+      "description": "The name of the downloaded file with the full path."
+    },
+    {
+      "name": "mime_type",
+      "type": "String",
+      "description": "This string indicates Multipurpose internet Mail Extensions type. It's a way of identifying files according to their nature and format."
+    },
+    {
+      "name": "received_bytes",
+      "type": "int",
+      "description": "Number of bytes received."
+    },
+    {
+      "name": "referrer",
+      "type": "String",
+      "description": "The webpage that requested the download."
+    },
+    {
+      "name": "site_url",
+      "type": "String",
+      "description": "The URL of the site from where the file is downloaded."
+    },
+    {
+      "name": "start_time",
+      "type": "String",
+      "description": "Time when the download started. The string represents the FILETIME structure which is 64-bit. This value represents the number of 100-nanosecond intervals since January 1, 1601 (UTC)."
+    },
+    {
+      "name": "state",
+      "type": "int",
+      "description": "The state indicates whether the download was completed successfully."
+    },
+    {
+      "name": "total_bytes",
+      "type": "int",
+      "description": "Total size of the file for which the download was initiated ."
+    },
+    {
+      "name": "user_profile",
+      "type": "String",
+      "description": "The user profile used for downloading."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show browser downloads from URLs that have the trellix.com domain",
+      "v2_query": "BrowserDownload where BrowserDownload site_url contains \"trellix.com\""
+    },
+    {
+      "title": "Which browsers are used in my environment",
+      "v2_query": "BrowserDownload browser"
+    },
+    {
+      "title": "Prevalence - downloads by mimetype",
+      "v2_query": "BrowsewrDonload mime_type, total_bytes"
+    },
+    {
+      "title": "Prevalence - downloads by binary type",
+      "v2_query": "BrowserDownload mime_type, file_path\n    WHERE BrowserDownload mime_type contains \"octet-stream\""
+    },
+    {
+      "title": "Prevalence - downloads by zip archive type",
+      "v2_query": "BrowserDownload mime_type, file_path\n    WHERE BrowserDownload mime_type equals \"application/zip\""
+    },
+    {
+      "title": "Prevalence - downloads by many compressed archive type",
+      "v2_query": "BrowserDownload mime_type, file_path\n    WHERE BrowserDownload mime_type equals \"application/zip\"\n        OR BrowserDownload mime_type equals \"application/x-zip-compressed\"\n        OR BrowserDownload mime_type equals \"application/x-tar\""
+    },
+    {
+      "title": "Prevalence - websites offering downloads of binary type",
+      "v2_query": "BrowserDownload site_url, mime_type\n    WHERE BrowserDownload mime_type contains \"octet-stream\""
+    },
+    {
+      "title": "Specify single target website",
+      "v2_query": "BrowserDownload site_url, mime_type\n    WHERE BrowserDownload mime_type contains \"octet-stream\"\n        AND BrowserDownload site_url contains \"github.com\""
+    },
+    {
+      "title": "Specify many target websites",
+      "v2_query": "BrowserDownload site_url, mime_type\n    WHERE BrowserDownload mime_type contains \"octet-stream\"\n        AND BrowserDownload site_url contains \"github.com\"\n            OR BrowserDownload site_url contains \"drive.google.com\"\n            OR BrowserDownload site_url contains \"super.com\""
+    },
+    {
+      "title": "Specify single target filename",
+      "v2_query": "BrowserDownload site_url, mime_type, file_path\n    WHERE BrowserDownload mime_type contains \"octet-stream\"\n        AND BrowserDownload file_path contains \"zoom.exe\""
+    },
+    {
+      "title": "Specify many target filenames",
+      "v2_query": "BrowserDownload site_url, mime_type, file_path\n    WHERE BrowserDownload mime_type contains \"octet-stream\"\n        AND BrowserDownload file_path contains \"foo.exe\"\n            OR BrowserDownload file_path contains \"bar.exe\"\n            OR BrowserDownload file_path contains \"baz.exe\""
+    },
+    {
+      "title": "Prevalence - downloads by web referrer and web provider",
+      "v2_query": "BrowserDownload referrer, site_url\n    WHERE BrowserDownload referrer not equals \"\"\n        AND BrowserDownload site_url not equals \"\""
+    },
+    {
+      "title": "Specify download by referrer to provider combination",
+      "v2_query": "BrowserDownload referrer, site_url\n    WHERE BrowserDownload referrer contains \"evil_foo.com\"\n        AND BrowserDownload site_url not equals \"drive.google.com\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all BrowserDownload entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "BrowserDownload",
+              "outputs": [
+                "browser",
+                "browser_profile",
+                "end_time",
+                "file_path",
+                "mime_type",
+                "received_bytes",
+                "referrer",
+                "site_url",
+                "start_time",
+                "state",
+                "total_bytes",
+                "user_profile"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      },
+      {
+        "title": "BrowserDownload entries where browser equals \"Google Chrome Mozilla Firefox Microsoft Edge\"",
+        "payload": {
+          "projections": [
+            {
+              "name": "BrowserDownload",
+              "outputs": [
+                "browser",
+                "browser_profile",
+                "end_time",
+                "file_path",
+                "mime_type",
+                "received_bytes",
+                "referrer",
+                "site_url",
+                "start_time",
+                "state",
+                "total_bytes",
+                "user_profile"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": [
+                  {
+                    "name": "BrowserDownload",
+                    "output": "browser",
+                    "op": "EQUALS",
+                    "value": "Google Chrome Mozilla Firefox Microsoft Edge"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-6a6cb207-ba56-0963-7e37-42159668b5d6.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "name": "UsbConnectedStorageDevices",
+  "page_title": "UsbConnectedStorageDevices collector",
+  "summary": "Find which users have used USB mass storage devices on managed devices. This collector gets details about last usage and device details.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "vendor_id",
+      "type": "String",
+      "description": "Device's vendor ID."
+    },
+    {
+      "name": "product_id",
+      "type": "String",
+      "description": "Device's product ID."
+    },
+    {
+      "name": "serial_number",
+      "type": "String",
+      "description": "Device's serial number."
+    },
+    {
+      "name": "device_type",
+      "type": "String",
+      "description": "Only \"USB storage\" type is supported."
+    },
+    {
+      "name": "guid",
+      "type": "String",
+      "description": "ID provided by operating system (Windows only)."
+    },
+    {
+      "name": "last_connection_time",
+      "type": "Timestamp",
+      "description": "Last time the device was plugged (Windows only)."
+    },
+    {
+      "name": "user_name",
+      "type": "String",
+      "description": "User that mounted the device. If no user was logged in when device was mounted, then the field will be empty (Windows only)."
+    },
+    {
+      "name": "last_time_used_by_user",
+      "type": "Timestamp",
+      "description": "Last time the operating system touched the device."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show all USB storage devices that were connected to computers with running Windows",
+      "v2_query": "UsbConnectedStorageDevices where HostInfo os contains \"win\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all UsbConnectedStorageDevices entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "UsbConnectedStorageDevices",
+              "outputs": [
+                "vendor_id",
+                "product_id",
+                "serial_number",
+                "device_type",
+                "guid",
+                "last_connection_time",
+                "user_name",
+                "last_time_used_by_user"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-d9f47a39-14d0-3347-3d6e-647b874a9fc5.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

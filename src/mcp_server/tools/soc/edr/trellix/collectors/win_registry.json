@@ -1,0 +1,134 @@
+{
+  "name": "WinRegistry",
+  "page_title": "WinRegistry collector",
+  "summary": "The WinRegistry collector gathers Windows registry data from devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": null,
+    "macos": null
+  },
+  "fields": [
+    {
+      "name": "keypath",
+      "type": "Win Registry String",
+      "description": "A path to a registry key. The path does not include the key name. Only equals and starts_with operators are valid for this output field."
+    },
+    {
+      "name": "keyvalue",
+      "type": "Win Registry String",
+      "description": "The key value name."
+    },
+    {
+      "name": "valuedata",
+      "type": "Win Registry String",
+      "description": "The data stored by the key value."
+    },
+    {
+      "name": "valuetype",
+      "type": "Win Registry String",
+      "description": "The data type of the registry data."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show registry data related to installation on managed devices.",
+      "v2_query": "WinRegistry where WinRegistry keypath equals \"hkey_local_machine\\software\\mcafee\\mar\""
+    },
+    {
+      "title": "User registered startup items",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath equals \"HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\""
+    },
+    {
+      "title": "Specify - single IoC simulation",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath equals \"HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\"\n        AND WinRegistry keyvalue equals \"foo\""
+    },
+    {
+      "title": "Specify - many IoC simulation",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath equals \"HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\"\n        AND WinRegistry keyvalue equals \"Skype\"\n            OR WinRegistry keyvalue contains \"Google\"\n            OR WinRegistry keyvalue contains \"zoom\"\n            OR WinRegistry keyvalue contains \"Zoom\""
+    },
+    {
+      "title": "User registered software CLSIDs",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath equals \"HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\\""
+    },
+    {
+      "title": "User registered chrome browser extensions",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath\n        equals \"HKEY_CURRENT_USER\\Software\\Google\\Chrome\\Extensions\"\n        OR WinRegistry keypath equals \"HKEY_CURRENT_USER\\Software\\Wow6432Node\\Google\\Chrome\\Extensions\""
+    },
+    {
+      "title": "Globally registered services",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath equals \"HKLM\\SYSTEM\\CurrentControlSet\\Services\""
+    },
+    {
+      "title": "Globally registered system startup & device configuration",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath equals \"HKLM\\SYSTEM\\CurrentControlSet\\HardwareProfiles\""
+    },
+    {
+      "title": "Globally registered audit policy settings",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath equals \"HKEY_LOCAL_MACHINE\\SECURITY\\Policy\\PolAdtEv\""
+    },
+    {
+      "title": "Globally registered browser helper objects - BHO",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath\n        equals \"HKEY_LOCAL_MACHINE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Browser Helper Objects\"\n            OR WinRegistry keypath\n                equals \"HKEY_LOCAL_MACHINE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\\\Browser Helper Objects\""
+    },
+    {
+      "title": "Globally registered software CLSIDs",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath starts with \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\\""
+    },
+    {
+      "title": "Specify a CLSID",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath starts with \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\\"\n        AND WinRegistry keyvalue contains \"{42aedc87-2188-41fd-b9a3-0c966feabec1}\""
+    },
+    {
+      "title": "Globally registered scheduled tasks",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath\n        equals \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\""
+    },
+    {
+      "title": "Globally registered chrome browser extensions",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath\n        equals \"HKEY_LOCAL_MACHINE\\Software\\Google\\Chrome\\Extensions\"\n        OR WinRegistry keypath equals \"HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Google\\Chrome\\Extensions\""
+    },
+    {
+      "title": "Globally registered local user accounts",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath\n        equals \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\""
+    },
+    {
+      "title": "Confirming enterprise powershell settings",
+      "v2_query": "WinRegistry \n    WHERE WinRegistry keypath equals \"HKLM\\SOFTWARE\\Wow6432Node\\Policies\\Microsoft\\Windows\\PowerShell\"\n        AND WinRegistry valuedata equals \"Unrestricted\""
+    },
+    {
+      "title": "Hunting for Indicators Of Compromise - IoCs: hashes",
+      "v2_query": "WinRegistry\n    WHERE WinRegistry keypath equals \"HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\UoOfbM\"\n        OR WinRegistry keypath equals \"HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run\\UoOfbM\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all WinRegistry entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "WinRegistry",
+              "outputs": [
+                "keypath",
+                "keyvalue",
+                "valuedata",
+                "valuetype"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-4af8ea5f-1bad-830b-3554-b670ffcbe68e.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

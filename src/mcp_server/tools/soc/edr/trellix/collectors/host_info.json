@@ -1,0 +1,124 @@
+{
+  "name": "HostInfo",
+  "page_title": "HostInfo collector",
+  "summary": "The HostInfo collector shows a device's hostname, physical IP address, and operating system version.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "hostname",
+      "type": "String",
+      "description": "The device's hostname"
+    },
+    {
+      "name": "ip_address",
+      "type": "IP",
+      "description": "The device's physical IP address"
+    },
+    {
+      "name": "os",
+      "type": "String",
+      "description": "The device's operating system version."
+    },
+    {
+      "name": "connection_status",
+      "type": "String",
+      "description": "Displays the device's status of Quarantined or Online"
+    },
+    {
+      "name": "platform",
+      "type": "String",
+      "description": "The device's operating system (Windows, macOS, Linux)"
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Find all devices with Windows operating system.",
+      "v2_query": "HostInfo where HostInfo os contains \"Windows\""
+    },
+    {
+      "title": "Who are the active users in my enterprise",
+      "v2_query": "HostInfo hostname\n    AND InteractiveSessions userid, name\n        WHERE InteractiveSessions userid not equals \"\"\n            AND InteractiveSessions name not equals \"\""
+    },
+    {
+      "title": "Where has user JDOE logged-in",
+      "v2_query": "HostInfo hostname\n    AND InteractiveSessions userid, name\n        WHERE InteractiveSessions userid equals \"jdoe\""
+    },
+    {
+      "title": "Find if a list of users logged-in to one target PC",
+      "v2_query": "HostInfo hostname\n    AND InteractiveSessions userid, name\n        WHERE HostInfo hostname equals \"PC1\"\n            AND InteractiveSessions userid equals \"jdoe\"\n                OR InteractiveSessions userid equals \"alice\" \n                OR InteractiveSessions userid equals \"bob\""
+    },
+    {
+      "title": "Show me all logins to one target PC",
+      "v2_query": "HostInfo hostname\n    AND InteractiveSessions userid, name\n        WHERE HostInfo hostname equals \"PC1\"\n            AND InteractiveSessions userid equals \"jdoe\"\n                OR InteractiveSessions userid equals \"alice\" \n                OR InteractiveSessions userid equals \"bob\""
+    },
+    {
+      "title": "Show me all Logins to one Target PC",
+      "v2_query": "HostInfo hostname\n    AND InteractiveSessions userid, name\n        WHERE HostInfo hostname equals \"W10-LATEST\"\n            AND InteractiveSessions userid not equals \"\""
+    },
+    {
+      "title": "Show me all logins to many target PCs",
+      "v2_query": "HostInfo hostname\n    AND InteractiveSessions userid, name\n        WHERE HostInfo hostname equals \"PC1\"\n            OR HostInfo hostname equals \"PC2\"\n            OR HostInfo hostname equals \"PC3\""
+    },
+    {
+      "title": "Discover which systems have extensions installed - single",
+      "v2_query": "HostInfo hostname\n   AND Files created_at, last_write, name\n      WHERE Files full_name contains \"hddjhjcbioambdhjejhdlobijkdnbggp\""
+    },
+    {
+      "title": "Discover which systems have extensions installed - many",
+      "v2_query": "HostInfo hostname\n   AND Files created_at, last_write, name\n      WHERE Files full_name contains \"hddjhjcbioambdhjejhdlobijkdnbggp\"\n         OR Files full_name contains \"efaidnbmnnnibpcajpcglclefindmkaj\"\n         OR Files full_name contains \"jlhmfgmfgeifomenelglieieghnjghma\""
+    },
+    {
+      "title": "Confirm a chrome manifest file is present",
+      "v2_query": "HostInfo hostname\n   AND Files created_at, last_write, name\n      WHERE Files full_name contains \"hddjhjcbioambdhjejhdlobijkdnbggp\"\n         OR Files full_name contains \"efaidnbmnnnibpcajpcglclefindmkaj\"\n         OR Files full_name contains \"jlhmfgmfgeifomenelglieieghnjghma\"\n            AND File name equals \"manifest.json\""
+    },
+    {
+      "title": "Discover number of systems and versions of the target software",
+      "v2_query": "HostInfo hostname\n    AND Software installdate, publisher, version, displayname\n        WHERE Software displayname contains \"zoom\""
+    },
+    {
+      "title": "Discover source locations used to download the target software",
+      "v2_query": "HostInfo hostname\n    AND BrowserDownload referrer, site_url, mime_type, browser, user_profile\n        WHERE BrowserDownload file_path contains \"zoom\""
+    },
+    {
+      "title": "Get some hashes, might be good for app control",
+      "v2_query": "HostInfo hostname\n    AND BrowserDownload referrer, site_url, mime_type, browser, user_profile\n        WHERE BrowserDownload file_path contains \"zoom\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all HostInfo entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "HostInfo",
+              "outputs": [
+                "hostname",
+                "ip_address",
+                "os",
+                "connection_status",
+                "platform"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-f26b1b4a-f756-1570-a8a9-60f7f30d5d0e.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

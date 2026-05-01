@@ -1,0 +1,64 @@
+{
+  "name": "LoggedInUsers",
+  "page_title": "LoggedInUsers collector",
+  "summary": "The LoggedInUsers collector gathers data about users logged into managed systems.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "id",
+      "type": "String",
+      "description": "The user ID set by the operating system."
+    },
+    {
+      "name": "userdomain",
+      "type": "String",
+      "description": "The domain where the user belongs."
+    },
+    {
+      "name": "username",
+      "type": "String",
+      "description": "The logon user name."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show users logged under the \"RISK\" domain",
+      "v2_query": "LoggedInUsers where LoggedInUsers userdomain equals \"RISK\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all LoggedInUsers entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "LoggedInUsers",
+              "outputs": [
+                "id",
+                "userdomain",
+                "username"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-74e34011-531a-0219-a581-bdc90d46c01a.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

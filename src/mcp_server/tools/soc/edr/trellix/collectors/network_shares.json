@@ -1,0 +1,64 @@
+{
+  "name": "NetworkShares",
+  "page_title": "NetworkShares collector",
+  "summary": "The NetworkShares collector finds network shared paths accessible from each managed device.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "name",
+      "type": "String",
+      "description": "Name of shared resource."
+    },
+    {
+      "name": "description",
+      "type": "String",
+      "description": "Description of shared resource set either by the user or by default."
+    },
+    {
+      "name": "path",
+      "type": "String",
+      "description": "Local path to the resource."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show which paths on device \"owilde-office\" are being shared",
+      "v2_query": "NetworkShares path where HostEntries hostname equals \"owilde-office\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all NetworkShares entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "NetworkShares",
+              "outputs": [
+                "name",
+                "description",
+                "path"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-1daefd80-9923-eb5b-d38f-d729366bd662.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

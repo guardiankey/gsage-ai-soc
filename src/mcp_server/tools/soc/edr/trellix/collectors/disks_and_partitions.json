@@ -1,0 +1,130 @@
+{
+  "name": "DisksAndPartitions",
+  "page_title": "DisksAndPartitions collector",
+  "summary": "The DisksAndPartitions collector collects information of disks and partitions.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "disk",
+      "type": "String",
+      "description": "Numeric index of the physical disk."
+    },
+    {
+      "name": "model",
+      "type": "String",
+      "description": "Model of the physical disk."
+    },
+    {
+      "name": "disk_size",
+      "type": "String",
+      "description": "Size of the physical disk."
+    },
+    {
+      "name": "logical_sector",
+      "type": "String",
+      "description": "Size of the logical sector in bytes. Note On Windows, only NTFS partitions are supported."
+    },
+    {
+      "name": "physical_sector",
+      "type": "String",
+      "description": "Size of the physical sector in bytes."
+    },
+    {
+      "name": "virtual_loc",
+      "type": "String",
+      "description": "Virtual location of the physical device (Linux only)."
+    },
+    {
+      "name": "disk_flags",
+      "type": "String",
+      "description": "Flags of the disk (Linux only)."
+    },
+    {
+      "name": "partition",
+      "type": "String",
+      "description": "Numeric index of the partition on a physical disk."
+    },
+    {
+      "name": "volume",
+      "type": "String",
+      "description": "Volume of the partition or location where it is mounted."
+    },
+    {
+      "name": "partition_size",
+      "type": "String",
+      "description": "Size of the partition."
+    },
+    {
+      "name": "partition_freespace",
+      "type": "String",
+      "description": "Free space available in the partition."
+    },
+    {
+      "name": "file_system",
+      "type": "String",
+      "description": "Name of the file system."
+    },
+    {
+      "name": "type",
+      "type": "String",
+      "description": "Type of physical device. For example, fixed hard disk media, removable disk media (Windows only)."
+    },
+    {
+      "name": "partition_flags",
+      "type": "String",
+      "description": "Flags of the partition."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show the models of physical disks connected to device \"john-pc\"",
+      "v2_query": "DisksAndPartitions model where HostInfo hostname equals \"john-pc\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all DisksAndPartitions entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "DisksAndPartitions",
+              "outputs": [
+                "disk",
+                "model",
+                "disk_size",
+                "logical_sector",
+                "physical_sector",
+                "virtual_loc",
+                "disk_flags",
+                "partition",
+                "volume",
+                "partition_size",
+                "partition_freespace",
+                "file_system",
+                "type",
+                "partition_flags"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-aa6148d6-c4ea-f3ca-4f79-d1dea7a74a3e.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

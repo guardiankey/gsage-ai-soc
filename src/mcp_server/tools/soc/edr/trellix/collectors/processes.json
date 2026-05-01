@@ -1,0 +1,280 @@
+{
+  "name": "Processes",
+  "page_title": "Processes collector",
+  "summary": "The Processes collector gathers data on processes running on managed devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "name",
+      "type": "String",
+      "description": "The name of the running process."
+    },
+    {
+      "name": "id",
+      "type": "Number",
+      "description": "The process' system identifier."
+    },
+    {
+      "name": "threadcount",
+      "type": "Number",
+      "description": "The number of active threads spawned by the process."
+    },
+    {
+      "name": "parentid",
+      "type": "Number",
+      "description": "The system identifier for the process that spawned the current process."
+    },
+    {
+      "name": "parentname",
+      "type": "String",
+      "description": "The name of the process that spawned the current process."
+    },
+    {
+      "name": "parentimagepath",
+      "type": "String",
+      "description": "The full path of the parent process."
+    },
+    {
+      "name": "parent_cmdline",
+      "type": "String",
+      "description": "The command that started the parent process."
+    },
+    {
+      "name": "file_reputation (reputation renamed file_reputation)",
+      "type": "String",
+      "description": "The process reputation's name and level (range) defined by TIE or ATP . Known Trusted — [99,100] — This is a trusted file Most Likely Trusted — [71,85] — Almost certainly a trusted file Might Be Trusted — [51,70] — Appears to be a benign file Unknown — [31,50] — Cannot make a determination at this time Might Be Malicious — [16,30] — Appears to be a suspicious file Most Likely Malicious — [14,15] — Almost certainly a malicious file Known Malicious — 1 — This is a malicious file Not Set — 0 — No reputation has been specified"
+    },
+    {
+      "name": "process_reputation",
+      "type": "String",
+      "description": "The reputation of a running process. See file_reputation for range of values."
+    },
+    {
+      "name": "started_at",
+      "type": "Timestamp",
+      "description": "Time when the process started."
+    },
+    {
+      "name": "finished_at",
+      "type": "Timestamp",
+      "description": "Time when the process terminated."
+    },
+    {
+      "name": "content_size",
+      "type": "Number",
+      "description": "If the process is a PowerShell, this is the size of the script being executed."
+    },
+    {
+      "name": "content",
+      "type": "String",
+      "description": "A piece of the script; if the script is larger than 8 k, it is truncated."
+    },
+    {
+      "name": "content_file",
+      "type": "String",
+      "description": "The full path of the script if it was in a file and the PowerShell was executed with -file parameter (if interactive, it may include the first file read by the interpreter)."
+    },
+    {
+      "name": "execution_mode",
+      "type": "String",
+      "description": "The mode that the PowerShell was executed: Interactive — No file was introduced and the user is interacting with the console Unknown — It was not known how it was executed File — With the -file parameter and a file on it (File based execution) Commandline — When the command is placed in the command line with the interpreter (Fileless) Mar_child — This is a PowerShell instance launched by Trellix EDR to execute a collector"
+    },
+    {
+      "name": "size",
+      "type": "Number",
+      "description": "The amount of resident RAM used by the process."
+    },
+    {
+      "name": "md5",
+      "type": "String",
+      "description": "The MD5 hash code for the process."
+    },
+    {
+      "name": "sha1",
+      "type": "String",
+      "description": "The SHA-1 hash code for the process."
+    },
+    {
+      "name": "sha256",
+      "type": "String",
+      "description": "The SHA-256 hash code for the process."
+    },
+    {
+      "name": "cmdline",
+      "type": "String",
+      "description": "The command that started the process."
+    },
+    {
+      "name": "imagepath",
+      "type": "String",
+      "description": "Path to the process image name."
+    },
+    {
+      "name": "kerneltime",
+      "type": "Number",
+      "description": "The process's use of kernel mode CPU time, in seconds."
+    },
+    {
+      "name": "usertime",
+      "type": "Number",
+      "description": "The process's use of user mode CPU time, in seconds."
+    },
+    {
+      "name": "uptime",
+      "type": "Number",
+      "description": "The number of seconds passed since the process started."
+    },
+    {
+      "name": "user",
+      "type": "String",
+      "description": "The user name that started the process."
+    },
+    {
+      "name": "user_id",
+      "type": "String",
+      "description": "The ID for the user that started the process."
+    },
+    {
+      "name": "normalized_cmdline",
+      "type": "String",
+      "description": "The result of using a Windows API for getting command line arguments in a standard format. This API has a special interpretation of backslash character and double quotation marks. Ex: -C\"a\"r is a valid argument and is equal to -Car/ More information: https://devblogs.microsoft.com/oldnewthing/20100917-00/?p=12833 For Linux and macOS, it is the same as cmdline ."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show processes' names and RAM size for processes that use more than 10 MB of resident RAM.",
+      "v2_query": "Processes name, size where Processes size greater than 10240"
+    },
+    {
+      "title": "Show processes' process reputation on a host with IP address of 10.9.9.9",
+      "v2_query": "Processes id, name, process_reputation where HostInfo ip_address equals 10.9.9.9"
+    },
+    {
+      "title": "Which system user identity executed a program: by process - single",
+      "v2_query": "Processes user, user_id, name\n    WHERE Processes name equals \"svchost.exe\""
+    },
+    {
+      "title": "Which system user identity executed a program: by process - many",
+      "v2_query": "Processes user, user_id, name\n    WHERE Processes name equals \"svchost.exe\"\n        OR Processes name equals \"cmd.exe\"\n        OR Processes name equals \"schtasks.exe\""
+    },
+    {
+      "title": "Which system user identity executed a program: by user identity - single",
+      "v2_query": "Processes user, user_id, name\n    WHERE Processes name equals \"svchost.exe\"\n        AND Proceses user equals \"alice\""
+    },
+    {
+      "title": "Which system user identity executed a program: by user identity - many",
+      "v2_query": "Processes user, user_id, name\n    WHERE Processes name equals \"svchost.exe\"\n        AND Proceses user equals \"alice\"\n            OR Processes user equals \"bob\"\n            OR Processes user equals \"jane\""
+    },
+    {
+      "title": "Who is the parent of a child process - single",
+      "v2_query": "Processes parentname, name, execution_mode\n    WHERE Processes name equals \"svchost.exe\""
+    },
+    {
+      "title": "Who is the parent of a child process - many",
+      "v2_query": "Processes parentname, name, execution_mode\n    WHERE Processes name equals \"svchost.exe\"\n        OR Processes name equals \"cmd.exe\"\n        OR Processes name equals \"mshta.exe\""
+    },
+    {
+      "title": "Specify - parent process",
+      "v2_query": "Processes parentname, name, id, execution_mode\n    WHERE Processes parentname not equals \"services.exe\"\n        AND Processes name equals \"svchost.exe\""
+    },
+    {
+      "title": "What is the process ID of the parent",
+      "v2_query": "Processes parentname, parentid, name, id, execution_mode\n    WHERE Processes name equals \"svchost.exe\""
+    },
+    {
+      "title": "What is the process ID of the child",
+      "v2_query": "Processes parentname, name, id, execution_mode\n    WHERE Processes name equals \"svchost.exe\""
+    },
+    {
+      "title": "What is the source file location of the parent",
+      "v2_query": "Processes parentimagepath, name\n    WHERE Processes name equals \"svchost.exe\""
+    },
+    {
+      "title": "What is the source file location of the child",
+      "v2_query": "Processes imagepath, name\n    WHERE Processes name equals \"svchost.exe\""
+    },
+    {
+      "title": "What is the command line of the parent",
+      "v2_query": "Processes parentname, parent_cmdline, name, id\n    WHERE Processes name equals \"svchost.exe\"\n        AND parent_cmdline not equals \"\""
+    },
+    {
+      "title": "What is the command line of the child",
+      "v2_query": "Processes parentname, cmdline, name, id\n    WHERE Processes name equals \"svchost.exe\"\n        AND Processes cmdline not equals \"\""
+    },
+    {
+      "title": "What is the Trellix file reputation of the child",
+      "v2_query": "Processes name, process_reputation\n    WHERE Processes name equals \"svchost.exe\""
+    },
+    {
+      "title": "Specify date of execution after",
+      "v2_query": "Processes name, started_at\n    WHERE Processes name equals \"svchost.exe\"\n        AND Processes started_at after \"2020-01-01\""
+    },
+    {
+      "title": "Specify date of execution before",
+      "v2_query": "Processes name, started_at\n    WHERE Processes name equals \"svchost.exe\"\n        AND Processes started_at before \"2020-04-17\""
+    },
+    {
+      "title": "Specify date of execution range",
+      "v2_query": "Processes name, started_at\n    WHERE Processes name equals \"svchost.exe\"\n        AND Processes started_at after \"2020-04-15\"\n        AND Processes started_at before \"2020-04-17\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all Processes entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "Processes",
+              "outputs": [
+                "name",
+                "id",
+                "threadcount",
+                "parentid",
+                "parentname",
+                "parentimagepath",
+                "parent_cmdline",
+                "file_reputation (reputation renamed file_reputation)",
+                "process_reputation",
+                "started_at",
+                "finished_at",
+                "content_size",
+                "content",
+                "content_file",
+                "execution_mode",
+                "size",
+                "md5",
+                "sha1",
+                "sha256",
+                "cmdline",
+                "imagepath",
+                "kerneltime",
+                "usertime",
+                "uptime",
+                "user",
+                "user_id",
+                "normalized_cmdline"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-d79e2f2f-a526-24ae-44bb-f6c7ea7c5f06.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

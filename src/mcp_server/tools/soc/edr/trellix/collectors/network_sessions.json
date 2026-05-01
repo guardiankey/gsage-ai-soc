@@ -1,0 +1,96 @@
+{
+  "name": "NetworkSessions",
+  "page_title": "NetworkSessions collector",
+  "summary": "The NetworkSessions collector gets information of currently open network sessions (connections made from a remote computer to a shared resource) on the device.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": null
+  },
+  "fields": [
+    {
+      "name": "computer",
+      "type": "String",
+      "description": "IP or host name of remote device."
+    },
+    {
+      "name": "user",
+      "type": "String",
+      "description": "User logged on to host through the network session."
+    },
+    {
+      "name": "client",
+      "type": "String",
+      "description": "Remote session command provider (Windows only)."
+    },
+    {
+      "name": "file",
+      "type": "String",
+      "description": "Path of local resource being accessed by client (Windows only)."
+    },
+    {
+      "name": "idletime",
+      "type": "String",
+      "description": "Time since last session activity (Windows only)."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show which shared resources are being accessed by user name \"owilde\"",
+      "v2_query": "NetworkSessions where NetworkSessions user equals \"owilde\""
+    },
+    {
+      "title": "Network sessions by non-system drives or IPC$ shares",
+      "v2_query": "NetworkSessions computer, user, client, file\n    WHERE NetworkSessions file not ends with \"$\""
+    },
+    {
+      "title": "Network sessions by CIFS share type",
+      "v2_query": "NetworkSessions computer, user, client, file\n    WHERE NetworkSessions file equals \"cifsshare\""
+    },
+    {
+      "title": "Network sessions by specific user - single",
+      "v2_query": "NetworkSessions computer, user, client, file\n    WHERE NetworkSessions user equals \"alice\""
+    },
+    {
+      "title": "Network sessions by specific user - many",
+      "v2_query": "NetworkSessions computer, user, client, file\n    WHERE NetworkSessions user equals \"alice\"\n        OR NetworkSessions user equals \"bob\"\n        OR NetworkSessions user equals \"frank\""
+    },
+    {
+      "title": "Network sessions by source system - single",
+      "v2_query": "NetworkSessions computer, user, client, file\n    WHERE NetworkSessions computer equals \"PC1\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all NetworkSessions entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "NetworkSessions",
+              "outputs": [
+                "computer",
+                "user",
+                "client",
+                "file",
+                "idletime"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-bb0a04da-f09d-c37c-99d1-f0224165ad9f.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

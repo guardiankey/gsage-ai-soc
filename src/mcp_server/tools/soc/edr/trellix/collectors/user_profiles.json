@@ -1,0 +1,100 @@
+{
+  "name": "UserProfiles",
+  "page_title": "UserProfiles collector",
+  "summary": "The UserProfiles collector gathers data about local users on managed devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "accountdisabled",
+      "type": "String",
+      "description": "True if the account is disabled. False otherwise. [a]"
+    },
+    {
+      "name": "domain",
+      "type": "String",
+      "description": "The domain that holds the user. *"
+    },
+    {
+      "name": "fullname",
+      "type": "String",
+      "description": "The user's full name. *"
+    },
+    {
+      "name": "installdate",
+      "type": "Timestamp",
+      "description": "The creation date for the user's home folder ( C:\\Users\\user-name ). The user must log in at least once for this date to be returned."
+    },
+    {
+      "name": "localaccount",
+      "type": "String",
+      "description": "True if the user is stored locally on the device. False otherwise."
+    },
+    {
+      "name": "lockedout",
+      "type": "String",
+      "description": "True if the user has been locked out from the device. False otherwise. *"
+    },
+    {
+      "name": "accountname",
+      "type": "String",
+      "description": "The user's account name."
+    },
+    {
+      "name": "sid",
+      "type": "String",
+      "description": "The security identifier for the user."
+    },
+    {
+      "name": "passwordexpires",
+      "type": "String",
+      "description": "True if the password is configured to expire. False otherwise. *"
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Find user accounts that have been locked out from devices.",
+      "v2_query": "UserProfiles where UserProfiles lockedout equals \"true\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all UserProfiles entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "UserProfiles",
+              "outputs": [
+                "accountdisabled",
+                "domain",
+                "fullname",
+                "installdate",
+                "localaccount",
+                "lockedout",
+                "accountname",
+                "sid",
+                "passwordexpires"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-043a98d6-a3d4-13de-2085-ee8fc9d8e7cd.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

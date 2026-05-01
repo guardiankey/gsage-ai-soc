@@ -1,0 +1,76 @@
+{
+  "name": "NSACryptEvents",
+  "page_title": "NSACryptEvents collector",
+  "summary": "NSACryptEvents collector retrieves Windows events log information from Microsoft-Windows-Audit-CVE provider.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": null,
+    "macos": null
+  },
+  "fields": [
+    {
+      "name": "id",
+      "type": "Number",
+      "description": "The process system identifier."
+    },
+    {
+      "name": "process_id",
+      "type": "Number",
+      "description": "ID given by operating system to the process."
+    },
+    {
+      "name": "thread_id",
+      "type": "Number",
+      "description": "The thread ID spawned by the process."
+    },
+    {
+      "name": "time_created",
+      "type": "Timestamp",
+      "description": "Time when the event was created."
+    },
+    {
+      "name": "message",
+      "type": "String",
+      "description": "CVE associated with the vulnerability for which this event is created."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show hostnames that reported a CVE exploitation attempt through Microsoft-Windows-Audit-CVE.",
+      "v2_query": "HostInfo hostname and NSACryptEvents where NSACryptEvents id not equals \"\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all NSACryptEvents entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "NSACryptEvents",
+              "outputs": [
+                "id",
+                "process_id",
+                "thread_id",
+                "time_created",
+                "message"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-d5bae530-6a01-8a4f-8c76-b7c4bb64faaf.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "name": "Software",
+  "page_title": "Software collector",
+  "summary": "The Software collector lists software installed on managed devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "displayname",
+      "type": "String",
+      "description": "Commonly used software name."
+    },
+    {
+      "name": "installdate",
+      "type": "Timestamp",
+      "description": "A date-time value indicating when the object was installed."
+    },
+    {
+      "name": "publisher",
+      "type": "String",
+      "description": "The name of the software's supplier."
+    },
+    {
+      "name": "version",
+      "type": "String",
+      "description": "Software version information."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show installed software provided by 'Bad Co.' publisher",
+      "v2_query": "Software where Software publisher equals \"Bad Co.\""
+    },
+    {
+      "title": "What software is installed",
+      "v2_query": "Software installdate, publisher, version, displayname, displayname"
+    },
+    {
+      "title": "Which software version am i running - by program single",
+      "v2_query": "Software installdate, publisher, version, displayname\n    WHERE Software displayname contains \"zoom\""
+    },
+    {
+      "title": "Which software version am i running - by program many",
+      "v2_query": "Software installdate, publisher, version, displayname\n    WHERE Software displayname contains \"zoom\"\n        OR Software displayname contains \"google\"\n        OR Software displayname contains \"adobe\""
+    },
+    {
+      "title": "Which software version am i running - by version single",
+      "v2_query": "Software installdate, publisher, version, displayname\n    WHERE Software displayname contains \"zoom\"\n        AND Software version not equals \"4.6\""
+    },
+    {
+      "title": "Which software version am i running - by version many",
+      "v2_query": "Software installdate, publisher, version, displayname\n    WHERE Software displayname contains \"zoom\"\n        AND Software version not equals \"4.6\"\n        AND Software version not equals \"4.5\"\n        AND Software version not equals \"4.1\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all Software entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "Software",
+              "outputs": [
+                "displayname",
+                "installdate",
+                "publisher",
+                "version"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-eebbfd93-6824-2c4c-29b9-8cba62fa27a2.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

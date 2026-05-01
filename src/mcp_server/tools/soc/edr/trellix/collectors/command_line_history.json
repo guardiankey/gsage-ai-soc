@@ -1,0 +1,72 @@
+{
+  "name": "CommandLineHistory",
+  "page_title": "CommandLineHistory collector",
+  "summary": "You can use the CommandLineHistory collector to list the bash command-line history from managed Linux and macOS devices.",
+  "supported_os": {
+    "windows": null,
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "user",
+      "type": "String",
+      "description": "The user who runs the command."
+    },
+    {
+      "name": "ID",
+      "type": "Number",
+      "description": "The incremental execution sequence number (number 1 is the first command executed)."
+    },
+    {
+      "name": "CommandLine",
+      "type": "String",
+      "description": "The command executed."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show history of the usage of the service command",
+      "v2_query": "CommandLineHistory where CommandLineHistory command_line contains \"service\""
+    },
+    {
+      "title": "Hunting for indicators of attack - IoAs: process execution command line Syntax",
+      "v2_query": "CommandLineHistory command_line\n    WHERE CommandLineHistory command_line contains \"SEKURLSA::\"\n        OR CommandLineHistory command_line contains \"CRYPTO::\"\n        OR CommandLineHistory command_line contains \"KERBEROS::\"\n        OR CommandLineHistory command_line contains \"LSADUMP::\"\n        OR CommandLineHistory command_line contains \"TOKEN::\"\n        OR CommandLineHistory command_line contains \"MISC::\""
+    },
+    {
+      "title": "CommanLineHistory Collector",
+      "v2_query": "CommandLineHistory command_line\n    WHERE CommandLineHistory command_line contains \"-exec bypass -e\"\n        OR CommandLineHistory command_line contains \"-NoP -NonI -W Hidden -E\"\n        OR CommandLineHistory command_line contains \"-noni -nop -w hidden -e\"\n        OR CommandLineHistory command_line contains \"-nop -w hidden -e\"\n        OR CommandLineHistory command_line contains \"-nop -w hidden -encodedcommand\"\n        OR CommandLineHistory command_line contains \"-w hidden -en\"\n        OR CommandLineHistory command_line contains \"-nop -w hidden -exec bypass -enc\"\n        OR CommandLineHistory command_line contains \"-nop -exec bypass encodedcommand\"\n        OR CommandLineHistory command_line contains \"-nop -sta -w 1 -enc\"\n        OR CommandLineHistory command_line contains  \"-nop -w hidden -exec bypass -enc\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all CommandLineHistory entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "CommandLineHistory",
+              "outputs": [
+                "user",
+                "ID",
+                "CommandLine"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-967850a7-fcac-d579-bd53-7d215a6e4fe0.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-28T00:00:00Z"
+  }
+}

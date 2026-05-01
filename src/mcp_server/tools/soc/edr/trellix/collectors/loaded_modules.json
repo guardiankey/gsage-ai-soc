@@ -1,0 +1,100 @@
+{
+  "name": "LoadedModules",
+  "page_title": "LoadedModules collector",
+  "summary": "The LoadedModules collector shows the loaded modules of running processes.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "process_id",
+      "type": "Number",
+      "description": "The process's system identifier."
+    },
+    {
+      "name": "process_name",
+      "type": "String",
+      "description": "The name of the running process."
+    },
+    {
+      "name": "process_imagepath",
+      "type": "String",
+      "description": "Path to the process's image name."
+    },
+    {
+      "name": "module_name",
+      "type": "String",
+      "description": "The name of the module."
+    },
+    {
+      "name": "module_imagepath",
+      "type": "String",
+      "description": "Path to the module's image name."
+    },
+    {
+      "name": "module_reputation",
+      "type": "String",
+      "description": "The module's reputation name and level (range) defined by TIE or ATP . Known Trusted — [99,100] — This is a trusted file. Most Likely Trusted — [71,85] — Almost certainly a trusted file. Might Be Trusted — [51,70] — Appears to be a benign file. Unknown — [31,50] — Cannot make a determination at this time. Might Be Malicious — [16,30] — Appears to be a suspicious file. Most Likely Malicious — [14,15] — Almost certainly a malicious file. Known Malicious — 1 — This is a malicious file. Not Set — 0 — No reputation has been specified."
+    },
+    {
+      "name": "module_sha1",
+      "type": "String",
+      "description": "The SHA-1 hash code for the module."
+    },
+    {
+      "name": "module_sha2",
+      "type": "String",
+      "description": "The SHA-256 hash code for the module."
+    },
+    {
+      "name": "module_md5",
+      "type": "String",
+      "description": "The MD5 hash code for the module."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show names of modules with process ID of 71, running on host \"osx-elcapitan-01\".",
+      "v2_query": "LoadedModules where HostInfo hostname equals \"osx-elcapitan-01\" and LoadedModules id equals 71"
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all LoadedModules entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "LoadedModules",
+              "outputs": [
+                "process_id",
+                "process_name",
+                "process_imagepath",
+                "module_name",
+                "module_imagepath",
+                "module_reputation",
+                "module_sha1",
+                "module_sha2",
+                "module_md5"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-4516645a-24ff-2f22-080d-b47045b99900.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

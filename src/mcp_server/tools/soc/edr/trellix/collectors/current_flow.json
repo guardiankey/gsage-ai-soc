@@ -1,0 +1,118 @@
+{
+  "name": "CurrentFlow",
+  "page_title": "CurrentFlow collector",
+  "summary": "The CurrentFlow collector gathers real-time data on the network flow from managed devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "local_ip",
+      "type": "IPv4 or IPv6 address",
+      "description": "IP address of the source of the packet. Supports CIDR block notation."
+    },
+    {
+      "name": "local_port",
+      "type": "Number",
+      "description": "Port number originating the packet."
+    },
+    {
+      "name": "remote_ip",
+      "type": "IPv4 or IPv6 address",
+      "description": "IP address of the destination of the packet. Supports CIDR block notation."
+    },
+    {
+      "name": "remote_port",
+      "type": "Number",
+      "description": "Port number receiving the packet."
+    },
+    {
+      "name": "status",
+      "type": "String",
+      "description": "The status of the TCP transaction (not available in UDP transactions)."
+    },
+    {
+      "name": "process_id",
+      "type": "Number",
+      "description": "The originating process's ID."
+    },
+    {
+      "name": "user",
+      "type": "String",
+      "description": "The user that owns the originating process."
+    },
+    {
+      "name": "user_id",
+      "type": "String",
+      "description": "The user ID of the process owning the socket."
+    },
+    {
+      "name": "proto",
+      "type": "String",
+      "description": "The packet's protocol: TCP or UDP."
+    },
+    {
+      "name": "md5",
+      "type": "String",
+      "description": "The MD5 hash code for the source process."
+    },
+    {
+      "name": "sha1",
+      "type": "String",
+      "description": "The SHA-1 hash code for the source process."
+    },
+    {
+      "name": "sha256",
+      "type": "String",
+      "description": "The SHA-256 hash code for the source process."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show process image names for current flow originating on CIDR block 10.250.45.0/24 and targeting endpoint 10.0.0.2.",
+      "v2_query": "CurrentFlow process_id where CurrentFlow local_ip contains 10.250.45.0/24 and CurrentFlow remote_ip equals 10.0.0.2"
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all CurrentFlow entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "CurrentFlow",
+              "outputs": [
+                "local_ip",
+                "local_port",
+                "remote_ip",
+                "remote_port",
+                "status",
+                "process_id",
+                "user",
+                "user_id",
+                "proto",
+                "md5",
+                "sha1",
+                "sha256"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-9c69b59e-e37c-72ff-616a-3472e9c92bd4.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

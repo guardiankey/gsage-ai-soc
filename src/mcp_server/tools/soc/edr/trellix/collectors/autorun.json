@@ -1,0 +1,205 @@
+{
+  "name": "Autorun",
+  "page_title": "Autorun collector",
+  "summary": "The Autorun collector returns the autorun entries for a Windows-managed device.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": null,
+    "macos": null
+  },
+  "fields": [
+    {
+      "name": "entry_timestamp",
+      "type": "String",
+      "description": "Last modification time of the autorun entry location. It can be a folder, registry key, or scheduled tasks."
+    },
+    {
+      "name": "entry_location",
+      "type": "String",
+      "description": "The entry location of the autorun entry. It can be a folder, registry key, or scheduled tasks."
+    },
+    {
+      "name": "entry",
+      "type": "String",
+      "description": "The name of the entry. It can be the name of the shortcut, registry key name, or task full name."
+    },
+    {
+      "name": "enabled",
+      "type": "String",
+      "description": "Indicates if the entry is active."
+    },
+    {
+      "name": "category",
+      "type": "String",
+      "description": "Specifies the category of the entry. The possible values are: Logon, Explorer, Internet Explorer, Tasks, Codecs, Image Hijack, AppInit Dlls, Known DLLs, Boot Execute, WinLogon, Print Monitors, LSA Providers, Network Providers, Office).",
+      "enum": [
+        "Logon",
+        "Explorer",
+        "Internet Explorer",
+        "Tasks",
+        "Codecs",
+        "Image Hijack",
+        "AppInit Dlls",
+        "Known DLLs",
+        "Boot Execute",
+        "WinLogon",
+        "Print Monitors",
+        "LSA Providers",
+        "Network Providers",
+        "Office"
+      ]
+    },
+    {
+      "name": "Profile",
+      "type": "String",
+      "description": "Profile indicates the user mode under which we discovered the entry. The possible values are: Logged-on user name, System-wide.",
+      "enum": [
+        "Logged-on user name",
+        "System-wide"
+      ]
+    },
+    {
+      "name": "Description",
+      "type": "String",
+      "description": "The description member of the version data for the file associated with the entry."
+    },
+    {
+      "name": "Publisher",
+      "type": "String",
+      "description": "The publisher member of the version data for the file associated with the entry."
+    },
+    {
+      "name": "image_path",
+      "type": "String",
+      "description": "The file path for the file associated with the entry."
+    },
+    {
+      "name": "Version",
+      "type": "String",
+      "description": "The version member of the version data for the file associated with the entry."
+    },
+    {
+      "name": "launch_string",
+      "type": "String",
+      "description": "The command line with which the file was launched for this entry."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show autorun entries for Task Scheduler",
+      "v2_query": "AutoRun where AutoRun entry_location equals \"Task Scheduler\""
+    },
+    {
+      "title": "Which categories of autorun entries exist",
+      "v2_query": "AutoRun entry, entry_location, image_path, category, enabled"
+    },
+    {
+      "title": "Filter by exclusion - by single field with many matches",
+      "v2_query": "AutoRun entry, entry_location, image_path, category, enabled\n    WHERE AutoRun category not equals \"Explorer\"\n        AND AutoRun category not equals \"Codecs\"\n        AND AutoRun category not equals \"Logon\"\n        AND AutoRun category not equals \"Tasks\"\n        AND AutoRun category not equals \"Print Monitors\"\n        AND AutoRun category not equals \"LSA Providers\"\n        AND AutoRun category not equals \"Known DLLs\"\n        AND AutoRun category not equals \"Network Providers\""
+    },
+    {
+      "title": "Filter by exclusion - by many fields",
+      "v2_query": "AutoRun entry, entry_location, image_path, category, enabled\n    WHERE AutoRun enabled not equals \"enabled\"\n        AND AutoRun image_path contains \"C:\\Users\"\n        AND AutoRun image_path ends with \".exe\"\n            AND AutoRun category not equals \"Explorer\"\n            AND AutoRun category not equals \"Codecs\"\n            AND AutoRun category not equals \"Logon\"\n            AND AutoRun category not equals \"Tasks\"\n            AND AutoRun category not equals \"Print Monitors\"\n            AND AutoRun category not equals \"LSA Providers\"\n            AND AutoRun category not equals \"Known DLLs\"\n            AND AutoRun category not equals \"Network Providers\""
+    },
+    {
+      "title": "Which entries exist for the explorer autorun",
+      "v2_query": "AutoRun entry, entry_location, image_path, category\n    WHERE AutoRun category equals \"Explorer\""
+    },
+    {
+      "title": "Which entries exist for the logon autorun",
+      "v2_query": "AutoRun entry, entry_location, image_path, category\n    WHERE AutoRun category equals \"Logon\""
+    },
+    {
+      "title": "Which entries exist for the tasks autorun",
+      "v2_query": "AutoRun entry, entry_location, image_path, category\n    WHERE AutoRun category equals \"Tasks\""
+    },
+    {
+      "title": "Specify tasks that launch with exe files",
+      "v2_query": "AutoRun  category, entry, entry_location, image_path, launch_string, description\n    WHERE AutoRun category equals \"Tasks\"\n        AND AutoRun image_path ends with \".exe\""
+    },
+    {
+      "title": "Specify tasks that launch with exe files - from user space",
+      "v2_query": "AutoRun  category, entry, entry_location, image_path, launch_string, description\n    WHERE AutoRun category equals \"Tasks\"\n        AND AutoRun image_path ends with \".exe\"\n            AND AutoRun image_path contains \"C:\\Users\\\""
+    },
+    {
+      "title": "Specify tasks that launch with exe files - by description",
+      "v2_query": "AutoRun  category, entry, entry_location, image_path, launch_string, description\n    WHERE AutoRun category equals \"Tasks\"\n        AND AutoRun image_path ends with \".exe\"\n            AND AutoRun description equals \"FakeGoogle Installer\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all Autorun entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "Autorun",
+              "outputs": [
+                "entry_timestamp",
+                "entry_location",
+                "entry",
+                "enabled",
+                "category",
+                "Profile",
+                "Description",
+                "Publisher",
+                "image_path",
+                "Version",
+                "launch_string"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      },
+      {
+        "title": "Autorun entries where category equals \"Logon\"",
+        "payload": {
+          "projections": [
+            {
+              "name": "Autorun",
+              "outputs": [
+                "entry_timestamp",
+                "entry_location",
+                "entry",
+                "enabled",
+                "category",
+                "Profile",
+                "Description",
+                "Publisher",
+                "image_path",
+                "Version",
+                "launch_string"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": [
+                  {
+                    "name": "Autorun",
+                    "output": "category",
+                    "op": "EQUALS",
+                    "value": "Logon"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-6b4b8026-4849-4df9-8090-c0e9ea56045c.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

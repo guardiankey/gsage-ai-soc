@@ -27,6 +27,11 @@ DEFAULT_POLL_INTERVAL = 15
 DEFAULT_MAX_WAIT_SECONDS = 600
 DEFAULT_MAX_ROWS = 200
 HARD_MAX_ROWS = 5000
+# Maximum number of rows embedded in the tool result returned to the agent.
+# Larger result sets are still searched and (optionally) exported to CSV/JSON
+# in full, but only the first AGENT_PREVIEW_ROWS rows are shipped inline so
+# the agent's context is not flooded with thousands of records.
+AGENT_PREVIEW_ROWS = 100
 
 # ── Hash detection ──────────────────────────────────────────────────────────
 
@@ -192,8 +197,10 @@ _DEFAULT_GROUP_KEYS = (
     "Files_status",
     "Processes_name",
     "Processes_sha1",
-    "NetworkFlow_remote_ip",
-    "NetworkFlow_remote_port",
+    "NetworkFlow_src_ip",
+    "NetworkFlow_dst_ip",
+    "NetworkFlow_dst_port",
+    "NetworkFlow_process",
 )
 
 
@@ -334,44 +341,82 @@ def build_network_payload(
     hostname_contains: Optional[str] = None,
     direction: Optional[str] = None,
 ) -> dict:
-    """Build a v1 search payload for the NetworkFlow projection."""
-    conditions: list[dict] = []
-    if remote_ip:
-        conditions.append(
-            {"name": "NetworkFlow", "output": "remote_ip", "op": "EQUALS", "value": remote_ip}
-        )
-    if remote_port is not None:
-        conditions.append(
-            {
-                "name": "NetworkFlow",
-                "output": "remote_port",
-                "op": "EQUALS",
-                "value": int(remote_port),
-            }
-        )
+    """Build a v1 search payload for the NetworkFlow projection.
+
+    The Trellix NetworkFlow collector exposes ``src_ip``/``dst_ip`` and
+    ``src_port``/``dst_port`` (there is no ``remote_ip``/``remote_port``
+    field). To keep the public API ergonomic, ``remote_ip`` and
+    ``remote_port`` are translated into an OR-block that matches either the
+    source or the destination, so callers don't need to know the flow
+    direction up-front. Process attribution lives inside NetworkFlow itself
+    (``process`` and ``process_id``), so we filter and project them there.
+    """
+    # Conjunctive conditions (AND-block).
+    and_conditions: list[dict] = []
     if process_name:
-        conditions.append(
-            {"name": "Processes", "output": "name", "op": "CONTAINS", "value": process_name}
+        and_conditions.append(
+            {"name": "NetworkFlow", "output": "process", "op": "CONTAINS", "value": process_name}
         )
     if hostname_contains:
-        conditions.append(
+        and_conditions.append(
             {"name": "HostInfo", "output": "hostname", "op": "CONTAINS", "value": hostname_contains}
         )
-    if direction in ("in", "out"):
-        conditions.append(
+    if direction:
+        and_conditions.append(
             {"name": "NetworkFlow", "output": "direction", "op": "EQUALS", "value": direction}
         )
+
+    # ``remote_ip`` / ``remote_port`` match either side of the flow. We build
+    # one OR-block per match and combine them with the AND-conditions above:
+    #   (src_ip=X OR dst_ip=X) AND (src_port=Y OR dst_port=Y) AND <rest>
+    # In the v1 condition tree this is expressed as an outer OR of
+    # AND-blocks, where each AND-block carries one of the side combinations.
+    side_combinations: list[list[dict]] = [[]]
+    if remote_ip:
+        side_combinations = [
+            block + [{"name": "NetworkFlow", "output": "src_ip", "op": "EQUALS", "value": remote_ip}]
+            for block in side_combinations
+        ] + [
+            block + [{"name": "NetworkFlow", "output": "dst_ip", "op": "EQUALS", "value": remote_ip}]
+            for block in side_combinations
+        ]
+    if remote_port is not None:
+        port_value = int(remote_port)
+        side_combinations = [
+            block + [{"name": "NetworkFlow", "output": "src_port", "op": "EQUALS", "value": port_value}]
+            for block in side_combinations
+        ] + [
+            block + [{"name": "NetworkFlow", "output": "dst_port", "op": "EQUALS", "value": port_value}]
+            for block in side_combinations
+        ]
+
+    or_blocks = [
+        {"and": and_conditions + extras}
+        for extras in side_combinations
+    ]
 
     return {
         "projections": [
             {"name": "HostInfo", "outputs": ["hostname", "ip_address"]},
             {
                 "name": "NetworkFlow",
-                "outputs": ["remote_ip", "remote_port", "local_port", "direction", "protocol"],
+                "outputs": [
+                    "src_ip",
+                    "src_port",
+                    "dst_ip",
+                    "dst_port",
+                    "proto",
+                    "direction",
+                    "status",
+                    "time",
+                    "process",
+                    "process_id",
+                    "user",
+                    "sha256",
+                ],
             },
-            {"name": "Processes", "outputs": ["name", "command_line", "sha1"]},
         ],
-        "condition": {"or": [{"and": conditions}]},
+        "condition": {"or": or_blocks},
     }
 
 
@@ -495,13 +540,16 @@ def build_processes_payload(
         "file_reputation",
         "execution_mode",
         "started_at",
-        "finished_at",
         "size",
         "threadcount",
     ]
     if collector == "Processes":
         base_outputs.append("parent_cmdline")
     if collector == "ProcessHistory":
+        # ``finished_at`` is only emitted by ProcessHistory — including it on
+        # the live ``Processes`` collector triggers Trellix AR-806
+        # ("Output finished_at is not valid for collector").
+        base_outputs.append("finished_at")
         base_outputs.append("status")
     if include_powershell_content:
         base_outputs.extend(["content", "content_size", "content_file"])

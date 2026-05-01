@@ -1,0 +1,76 @@
+{
+  "name": "Startup",
+  "page_title": "Startup collector",
+  "summary": "The Startup collector shows information about start-up applications on managed devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": null,
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "caption",
+      "type": "String",
+      "description": "The short name set by the application."
+    },
+    {
+      "name": "command",
+      "type": "String",
+      "description": "The command line that starts the application."
+    },
+    {
+      "name": "description",
+      "type": "String",
+      "description": "The description set by the application."
+    },
+    {
+      "name": "name",
+      "type": "String",
+      "description": "The application's file name."
+    },
+    {
+      "name": "user",
+      "type": "String",
+      "description": "The user name for whom this start-up command will run."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show applications that start up automatically for user 'owilde'",
+      "v2_query": "Startup where Startup user equals \"owilde\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all Startup entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "Startup",
+              "outputs": [
+                "caption",
+                "command",
+                "description",
+                "name",
+                "user"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-e56e82ad-c09a-baeb-c447-35c2dd21af47.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

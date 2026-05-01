@@ -1,0 +1,94 @@
+{
+  "name": "InstalledDrivers",
+  "page_title": "InstalledDrivers collector",
+  "summary": "The InstalledDrivers collector shows details about drivers installed on managed devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "displayname",
+      "type": "String",
+      "description": "The display name for the driver."
+    },
+    {
+      "name": "description",
+      "type": "String",
+      "description": "A description for the driver."
+    },
+    {
+      "name": "last_modified_date",
+      "type": "Timestamp",
+      "description": "A date-time value indicating when the driver was last modified."
+    },
+    {
+      "name": "name",
+      "type": "String",
+      "description": "A short name that uniquely identifies the driver."
+    },
+    {
+      "name": "servicetype",
+      "type": "String",
+      "description": "The type of service provided to calling processes."
+    },
+    {
+      "name": "startmode",
+      "type": "String",
+      "description": "The driver start-up mode. Boot — the driver is started by the operating system loader. System — the driver is started by the operating system. Automatic — the driver starts automatically at system startup. Manual — the driver starts by the service control manager. The service control manager also allows to manually start the driver. Disabled — the driver can no longer be started."
+    },
+    {
+      "name": "state",
+      "type": "String",
+      "description": "The current state of the driver."
+    },
+    {
+      "name": "path",
+      "type": "String",
+      "description": "The fully qualified path to the driver file."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show drivers which are disabled on devices.",
+      "v2_query": "InstalledDrivers where InstalledDrivers state equals \"disabled\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all InstalledDrivers entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "InstalledDrivers",
+              "outputs": [
+                "displayname",
+                "description",
+                "last_modified_date",
+                "name",
+                "servicetype",
+                "startmode",
+                "state",
+                "path"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-eaaec75c-01be-321f-a58b-8af25c7ca0f9.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

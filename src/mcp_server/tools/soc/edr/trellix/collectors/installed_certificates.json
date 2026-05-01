@@ -1,0 +1,82 @@
+{
+  "name": "InstalledCertificates",
+  "page_title": "InstalledCertificates collector",
+  "summary": "The InstalledCertificates collector returns information about installed certificates.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "issued_to",
+      "type": "String",
+      "description": "The subject field identifies the entity associated with the public key stored in the subject public key field."
+    },
+    {
+      "name": "issued_by",
+      "type": "String",
+      "description": "Identifies the entity that has signed and issued the certificate."
+    },
+    {
+      "name": "expiration_date",
+      "type": "Time stamp",
+      "description": "Indicates the expiration date of the certificate."
+    },
+    {
+      "name": "purposes",
+      "type": "String",
+      "description": "The key usage extension defines the purpose (for example, encipherment, signature, and certificate signing) of the key obtained in the certificate. The usage restriction might be employed when a key that could be sent for more than one operation is to be restricted."
+    },
+    {
+      "name": "purposes_extended",
+      "type": "String",
+      "description": "This extension indicates one or more purposes where the certified public key might be used, in addition to or in place of the basic purposes indicated in the key usage extension. In general, this extension appears only in end entity certificates. Optional ( Extended Key Usage on Linux and Enhanced Key Usage on Windows)."
+    },
+    {
+      "name": "friendly_name",
+      "type": "String",
+      "description": "Displays a more friendly name of the certificate. (Windows only)."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show the installed certificates issued by Intel",
+      "v2_query": "InstalledCertificates where InstalledCertificates issued_by contains “Intel”"
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all InstalledCertificates entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "InstalledCertificates",
+              "outputs": [
+                "issued_to",
+                "issued_by",
+                "expiration_date",
+                "purposes",
+                "purposes_extended",
+                "friendly_name"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-2a2a491b-ef82-e308-6844-ea10b4193fbe.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

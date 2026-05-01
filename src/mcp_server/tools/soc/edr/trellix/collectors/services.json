@@ -1,0 +1,96 @@
+{
+  "name": "Services",
+  "page_title": "Services collector",
+  "summary": "The Services collector lists services installed on managed devices.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "description",
+      "type": "String",
+      "description": "A description of the service's functionality."
+    },
+    {
+      "name": "name",
+      "type": "String",
+      "description": "A short name that uniquely identifies the service."
+    },
+    {
+      "name": "startuptype",
+      "type": "String",
+      "description": "The start-up mode. Boot — specifies a device driver started by the operating system loader. System — specifies a device driver started by the operating system. Automatic — specifies a service that starts automatically at system start-up. Manual — specifies a service started by the service control manager. Disabled — specifies a service that can no longer be started."
+    },
+    {
+      "name": "status",
+      "type": "String",
+      "description": "The current status of the service."
+    },
+    {
+      "name": "user",
+      "type": "String",
+      "description": "The user that owns the service's process."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show services that are currently running and are set to start manually by users.",
+      "v2_query": "Services where Services status equals \"Running\" and Services startuptype equals \"Manually\""
+    },
+    {
+      "title": "Which have services startup: manual",
+      "v2_query": "Services startuptype, name, user, status\n    WHERE Services startuptype equals \"Manual\""
+    },
+    {
+      "title": "Which have services startup: automatic",
+      "v2_query": "Services startuptype, name, user, status\n    WHERE Services startuptype equals \"Automatic\""
+    },
+    {
+      "title": "Which services are running",
+      "v2_query": "Services startuptype, name, user, status\n    WHERE Services status equals \"Running\""
+    },
+    {
+      "title": "Which services are not running",
+      "v2_query": "Services startuptype, name, user, status\n    WHERE Services status equals \"Stopped\""
+    },
+    {
+      "title": "Which services running as non-system identities",
+      "v2_query": "Services startuptype, name, user, status\n    WHERE Services status equals \"Running\"\n        AND Services user not equals \"LocalService\"\n        AND Services user not equals \"LocalSystem\"\n        AND Services user not contains \"NT AUTHORITY\\\"\n        AND Services user not contains \"NT Service\\\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all Services entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "Services",
+              "outputs": [
+                "description",
+                "name",
+                "startuptype",
+                "status",
+                "user"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-2f272078-c04b-556d-04f5-dbe70e9e9626.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}

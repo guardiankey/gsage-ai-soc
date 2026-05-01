@@ -1,0 +1,100 @@
+{
+  "name": "ScheduledTasks",
+  "page_title": "ScheduledTasks collector",
+  "summary": "The ScheduledTasks collector shows the status of scheduled tasks on devices, and also when it is scheduled to run next.",
+  "supported_os": {
+    "windows": "3.0 and later",
+    "linux": "3.0 and later",
+    "macos": "3.0 and later"
+  },
+  "fields": [
+    {
+      "name": "folder",
+      "type": "String",
+      "description": "The path from where the scheduled task runs (Empty in Linux)."
+    },
+    {
+      "name": "taskname",
+      "type": "String",
+      "description": "Name of task."
+    },
+    {
+      "name": "nextruntime",
+      "type": "Timestamp",
+      "description": "Time and date when the task will run."
+    },
+    {
+      "name": "status",
+      "type": "String",
+      "description": "Current task status can be ready , disabled , setting , running , or could not start ."
+    },
+    {
+      "name": "task_run",
+      "type": "String",
+      "description": "Full command line to execute tasks."
+    },
+    {
+      "name": "last_run",
+      "type": "Timestamp",
+      "description": "Last time the task ran successfully."
+    },
+    {
+      "name": "username",
+      "type": "String",
+      "description": "Name of the user that executed the task."
+    },
+    {
+      "name": "schedule_on",
+      "type": "String",
+      "description": "See Trigger field documentation."
+    },
+    {
+      "name": "log_on_type",
+      "type": "String",
+      "description": "Security logon method required to run tasks. See Log on Type documentation (Windows only)."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Example: Show when will the task called 'backupDaily' run next",
+      "v2_query": "ScheduledTasks taskname, nextruntime where ScheduledTasks taskname equals \"backupDaily\""
+    }
+  ],
+  "v1_payload_example": {
+    "examples": [
+      {
+        "title": "List all ScheduledTasks entries (no filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "ScheduledTasks",
+              "outputs": [
+                "folder",
+                "taskname",
+                "nextruntime",
+                "status",
+                "task_run",
+                "last_run",
+                "username",
+                "schedule_on",
+                "log_on_type"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": []
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "_source": {
+    "page_id": "UUID-62447a07-708a-5af2-9ca5-e3df11ee3bde.html",
+    "bundle_id": "mvision-endpoint-detection-and-response-product-guide",
+    "updated_on": "2025-09-29T00:00:00Z"
+  }
+}
