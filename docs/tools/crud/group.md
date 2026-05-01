@@ -24,12 +24,58 @@ _No configuration-derived environment variables._
 ### `group`
 
 - **`list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `group_id` | `string` | — | [get/update/delete/add_permission/remove_permission] Group UUID. |
+  | `name` | `string` | — | [create/update] Group name. |
+  | `description` | `string` | — | [create/update] Group description. |
+  | `permission_tag` | `string` | — | [add_permission/remove_permission] Permission tag (e.g., dns:read). |
+  | `dept_id` | `string` | — | [add_permission/remove_permission] Optional department UUID to scope the permission. Omit or null for global (all departments). |
+
 - **`get`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `group_id` | `string` | — | [get/update/delete/add_permission/remove_permission] Group UUID. |
+
 - **`create`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `name` | `string` | — | [create/update] Group name. |
+  | `description` | `string` | — | [create/update] Group description. |
+
 - **`update`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `group_id` | `string` | — | [get/update/delete/add_permission/remove_permission] Group UUID. |
+  | `name` | `string` | — | [create/update] Group name. |
+  | `description` | `string` | — | [create/update] Group description. |
+
 - **`delete`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `group_id` | `string` | — | [get/update/delete/add_permission/remove_permission] Group UUID. |
+
 - **`add_permission`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `group_id` | `string` | — | [get/update/delete/add_permission/remove_permission] Group UUID. |
+  | `permission_tag` | `string` | — | [add_permission/remove_permission] Permission tag (e.g., dns:read). |
+  | `dept_id` | `string` | — | [add_permission/remove_permission] Optional department UUID to scope the permission. Omit or null for global (all departments). |
+
 - **`remove_permission`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `group_id` | `string` | — | [get/update/delete/add_permission/remove_permission] Group UUID. |
+  | `permission_tag` | `string` | — | [add_permission/remove_permission] Permission tag (e.g., dns:read). |
+  | `dept_id` | `string` | — | [add_permission/remove_permission] Optional department UUID to scope the permission. Omit or null for global (all departments). |
+
 
 ## Permissions required
 

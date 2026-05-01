@@ -72,18 +72,162 @@ The variables below are derived automatically from each tool's `config_schema`. 
 ### `zabbix_query`
 
 - **`hosts_list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `hostid` | `string` | — | Zabbix internal host ID. Use hosts_list to discover hostid values from a name or IP. |
+  | `host` | `string` | — | Filter hosts by technical name (partial match). Used with hosts_list and templates_list. |
+  | `host_name` | `string` | — | Filter hosts by visible/display name (partial match). Used with hosts_list. |
+  | `ip` | `string` | — | Filter hosts by IP address (exact match). Used with hosts_list. |
+
 - **`host_details`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `hostid` | `string` | — | Zabbix internal host ID. Use hosts_list to discover hostid values from a name or IP. |
+  | `hostids` | `array` | — | List of Zabbix host IDs (use instead of hostid when multiple). |
+  | `host` | `string` | — | Filter hosts by technical name (partial match). Used with hosts_list and templates_list. |
+  | `host_name` | `string` | — | Filter hosts by visible/display name (partial match). Used with hosts_list. |
+  | `ip` | `string` | — | Filter hosts by IP address (exact match). Used with hosts_list. |
+  | `groupid` | `string` | — | Zabbix host group ID. Used with hosts_in_group. |
+  | `groupids` | `array` | — | List of host group IDs. Used with problems_list, events_list. |
+  | `group_name` | `string` | — | Filter host groups by name (partial match). Used with hostgroups_list. |
+  | `itemids` | `array` | — | List of item IDs to retrieve history for. Run action=items_list first to discover valid item IDs. |
+  | `item_key` | `string` | — | Filter items by key_ (partial match). Example: 'cpu', 'memory', 'vfs.fs'. Used with items_list. |
+  | `item_name` | `string` | — | Filter items by display name (partial match). Used with items_list. |
+  | `history_type` | `string` | — | Item value type for metric_history. Use 'float' for numeric gauges (CPU, memory), 'integer' for counters, 'character'/'text'/'log' for string values. Default: 'float'. |
+  | `time_from` | `integer` | — | Start of time range as Unix timestamp. |
+  | `time_till` | `integer` | — | End of time range as Unix timestamp. |
+  | `severities` | `array` | — | Severity codes to include: 0=not_classified, 1=info, 2=warning, 3=average, 4=high, 5=disaster. |
+  | `min_severity` | `integer` | — | Minimum severity to include (inclusive). Shorthand for severities=[min_severity..5]. |
+  | `recent` | `boolean` | — | When true, return only recent problems (still active or suppressed). Default: true for problems_list. |
+  | `only_true` | `boolean` | — | Return only currently firing triggers (triggers_list only). |
+  | `limit` | `integer` | — | Maximum number of records to return. Default: 100 for list actions; 100 for metric_history. Max: 500 for list actions; 1000 for metric_history. |
+
 - **`hostgroups_list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `group_name` | `string` | — | Filter host groups by name (partial match). Used with hostgroups_list. |
+
 - **`hosts_in_group`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `groupid` | `string` | — | Zabbix host group ID. Used with hosts_in_group. |
+
 - **`templates_list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `host` | `string` | — | Filter hosts by technical name (partial match). Used with hosts_list and templates_list. |
+
 - **`items_list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `itemids` | `array` | — | List of item IDs to retrieve history for. Run action=items_list first to discover valid item IDs. |
+  | `item_key` | `string` | — | Filter items by key_ (partial match). Example: 'cpu', 'memory', 'vfs.fs'. Used with items_list. |
+  | `item_name` | `string` | — | Filter items by display name (partial match). Used with items_list. |
+
 - **`maintenance_list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `hostid` | `string` | — | Zabbix internal host ID. Use hosts_list to discover hostid values from a name or IP. |
+  | `hostids` | `array` | — | List of Zabbix host IDs (use instead of hostid when multiple). |
+  | `host` | `string` | — | Filter hosts by technical name (partial match). Used with hosts_list and templates_list. |
+  | `host_name` | `string` | — | Filter hosts by visible/display name (partial match). Used with hosts_list. |
+  | `ip` | `string` | — | Filter hosts by IP address (exact match). Used with hosts_list. |
+  | `groupid` | `string` | — | Zabbix host group ID. Used with hosts_in_group. |
+  | `groupids` | `array` | — | List of host group IDs. Used with problems_list, events_list. |
+  | `group_name` | `string` | — | Filter host groups by name (partial match). Used with hostgroups_list. |
+  | `itemids` | `array` | — | List of item IDs to retrieve history for. Run action=items_list first to discover valid item IDs. |
+  | `item_key` | `string` | — | Filter items by key_ (partial match). Example: 'cpu', 'memory', 'vfs.fs'. Used with items_list. |
+  | `item_name` | `string` | — | Filter items by display name (partial match). Used with items_list. |
+  | `history_type` | `string` | — | Item value type for metric_history. Use 'float' for numeric gauges (CPU, memory), 'integer' for counters, 'character'/'text'/'log' for string values. Default: 'float'. |
+  | `time_from` | `integer` | — | Start of time range as Unix timestamp. |
+  | `time_till` | `integer` | — | End of time range as Unix timestamp. |
+  | `severities` | `array` | — | Severity codes to include: 0=not_classified, 1=info, 2=warning, 3=average, 4=high, 5=disaster. |
+  | `min_severity` | `integer` | — | Minimum severity to include (inclusive). Shorthand for severities=[min_severity..5]. |
+  | `recent` | `boolean` | — | When true, return only recent problems (still active or suppressed). Default: true for problems_list. |
+  | `only_true` | `boolean` | — | Return only currently firing triggers (triggers_list only). |
+  | `limit` | `integer` | — | Maximum number of records to return. Default: 100 for list actions; 100 for metric_history. Max: 500 for list actions; 1000 for metric_history. |
+
 - **`problems_list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `groupids` | `array` | — | List of host group IDs. Used with problems_list, events_list. |
+  | `recent` | `boolean` | — | When true, return only recent problems (still active or suppressed). Default: true for problems_list. |
+
 - **`events_list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `groupids` | `array` | — | List of host group IDs. Used with problems_list, events_list. |
+
 - **`triggers_list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `only_true` | `boolean` | — | Return only currently firing triggers (triggers_list only). |
+
 - **`severity_summary`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `hostid` | `string` | — | Zabbix internal host ID. Use hosts_list to discover hostid values from a name or IP. |
+  | `hostids` | `array` | — | List of Zabbix host IDs (use instead of hostid when multiple). |
+  | `host` | `string` | — | Filter hosts by technical name (partial match). Used with hosts_list and templates_list. |
+  | `host_name` | `string` | — | Filter hosts by visible/display name (partial match). Used with hosts_list. |
+  | `ip` | `string` | — | Filter hosts by IP address (exact match). Used with hosts_list. |
+  | `groupid` | `string` | — | Zabbix host group ID. Used with hosts_in_group. |
+  | `groupids` | `array` | — | List of host group IDs. Used with problems_list, events_list. |
+  | `group_name` | `string` | — | Filter host groups by name (partial match). Used with hostgroups_list. |
+  | `itemids` | `array` | — | List of item IDs to retrieve history for. Run action=items_list first to discover valid item IDs. |
+  | `item_key` | `string` | — | Filter items by key_ (partial match). Example: 'cpu', 'memory', 'vfs.fs'. Used with items_list. |
+  | `item_name` | `string` | — | Filter items by display name (partial match). Used with items_list. |
+  | `history_type` | `string` | — | Item value type for metric_history. Use 'float' for numeric gauges (CPU, memory), 'integer' for counters, 'character'/'text'/'log' for string values. Default: 'float'. |
+  | `time_from` | `integer` | — | Start of time range as Unix timestamp. |
+  | `time_till` | `integer` | — | End of time range as Unix timestamp. |
+  | `severities` | `array` | — | Severity codes to include: 0=not_classified, 1=info, 2=warning, 3=average, 4=high, 5=disaster. |
+  | `min_severity` | `integer` | — | Minimum severity to include (inclusive). Shorthand for severities=[min_severity..5]. |
+  | `recent` | `boolean` | — | When true, return only recent problems (still active or suppressed). Default: true for problems_list. |
+  | `only_true` | `boolean` | — | Return only currently firing triggers (triggers_list only). |
+  | `limit` | `integer` | — | Maximum number of records to return. Default: 100 for list actions; 100 for metric_history. Max: 500 for list actions; 1000 for metric_history. |
+
 - **`host_health`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `hostid` | `string` | — | Zabbix internal host ID. Use hosts_list to discover hostid values from a name or IP. |
+  | `hostids` | `array` | — | List of Zabbix host IDs (use instead of hostid when multiple). |
+  | `host` | `string` | — | Filter hosts by technical name (partial match). Used with hosts_list and templates_list. |
+  | `host_name` | `string` | — | Filter hosts by visible/display name (partial match). Used with hosts_list. |
+  | `ip` | `string` | — | Filter hosts by IP address (exact match). Used with hosts_list. |
+  | `groupid` | `string` | — | Zabbix host group ID. Used with hosts_in_group. |
+  | `groupids` | `array` | — | List of host group IDs. Used with problems_list, events_list. |
+  | `group_name` | `string` | — | Filter host groups by name (partial match). Used with hostgroups_list. |
+  | `itemids` | `array` | — | List of item IDs to retrieve history for. Run action=items_list first to discover valid item IDs. |
+  | `item_key` | `string` | — | Filter items by key_ (partial match). Example: 'cpu', 'memory', 'vfs.fs'. Used with items_list. |
+  | `item_name` | `string` | — | Filter items by display name (partial match). Used with items_list. |
+  | `history_type` | `string` | — | Item value type for metric_history. Use 'float' for numeric gauges (CPU, memory), 'integer' for counters, 'character'/'text'/'log' for string values. Default: 'float'. |
+  | `time_from` | `integer` | — | Start of time range as Unix timestamp. |
+  | `time_till` | `integer` | — | End of time range as Unix timestamp. |
+  | `severities` | `array` | — | Severity codes to include: 0=not_classified, 1=info, 2=warning, 3=average, 4=high, 5=disaster. |
+  | `min_severity` | `integer` | — | Minimum severity to include (inclusive). Shorthand for severities=[min_severity..5]. |
+  | `recent` | `boolean` | — | When true, return only recent problems (still active or suppressed). Default: true for problems_list. |
+  | `only_true` | `boolean` | — | Return only currently firing triggers (triggers_list only). |
+  | `limit` | `integer` | — | Maximum number of records to return. Default: 100 for list actions; 100 for metric_history. Max: 500 for list actions; 1000 for metric_history. |
+
 - **`metric_history`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `history_type` | `string` | — | Item value type for metric_history. Use 'float' for numeric gauges (CPU, memory), 'integer' for counters, 'character'/'text'/'log' for string values. Default: 'float'. |
+  | `limit` | `integer` | — | Maximum number of records to return. Default: 100 for list actions; 100 for metric_history. Max: 500 for list actions; 1000 for metric_history. |
+
 
 ## Permissions required
 

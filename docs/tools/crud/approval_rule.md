@@ -24,8 +24,32 @@ _No configuration-derived environment variables._
 ### `approval_rule`
 
 - **`list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `approver` | `string` | — | [add] Name or email of the org member who will approve matching calls. Resolved by exact email or partial full_name match among active org members. Use a full email address when names are ambiguous. |
+  | `tool_pattern` | `string` | — | [add] Exact tool name to match, or '*' for all tools. Examples: 'block_ip', 'dns_lookup', '*'. Defaults to '*'. |
+  | `user_id_pattern` | `string` | — | [add] UUID of the user whose calls must be approved, or '*' to match calls from any user in the org. Defaults to '*'. |
+  | `priority` | `integer` | — | [add] Tie-break priority when multiple rules match with the same specificity score. Higher value wins. Defaults to 0. |
+  | `description` | `string` | — | [add] Optional human-readable description of the rule. |
+  | `rule_id` | `string` | — | [delete] UUID of the approval rule to remove. |
+
 - **`add`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `approver` | `string` | — | [add] Name or email of the org member who will approve matching calls. Resolved by exact email or partial full_name match among active org members. Use a full email address when names are ambiguous. |
+  | `tool_pattern` | `string` | — | [add] Exact tool name to match, or '*' for all tools. Examples: 'block_ip', 'dns_lookup', '*'. Defaults to '*'. |
+  | `user_id_pattern` | `string` | — | [add] UUID of the user whose calls must be approved, or '*' to match calls from any user in the org. Defaults to '*'. |
+  | `priority` | `integer` | — | [add] Tie-break priority when multiple rules match with the same specificity score. Higher value wins. Defaults to 0. |
+  | `description` | `string` | — | [add] Optional human-readable description of the rule. |
+
 - **`delete`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `rule_id` | `string` | — | [delete] UUID of the approval rule to remove. |
+
 
 ## Permissions required
 

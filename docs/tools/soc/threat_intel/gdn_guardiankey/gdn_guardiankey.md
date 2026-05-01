@@ -59,8 +59,39 @@ The variables below are derived automatically from each tool's `config_schema`. 
 ### `gdn_guardiankey`
 
 - **`query`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `report` | `string` | — | Report to query (required for action='query'). Available reports: top_users (top users by event count), top_clientips (top IPs by event count), events (detailed event list), users (user activity summary), top_clientips_users (IPs with distinct user counts), top_users_cities (users by distinct cities — impossible travel detection), areas_risk_treatment_in_time (risk timeline series), top_users_risk (users by cumulative risk score), pie_event_responses (response distribution), bars_events_in_time (event volume over time), table_top_countries (top countries), table_top_cities (top cities), table_top_threats (top threat categories), table_messagelog_events (WAP message log events). |
+
 - **`list_reports`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `report` | `string` | — | Report to query (required for action='query'). Available reports: top_users (top users by event count), top_clientips (top IPs by event count), events (detailed event list), users (user activity summary), top_clientips_users (IPs with distinct user counts), top_users_cities (users by distinct cities — impossible travel detection), areas_risk_treatment_in_time (risk timeline series), top_users_risk (users by cumulative risk score), pie_event_responses (response distribution), bars_events_in_time (event volume over time), table_top_countries (top countries), table_top_cities (top cities), table_top_threats (top threat categories), table_messagelog_events (WAP message log events). |
+  | `days_ago` | `integer` | — | Number of days back from now to use as the time range start. Default: 7. Ignored if time_begin / time_end are provided. |
+  | `time_begin` | `string` | — | Explicit time range start in ISO 8601 format (YYYY-MM-DDTHH:MM). When set, takes priority over days_ago. |
+  | `time_end` | `string` | — | Explicit time range end in ISO 8601 format (YYYY-MM-DDTHH:MM). When set, takes priority over days_ago. |
+  | `username` | `string` | — | Filter results by username. |
+  | `client_ip` | `string` | — | Filter results by client IP address. |
+  | `login_failed` | `boolean` | — | Filter by login outcome: true = failed logins only, false = successful logins only. |
+  | `country` | `string` | — | Filter results by country name. |
+  | `response` | `string` | — | Filter results by gSageKey treatment response. |
+
 - **`usage_summary`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `report` | `string` | — | Report to query (required for action='query'). Available reports: top_users (top users by event count), top_clientips (top IPs by event count), events (detailed event list), users (user activity summary), top_clientips_users (IPs with distinct user counts), top_users_cities (users by distinct cities — impossible travel detection), areas_risk_treatment_in_time (risk timeline series), top_users_risk (users by cumulative risk score), pie_event_responses (response distribution), bars_events_in_time (event volume over time), table_top_countries (top countries), table_top_cities (top cities), table_top_threats (top threat categories), table_messagelog_events (WAP message log events). |
+  | `days_ago` | `integer` | — | Number of days back from now to use as the time range start. Default: 7. Ignored if time_begin / time_end are provided. |
+  | `time_begin` | `string` | — | Explicit time range start in ISO 8601 format (YYYY-MM-DDTHH:MM). When set, takes priority over days_ago. |
+  | `time_end` | `string` | — | Explicit time range end in ISO 8601 format (YYYY-MM-DDTHH:MM). When set, takes priority over days_ago. |
+  | `username` | `string` | — | Filter results by username. |
+  | `client_ip` | `string` | — | Filter results by client IP address. |
+  | `login_failed` | `boolean` | — | Filter by login outcome: true = failed logins only, false = successful logins only. |
+  | `country` | `string` | — | Filter results by country name. |
+  | `response` | `string` | — | Filter results by gSageKey treatment response. |
+
 
 ## Permissions required
 

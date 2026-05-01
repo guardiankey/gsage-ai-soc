@@ -24,15 +24,94 @@ _No configuration-derived environment variables._
 ### `datastore`
 
 - **`list_stores`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `store_id` | `string` | — | UUID of the target store (for most record/store actions). |
+  | `store_name` | `string` | — | Name of the store — alternative to store_id for describe_store. |
+  | `name` | `string` | — | Store name (for create_store or update_store). |
+  | `description` | `string` | — | Human-readable description of the store (LLM context). |
+  | `schema` | `object` | — | JSON Schema draft-07 for record validation. Pass {} to disable validation. |
+  | `visibility` | `string` | — | Visibility: 'private' (owner-only) or 'shared' (all department members). |
+  | `max_records` | `integer` | — | Maximum number of records allowed in the store. |
+  | `is_active` | `boolean` | — | Set False to soft-disable a store (update_store only). |
+  | `data` | `object` | — | Record payload for insert or update_record. |
+  | `records` | `array` | — | Array of record payloads for bulk_insert. |
+  | `record_id` | `string` | — | UUID of the target record (for update_record / delete_record). |
+  | `filters` | `object` | — | JSONB containment filter for query — records must contain these key/values. |
+  | `page` | `integer` | — | 1-based page number. |
+  | `page_size` | `integer` | — | Results per page. |
+
 - **`describe_store`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `store_name` | `string` | — | Name of the store — alternative to store_id for describe_store. |
+
 - **`create_store`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `name` | `string` | — | Store name (for create_store or update_store). |
+
 - **`update_store`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `name` | `string` | — | Store name (for create_store or update_store). |
+  | `is_active` | `boolean` | — | Set False to soft-disable a store (update_store only). |
+
 - **`delete_store`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `store_id` | `string` | — | UUID of the target store (for most record/store actions). |
+  | `store_name` | `string` | — | Name of the store — alternative to store_id for describe_store. |
+  | `name` | `string` | — | Store name (for create_store or update_store). |
+  | `description` | `string` | — | Human-readable description of the store (LLM context). |
+  | `schema` | `object` | — | JSON Schema draft-07 for record validation. Pass {} to disable validation. |
+  | `visibility` | `string` | — | Visibility: 'private' (owner-only) or 'shared' (all department members). |
+  | `max_records` | `integer` | — | Maximum number of records allowed in the store. |
+  | `is_active` | `boolean` | — | Set False to soft-disable a store (update_store only). |
+  | `data` | `object` | — | Record payload for insert or update_record. |
+  | `records` | `array` | — | Array of record payloads for bulk_insert. |
+  | `record_id` | `string` | — | UUID of the target record (for update_record / delete_record). |
+  | `filters` | `object` | — | JSONB containment filter for query — records must contain these key/values. |
+  | `page` | `integer` | — | 1-based page number. |
+  | `page_size` | `integer` | — | Results per page. |
+
 - **`query`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `filters` | `object` | — | JSONB containment filter for query — records must contain these key/values. |
+
 - **`insert`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `data` | `object` | — | Record payload for insert or update_record. |
+  | `records` | `array` | — | Array of record payloads for bulk_insert. |
+
 - **`bulk_insert`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `records` | `array` | — | Array of record payloads for bulk_insert. |
+
 - **`update_record`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `data` | `object` | — | Record payload for insert or update_record. |
+  | `record_id` | `string` | — | UUID of the target record (for update_record / delete_record). |
+
 - **`delete_record`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `record_id` | `string` | — | UUID of the target record (for update_record / delete_record). |
+
 
 ## Permissions required
 

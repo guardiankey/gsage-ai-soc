@@ -1078,8 +1078,8 @@ def main() -> int:
     parser.add_argument(
         "--actions-depth",
         choices=("brief", "medium"),
-        default="brief",
-        help="How much detail to render for action-driven tools (default: brief).",
+        default="medium",
+        help="How much detail to render for action-driven tools (default: medium).",
     )
     parser.add_argument(
         "--output-dir",

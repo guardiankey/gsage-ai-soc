@@ -62,12 +62,70 @@ The variables below are derived automatically from each tool's `config_schema`. 
 ### `wikijs_editor`
 
 - **`list_pages`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `path` | `string` | — | Page path or folder prefix. For list_pages: folder prefix to browse (e.g. 'gsage'). For read_page/grep_page: full page path (e.g. 'gsage/overview'). For create_page: full path for the new page. For edit_page: used to locate the page when page_id is unknown. |
+
 - **`search_pages`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `query` | `string` | — | Search term for search_pages. Wiki.js performs full-text search across all page titles and content. |
+
 - **`read_page`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `path` | `string` | — | Page path or folder prefix. For list_pages: folder prefix to browse (e.g. 'gsage'). For read_page/grep_page: full page path (e.g. 'gsage/overview'). For create_page: full path for the new page. For edit_page: used to locate the page when page_id is unknown. |
+  | `page_id` | `integer` | — | Wiki.js numeric page ID. Used by read_page, grep_page, and edit_page to identify the page. Preferred over 'path' when known — avoids an extra lookup. |
+  | `line_start` | `integer` | — | First line to read or replace (1-based inclusive). Used by read_page (partial read) and edit_page (line range replacement). |
+  | `line_end` | `integer` | — | Last line to read or replace (1-based inclusive). Used by read_page (partial read) and edit_page (line range replacement). Must be >= line_start. |
+
 - **`grep_page`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `path` | `string` | — | Page path or folder prefix. For list_pages: folder prefix to browse (e.g. 'gsage'). For read_page/grep_page: full page path (e.g. 'gsage/overview'). For create_page: full path for the new page. For edit_page: used to locate the page when page_id is unknown. |
+  | `page_id` | `integer` | — | Wiki.js numeric page ID. Used by read_page, grep_page, and edit_page to identify the page. Preferred over 'path' when known — avoids an extra lookup. |
+  | `pattern` | `string` | — | Python regex pattern to search within the page content for grep_page. Case-insensitive. Returns up to 50 matching lines. |
+
 - **`edit_page`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `path` | `string` | — | Page path or folder prefix. For list_pages: folder prefix to browse (e.g. 'gsage'). For read_page/grep_page: full page path (e.g. 'gsage/overview'). For create_page: full path for the new page. For edit_page: used to locate the page when page_id is unknown. |
+  | `page_id` | `integer` | — | Wiki.js numeric page ID. Used by read_page, grep_page, and edit_page to identify the page. Preferred over 'path' when known — avoids an extra lookup. |
+  | `line_start` | `integer` | — | First line to read or replace (1-based inclusive). Used by read_page (partial read) and edit_page (line range replacement). |
+  | `line_end` | `integer` | — | Last line to read or replace (1-based inclusive). Used by read_page (partial read) and edit_page (line range replacement). Must be >= line_start. |
+  | `new_content` | `string` | — | Replacement text for edit_page. Replaces the lines [line_start, line_end] (inclusive). May contain multiple lines separated by newline characters. |
+
 - **`create_page`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `path` | `string` | — | Page path or folder prefix. For list_pages: folder prefix to browse (e.g. 'gsage'). For read_page/grep_page: full page path (e.g. 'gsage/overview'). For create_page: full path for the new page. For edit_page: used to locate the page when page_id is unknown. |
+  | `title` | `string` | — | Page title. Required for create_page. |
+  | `content` | `string` | — | Full Markdown content for the new page. Required for create_page. |
+  | `description` | `string` | — | Short description/summary for create_page (optional). |
+  | `tags` | `array` | — | List of tag strings for create_page (optional). |
+
 - **`delete_page`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `path` | `string` | — | Page path or folder prefix. For list_pages: folder prefix to browse (e.g. 'gsage'). For read_page/grep_page: full page path (e.g. 'gsage/overview'). For create_page: full path for the new page. For edit_page: used to locate the page when page_id is unknown. |
+  | `page_id` | `integer` | — | Wiki.js numeric page ID. Used by read_page, grep_page, and edit_page to identify the page. Preferred over 'path' when known — avoids an extra lookup. |
+  | `line_start` | `integer` | — | First line to read or replace (1-based inclusive). Used by read_page (partial read) and edit_page (line range replacement). |
+  | `line_end` | `integer` | — | Last line to read or replace (1-based inclusive). Used by read_page (partial read) and edit_page (line range replacement). Must be >= line_start. |
+  | `new_content` | `string` | — | Replacement text for edit_page. Replaces the lines [line_start, line_end] (inclusive). May contain multiple lines separated by newline characters. |
+  | `query` | `string` | — | Search term for search_pages. Wiki.js performs full-text search across all page titles and content. |
+  | `pattern` | `string` | — | Python regex pattern to search within the page content for grep_page. Case-insensitive. Returns up to 50 matching lines. |
+  | `title` | `string` | — | Page title. Required for create_page. |
+  | `content` | `string` | — | Full Markdown content for the new page. Required for create_page. |
+  | `description` | `string` | — | Short description/summary for create_page (optional). |
+  | `tags` | `array` | — | List of tag strings for create_page (optional). |
+
 
 ## Permissions required
 

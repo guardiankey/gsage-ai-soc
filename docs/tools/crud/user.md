@@ -24,7 +24,17 @@ _No configuration-derived environment variables._
 ### `user`
 
 - **`list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `user_id` | `string` | — | [get] User UUID. |
+
 - **`get`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `user_id` | `string` | — | [get] User UUID. |
+
 
 ## Permissions required
 

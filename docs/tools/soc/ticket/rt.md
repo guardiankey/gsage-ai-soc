@@ -69,22 +69,467 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 ### `rt_manage`
 
 - **`bulk_create`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`bulk_update`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `fields` | `object` | — | Field map for bulk_update. |
+
 - **`comment`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`correspond`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`create_ticket`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+
 - **`fetch_attachment`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`manage_link`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`merge`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`queue_create`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`queue_delete`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`queue_update`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`steal`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`take`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`untake`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`update_ticket`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`user_create`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 - **`user_update`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `ticket_id` | `integer` | — | — |
+  | `into_id` | `integer` | — | — |
+  | `attachment_id` | `integer` | — | — |
+  | `queue_id` | `—` | — | — |
+  | `user_id` | `—` | — | — |
+  | `queue` | `string` | — | — |
+  | `subject` | `string` | — | — |
+  | `content` | `string` | — | — |
+  | `content_type` | `string` | — | — |
+  | `status` | `string` | — | — |
+  | `owner` | `string` | — | — |
+  | `priority` | `integer` | — | — |
+  | `due` | `string` | — | — |
+  | `requestor` | `—` | — | — |
+  | `cc` | `—` | — | — |
+  | `admin_cc` | `—` | — | — |
+  | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `link_type` | `string` | — | — |
+  | `target` | `—` | — | Target ticket id or URI for link operations. |
+  | `op` | `string` | — | — |
+  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
+  | `ticket_ids` | `array` | — | — |
+  | `fields` | `object` | — | Field map for bulk_update. |
+  | `queue_payload` | `object` | — | Queue create/update payload. |
+  | `user_payload` | `object` | — | User create/update payload. |
+
 
 ## Permissions required
 
