@@ -51,6 +51,24 @@ def _mask_token(token: str) -> str:
     return f"{token[:4]}…{token[-4:]}({len(token)} chars)"
 
 
+def _normalise_rt_url(url: str) -> str:
+    """Ensure the RT base URL ends with ``/REST/2.0``.
+
+    Accepts any of these forms and normalises to the canonical path:
+
+    * ``https://rt.example.com``             → ``https://rt.example.com/REST/2.0``
+    * ``https://rt.example.com/``            → ``https://rt.example.com/REST/2.0``
+    * ``https://rt.example.com/REST/2.0``    → unchanged
+    * ``https://rt.example.com/REST/2.0/``   → trailing slash stripped
+    """
+    stripped = url.rstrip("/")
+    if not stripped:
+        return stripped
+    if not stripped.lower().endswith("/rest/2.0"):
+        stripped = stripped.rstrip("/") + "/REST/2.0"
+    return stripped
+
+
 class RTError(Exception):
     """Raised when the RT API or transport layer returns an error.
 
@@ -105,7 +123,7 @@ class RTClient:
         timeout: float = _DEFAULT_TIMEOUT,
         proxy: Optional[str] = None,
     ) -> None:
-        self._url = (url or "").rstrip("/")
+        self._url = _normalise_rt_url(url or "")
         self._token = token or ""
         self._verify_ssl = verify_ssl
         self._timeout = timeout

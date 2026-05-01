@@ -66,6 +66,22 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
 ## Operations
 
+### `rt_get_ticket`
+
+- **`get`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `include` | `array` | — | Extra sub-resources to attach (action='get' only). Each runs in parallel. 'attachments' returns the index only — use action='fetch_attachment' to download a file. |
+
+- **`fetch_attachment`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `attachment_id` | `integer` | — | RT attachment numeric id. Required when action='fetch_attachment'. |
+  | `include` | `array` | — | Extra sub-resources to attach (action='get' only). Each runs in parallel. 'attachments' returns the index only — use action='fetch_attachment' to download a file. |
+
+
 ### `rt_manage`
 
 - **`bulk_create`** — _(no description)_
@@ -74,7 +90,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -89,6 +104,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -108,97 +124,20 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `ticket_id` | `integer` | — | — |
-  | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
-  | `queue_id` | `—` | — | — |
-  | `user_id` | `—` | — | — |
-  | `queue` | `string` | — | — |
-  | `subject` | `string` | — | — |
-  | `content` | `string` | — | — |
-  | `content_type` | `string` | — | — |
-  | `status` | `string` | — | — |
-  | `owner` | `string` | — | — |
-  | `priority` | `integer` | — | — |
-  | `due` | `string` | — | — |
-  | `requestor` | `—` | — | — |
-  | `cc` | `—` | — | — |
-  | `admin_cc` | `—` | — | — |
-  | `custom_fields` | `object` | — | Map of CF name → value. |
-  | `link_type` | `string` | — | — |
-  | `target` | `—` | — | Target ticket id or URI for link operations. |
-  | `op` | `string` | — | — |
-  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
-  | `ticket_ids` | `array` | — | — |
-  | `fields` | `object` | — | Field map for bulk_update. |
-  | `queue_payload` | `object` | — | Queue create/update payload. |
-  | `user_payload` | `object` | — | User create/update payload. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
 
 - **`correspond`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `ticket_id` | `integer` | — | — |
-  | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
-  | `queue_id` | `—` | — | — |
-  | `user_id` | `—` | — | — |
-  | `queue` | `string` | — | — |
-  | `subject` | `string` | — | — |
-  | `content` | `string` | — | — |
-  | `content_type` | `string` | — | — |
-  | `status` | `string` | — | — |
-  | `owner` | `string` | — | — |
-  | `priority` | `integer` | — | — |
-  | `due` | `string` | — | — |
-  | `requestor` | `—` | — | — |
-  | `cc` | `—` | — | — |
-  | `admin_cc` | `—` | — | — |
-  | `custom_fields` | `object` | — | Map of CF name → value. |
-  | `link_type` | `string` | — | — |
-  | `target` | `—` | — | Target ticket id or URI for link operations. |
-  | `op` | `string` | — | — |
-  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
-  | `ticket_ids` | `array` | — | — |
-  | `fields` | `object` | — | Field map for bulk_update. |
-  | `queue_payload` | `object` | — | Queue create/update payload. |
-  | `user_payload` | `object` | — | User create/update payload. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
 
 - **`create_ticket`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
-
-- **`fetch_attachment`** — _(no description)_
-
-  | Parameter | Type | Required | Description |
-  | --- | --- | :---: | --- |
-  | `ticket_id` | `integer` | — | — |
-  | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
-  | `queue_id` | `—` | — | — |
-  | `user_id` | `—` | — | — |
-  | `queue` | `string` | — | — |
-  | `subject` | `string` | — | — |
-  | `content` | `string` | — | — |
-  | `content_type` | `string` | — | — |
-  | `status` | `string` | — | — |
-  | `owner` | `string` | — | — |
-  | `priority` | `integer` | — | — |
-  | `due` | `string` | — | — |
-  | `requestor` | `—` | — | — |
-  | `cc` | `—` | — | — |
-  | `admin_cc` | `—` | — | — |
-  | `custom_fields` | `object` | — | Map of CF name → value. |
-  | `link_type` | `string` | — | — |
-  | `target` | `—` | — | Target ticket id or URI for link operations. |
-  | `op` | `string` | — | — |
-  | `tickets` | `array` | — | Array of create_ticket payloads (max 25). |
-  | `ticket_ids` | `array` | — | — |
-  | `fields` | `object` | — | Field map for bulk_update. |
-  | `queue_payload` | `object` | — | Queue create/update payload. |
-  | `user_payload` | `object` | — | User create/update payload. |
 
 - **`manage_link`** — _(no description)_
 
@@ -206,7 +145,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -221,6 +159,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -236,7 +175,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -251,6 +189,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -266,7 +205,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -281,6 +219,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -296,7 +235,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -311,6 +249,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -326,7 +265,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -341,6 +279,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -356,7 +295,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -371,6 +309,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -386,7 +325,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -401,6 +339,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -416,7 +355,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -431,6 +369,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -446,7 +385,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -461,6 +399,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -476,7 +415,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -491,6 +429,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |
@@ -506,7 +445,6 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ticket_id` | `integer` | — | — |
   | `into_id` | `integer` | — | — |
-  | `attachment_id` | `integer` | — | — |
   | `queue_id` | `—` | — | — |
   | `user_id` | `—` | — | — |
   | `queue` | `string` | — | — |
@@ -521,6 +459,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `cc` | `—` | — | — |
   | `admin_cc` | `—` | — | — |
   | `custom_fields` | `object` | — | Map of CF name → value. |
+  | `attachment_file_ids` | `array` | — | List of gSage file IDs (conversation-scoped) to attach to the ticket. Applies to create_ticket, comment and correspond. Max 10 files, 26214400 bytes each, 52428800 bytes combined. |
   | `link_type` | `string` | — | — |
   | `target` | `—` | — | Target ticket id or URI for link operations. |
   | `op` | `string` | — | — |

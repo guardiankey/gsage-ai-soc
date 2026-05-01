@@ -304,14 +304,20 @@ async def _test_imap(acc: GSageEmailAccount) -> tuple[bool, str | None]:
 def _imap_login(acc: GSageEmailAccount) -> None:
     import imaplib
     import ssl
+    # IMPORTANT: pass timeout=5 to bound socket.connect().  Without it the OS
+    # default TCP timeout (minutes) leaves the worker thread alive after
+    # asyncio.wait_for cancels the Future, which in turn keeps anyio busy-
+    # looping in _deliver_cancellation (high CPU with no requests).
     if acc.imap_use_tls:
         ssl_ctx = ssl.create_default_context()
         if not acc.imap_verify_ssl:
             ssl_ctx.check_hostname = False
             ssl_ctx.verify_mode = ssl.CERT_NONE
-        conn = imaplib.IMAP4_SSL(acc.imap_host, acc.imap_port, ssl_context=ssl_ctx)
+        conn = imaplib.IMAP4_SSL(
+            acc.imap_host, acc.imap_port, ssl_context=ssl_ctx, timeout=5
+        )
     else:
-        conn = imaplib.IMAP4(acc.imap_host, acc.imap_port)
+        conn = imaplib.IMAP4(acc.imap_host, acc.imap_port, timeout=5)
     try:
         conn.login(acc.imap_username, acc.imap_password)
         conn.logout()
@@ -333,9 +339,11 @@ def _imap_login_oauth2(acc: GSageEmailAccount, token: str) -> None:
         if not acc.imap_verify_ssl:
             ssl_ctx.check_hostname = False
             ssl_ctx.verify_mode = ssl.CERT_NONE
-        conn = imaplib.IMAP4_SSL(acc.imap_host, acc.imap_port, ssl_context=ssl_ctx)
+        conn = imaplib.IMAP4_SSL(
+            acc.imap_host, acc.imap_port, ssl_context=ssl_ctx, timeout=5
+        )
     else:
-        conn = imaplib.IMAP4(acc.imap_host, acc.imap_port)
+        conn = imaplib.IMAP4(acc.imap_host, acc.imap_port, timeout=5)
     try:
         sasl = build_xoauth2_string(acc.imap_username or acc.email, token)
         conn.authenticate("XOAUTH2", lambda _challenge: sasl.encode("utf-8"))

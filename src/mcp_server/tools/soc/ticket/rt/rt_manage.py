@@ -2,10 +2,19 @@
 
 Single tool that dispatches to a write action against Request Tracker:
 ticket lifecycle (create/update/comment/correspond/take/untake/steal),
-links/merges, queue admin, user admin, and **fetch_attachment** which
-downloads an RT attachment into MinIO and returns a signed download path.
+links/merges, queue admin and user admin.
 
-All actions require human approval — the LLM **MUST** populate
+For each of ``create_ticket``, ``comment`` and ``correspond`` the caller
+may pass ``attachment_file_ids`` — a list of conversation-scoped file
+IDs (uploaded by the user or produced by another tool). Each file is
+loaded from the gSage file store and forwarded to RT as a binary
+attachment.
+
+To *download* an existing RT attachment, use the read-only tool
+``rt_get_ticket`` with ``action='fetch_attachment'`` — it does not
+require human approval.
+
+All write actions require human approval — the LLM **MUST** populate
 ``params._approval_summary`` with a concise human-readable summary
 of what will happen.
 
@@ -14,13 +23,11 @@ Required permission: ``rt:write``.
 
 from __future__ import annotations
 
-import base64
 import logging
-import re
 import time
 from typing import Any, ClassVar, Optional
 
-from src.mcp_server.tools.base import BaseTool, ToolResult, _tool_session_ctx
+from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.soc.ticket.rt._client import (
     RT_CONFIG_DEFAULTS,
     RT_CONFIG_SCHEMA,
@@ -29,6 +36,11 @@ from src.mcp_server.tools.soc.ticket.rt._client import (
     build_rt_client,
 )
 from src.shared.security.context import AgentContext
+
+try:
+    from rt.rest2 import Attachment as _RTAttachment  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover
+    _RTAttachment = None  # type: ignore[assignment,misc]
 
 log = logging.getLogger(__name__)
 
@@ -49,25 +61,18 @@ _ACTIONS = {
     "queue_delete",
     "user_create",
     "user_update",
-    "fetch_attachment",
 }
 
 # Hard caps for bulk operations.
 _BULK_MAX = 25
-_FETCH_ATT_MAX_BYTES = 25 * 1024 * 1024  # 25 MiB
+
+# Hard caps for outbound RT attachments (per call).
+_ATTACHMENT_MAX_COUNT = 10
+_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024  # 25 MiB per file
+_ATTACHMENT_TOTAL_MAX_BYTES = 50 * 1024 * 1024  # 50 MiB combined per call
 
 _LINK_TYPES = {"DependsOn", "DependedOnBy", "RefersTo", "ReferredToBy", "MemberOf", "HasMember"}
 _LINK_OPS = {"add", "remove"}
-
-_FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
-
-
-def _safe_filename(name: str) -> str:
-    """Return a filesystem-friendly version of *name*."""
-    if not name:
-        return "attachment"
-    cleaned = _FILENAME_SAFE_RE.sub("_", name).strip("._")
-    return cleaned or "attachment"
 
 
 def _missing(field: str) -> ToolResult:  # pragma: no cover — helper
@@ -80,10 +85,11 @@ class RTManageTool(BaseTool):
     Action list (set ``params.action``):
 
     - ``create_ticket``: queue, subject, content, [content_type, requestor,
-      cc, admin_cc, priority, owner, custom_fields].
+      cc, admin_cc, priority, owner, custom_fields, attachment_file_ids].
     - ``update_ticket``: ticket_id + any RT field (subject, status, owner,
       queue, priority, due, custom_fields).
-    - ``comment`` / ``correspond``: ticket_id, content, [content_type].
+    - ``comment`` / ``correspond``: ticket_id, content, [content_type,
+      attachment_file_ids].
     - ``take`` / ``untake`` / ``steal``: ticket_id.
     - ``merge``: ticket_id (source), into_id (target).
     - ``manage_link``: ticket_id, link_type, target, op (add|remove).
@@ -91,9 +97,9 @@ class RTManageTool(BaseTool):
     - ``bulk_update`` (≤25): ticket_ids + fields.
     - ``queue_create`` / ``queue_update`` / ``queue_delete``: queue admin.
     - ``user_create`` / ``user_update``: user admin.
-    - ``fetch_attachment``: ticket_id, attachment_id → downloads bytes
-      into MinIO; returns ``file_id`` and ``download_path``. Filename
-      pattern: ``rt_<ticket_id>_<original_filename>``.
+
+    To download an RT attachment, use the read-only tool ``rt_get_ticket``
+    with ``action='fetch_attachment'`` — no HITL required.
 
     HITL: every call requires ``params._approval_summary`` with a clear
     one-line description of the operation.
@@ -132,7 +138,6 @@ class RTManageTool(BaseTool):
             # Common identifiers
             "ticket_id": {"type": "integer", "minimum": 1},
             "into_id": {"type": "integer", "minimum": 1},
-            "attachment_id": {"type": "integer", "minimum": 1},
             "queue_id": {"oneOf": [{"type": "integer"}, {"type": "string"}]},
             "user_id": {"oneOf": [{"type": "integer"}, {"type": "string"}]},
             # Ticket fields
@@ -170,6 +175,20 @@ class RTManageTool(BaseTool):
                 "type": "object",
                 "additionalProperties": True,
                 "description": "Map of CF name → value.",
+            },
+            # Outbound attachments (conversation-scoped files)
+            "attachment_file_ids": {
+                "type": "array",
+                "maxItems": _ATTACHMENT_MAX_COUNT,
+                "uniqueItems": True,
+                "items": {"type": "string", "minLength": 1},
+                "description": (
+                    "List of gSage file IDs (conversation-scoped) to attach "
+                    "to the ticket. Applies to create_ticket, comment and "
+                    f"correspond. Max {_ATTACHMENT_MAX_COUNT} files, "
+                    f"{_ATTACHMENT_MAX_BYTES} bytes each, "
+                    f"{_ATTACHMENT_TOTAL_MAX_BYTES} bytes combined."
+                ),
             },
             # Link
             "link_type": {"type": "string", "enum": sorted(_LINK_TYPES)},
@@ -264,14 +283,23 @@ class RTManageTool(BaseTool):
         subject = _require(params, "subject")
         content = _require(params, "content")
         kwargs = _ticket_payload(params)
+        attachments, att_meta, att_skipped = await self._load_rt_attachments(
+            params.get("attachment_file_ids") or [], ctx
+        )
         ticket_id = await client.create_ticket(
             queue=queue,
             subject=subject,
             content=content,
             content_type=params.get("content_type") or "text/plain",
+            attachments=attachments or None,
             **kwargs,
         )
-        return {"ticket_id": ticket_id}
+        out: dict[str, Any] = {"ticket_id": ticket_id}
+        if att_meta:
+            out["attachments"] = att_meta
+        if att_skipped:
+            out["attachments_skipped"] = att_skipped
+        return out
 
     async def _do_update_ticket(
         self, client: RTClient, ctx: AgentContext, params: dict
@@ -286,25 +314,47 @@ class RTManageTool(BaseTool):
     async def _do_comment(
         self, client: RTClient, ctx: AgentContext, params: dict
     ) -> dict:
-        return await self._comment_or_correspond(client, params, reply=False)
+        return await self._comment_or_correspond(client, ctx, params, reply=False)
 
     async def _do_correspond(
         self, client: RTClient, ctx: AgentContext, params: dict
     ) -> dict:
-        return await self._comment_or_correspond(client, params, reply=True)
+        return await self._comment_or_correspond(client, ctx, params, reply=True)
 
-    @staticmethod
     async def _comment_or_correspond(
-        client: RTClient, params: dict, *, reply: bool
+        self,
+        client: RTClient,
+        ctx: AgentContext,
+        params: dict,
+        *,
+        reply: bool,
     ) -> dict:
         ticket_id = _require_int(params, "ticket_id")
         content = _require(params, "content")
         ct = params.get("content_type") or "text/plain"
+        attachments, att_meta, att_skipped = await self._load_rt_attachments(
+            params.get("attachment_file_ids") or [], ctx
+        )
         if reply:
-            ok = await client.reply(ticket_id, content=content, content_type=ct)
+            ok = await client.reply(
+                ticket_id,
+                content=content,
+                content_type=ct,
+                attachments=attachments or None,
+            )
         else:
-            ok = await client.comment(ticket_id, content=content, content_type=ct)
-        return {"ticket_id": ticket_id, "ok": bool(ok)}
+            ok = await client.comment(
+                ticket_id,
+                content=content,
+                content_type=ct,
+                attachments=attachments or None,
+            )
+        out: dict[str, Any] = {"ticket_id": ticket_id, "ok": bool(ok)}
+        if att_meta:
+            out["attachments"] = att_meta
+        if att_skipped:
+            out["attachments_skipped"] = att_skipped
+        return out
 
     async def _do_take(self, client: RTClient, ctx: AgentContext, params: dict) -> dict:
         ticket_id = _require_int(params, "ticket_id")
@@ -461,66 +511,93 @@ class RTManageTool(BaseTool):
         result = await rt_obj.edit_user(user_id, **payload)  # type: ignore[attr-defined]
         return {"user_id": user_id, "ok": bool(result)}
 
-    async def _do_fetch_attachment(
-        self, client: RTClient, ctx: AgentContext, params: dict
-    ) -> dict:
-        ticket_id = _require_int(params, "ticket_id")
-        attachment_id = _require_int(params, "attachment_id")
-        att = await client.get_attachment(attachment_id)
+    # ── Outbound attachment helper ─────────────────────────────────────
 
-        # RT returns Content as base64 (Content + ContentEncoding=base64).
-        raw_content = att.get("Content") or att.get("content")
-        encoding = (att.get("ContentEncoding") or "base64").lower()
-        if not raw_content:
-            raise RTError(
-                f"Attachment {attachment_id} has no Content payload.",
-                code="RT_ERROR",
-            )
-        try:
-            data = base64.b64decode(raw_content) if encoding == "base64" else (
-                raw_content.encode("utf-8") if isinstance(raw_content, str) else raw_content
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise RTError(
-                f"Failed to decode attachment {attachment_id}: {exc}",
-                code="RT_ERROR",
-            ) from exc
+    async def _load_rt_attachments(
+        self,
+        file_ids: list[str],
+        ctx: AgentContext,
+    ) -> tuple[list, list[dict], list[dict]]:
+        """Load conversation-scoped files and convert them to RT Attachments.
 
-        if len(data) > _FETCH_ATT_MAX_BYTES:
-            raise RTError(
-                f"Attachment {attachment_id} exceeds the {_FETCH_ATT_MAX_BYTES} byte cap.",
-                code="INVALID_PARAMS",
-            )
+        Honours the same 3-way scope ACL as :meth:`BaseTool._load_file`
+        (organization / department / user). Files that exceed the per-file
+        cap, are truncated, are not found, or push the call past the
+        combined-size cap are reported under ``skipped``.
 
-        original = att.get("Filename") or att.get("filename") or f"att_{attachment_id}"
-        filename = f"rt_{ticket_id}_{_safe_filename(original)}"
-        content_type = att.get("ContentType") or att.get("content_type") or "application/octet-stream"
+        Returns
+        -------
+        (rt_attachments, meta, skipped)
+            * ``rt_attachments``: list of ``rt.rest2.Attachment`` ready for
+              the python-rt client.
+            * ``meta``: list of dicts with ``file_id``, ``filename``,
+              ``content_type``, ``size_bytes`` for the attachments included.
+            * ``skipped``: list of dicts with ``file_id`` and ``reason``.
+        """
+        rt_attachments: list = []
+        meta: list[dict] = []
+        skipped: list[dict] = []
+        if not file_ids:
+            return rt_attachments, meta, skipped
 
-        session = _tool_session_ctx.get()
-        if session is None:
+        if _RTAttachment is None:
             raise RTError(
-                "fetch_attachment requires an active DB session (tool runtime context).",
+                "python-rt is not installed; cannot attach files.",
                 code="INTERNAL_ERROR",
             )
 
-        stored = await self._store_file(
-            data=data,
-            filename=filename,
-            content_type=content_type,
-            agent_context=ctx,
-            session=session,
-            description=f"Attachment from RT ticket #{ticket_id}",
-        )
-        if stored is None:
-            raise RTError(
-                "Failed to persist the attachment in the file store.",
-                code="INTERNAL_ERROR",
+        if len(file_ids) > _ATTACHMENT_MAX_COUNT:
+            for fid in file_ids[_ATTACHMENT_MAX_COUNT:]:
+                skipped.append({"file_id": fid, "reason": "max_count_exceeded"})
+            file_ids = file_ids[:_ATTACHMENT_MAX_COUNT]
+
+        total_bytes = 0
+        for fid in file_ids:
+            loaded = await self._load_file(
+                file_id=fid,
+                org_id=str(ctx.org_id),
+                user_id=str(ctx.user_id),
+                dept_id=str(ctx.dept_id) if ctx.dept_id else None,
+                max_bytes=_ATTACHMENT_MAX_BYTES,
             )
-        return {
-            "ticket_id": ticket_id,
-            "attachment_id": attachment_id,
-            "file": stored,
-        }
+            if loaded is None:
+                skipped.append({"file_id": fid, "reason": "not_found_or_denied"})
+                continue
+            if loaded.get("truncated"):
+                skipped.append({
+                    "file_id": fid,
+                    "filename": loaded.get("filename"),
+                    "reason": "exceeds_per_file_cap",
+                })
+                continue
+            data: bytes = loaded["data"]
+            if total_bytes + len(data) > _ATTACHMENT_TOTAL_MAX_BYTES:
+                skipped.append({
+                    "file_id": fid,
+                    "filename": loaded.get("filename"),
+                    "reason": "exceeds_total_cap",
+                })
+                continue
+            total_bytes += len(data)
+            filename = loaded.get("filename") or f"file_{fid}"
+            content_type = (
+                loaded.get("content_type") or "application/octet-stream"
+            )
+            rt_attachments.append(
+                _RTAttachment(
+                    file_name=filename,
+                    file_type=content_type,
+                    file_content=data,
+                )
+            )
+            meta.append({
+                "file_id": loaded.get("file_id") or fid,
+                "filename": filename,
+                "content_type": content_type,
+                "size_bytes": loaded.get("size_bytes"),
+            })
+
+        return rt_attachments, meta, skipped
 
 
 # ── Param helpers ──────────────────────────────────────────────────────
