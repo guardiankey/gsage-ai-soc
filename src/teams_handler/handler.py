@@ -111,9 +111,41 @@ async def handle_teams_turn(
     aad_object_id = getattr(sender, "aad_object_id", None) if sender else None
     sender_name = getattr(sender, "name", None) if sender else None
     if not aad_object_id:
+        sender_id = getattr(sender, "id", None) if sender else None
+        sender_role = getattr(sender, "role", None) if sender else None
+        channel_data = getattr(activity, "channel_data", None) or {}
+        tenant_info = (
+            channel_data.get("tenant")
+            if isinstance(channel_data, dict)
+            else None
+        ) or {}
+        cd_tenant_id = (
+            tenant_info.get("id") if isinstance(tenant_info, dict) else None
+        )
+        conv_obj_dbg = getattr(activity, "conversation", None)
+        conv_id_dbg = (
+            getattr(conv_obj_dbg, "id", None)
+            if conv_obj_dbg is not None
+            else None
+        )
+        conv_type_dbg = (
+            getattr(conv_obj_dbg, "conversation_type", None)
+            if conv_obj_dbg is not None
+            else None
+        )
         logger.warning(
-            "handle_teams_turn: activity without aadObjectId — sender=%s",
+            "handle_teams_turn: activity without aadObjectId — "
+            "profile_id=%s sender_id=%s sender_name=%s sender_role=%s "
+            "channel_tenant_id=%s conversation_id=%s conversation_type=%s "
+            "service_url=%s",
+            profile.id,
+            sender_id,
             sender_name,
+            sender_role,
+            cd_tenant_id,
+            conv_id_dbg,
+            conv_type_dbg,
+            getattr(activity, "service_url", None),
         )
         await turn_context.send_activity(
             MessageFactory.text(
@@ -172,12 +204,48 @@ async def handle_teams_turn(
                     graph=graph_client,
                 )
                 if user is None:
+                    # Collect every identifying field the Bot Framework gave us
+                    # so administrators can correlate the inbound message with
+                    # an Entra account when registering / linking the user.
+                    sender_id = getattr(sender, "id", None) if sender else None
+                    sender_role = (
+                        getattr(sender, "role", None) if sender else None
+                    )
+                    channel_data = getattr(activity, "channel_data", None) or {}
+                    tenant_info = (
+                        channel_data.get("tenant")
+                        if isinstance(channel_data, dict)
+                        else None
+                    ) or {}
+                    cd_tenant_id = (
+                        tenant_info.get("id")
+                        if isinstance(tenant_info, dict)
+                        else None
+                    )
+                    conv_type = (
+                        getattr(conv_obj, "conversation_type", None)
+                        if conv_obj is not None
+                        else None
+                    )
+                    service_url = getattr(activity, "service_url", None)
+                    locale = getattr(activity, "locale", None)
                     logger.warning(
-                        "handle_teams_turn: unknown sender — aad_id=%s "
-                        "org_id=%s name=%s",
-                        aad_object_id,
+                        "handle_teams_turn: unknown sender — "
+                        "org_id=%s profile_id=%s aad_object_id=%s "
+                        "sender_id=%s sender_name=%s sender_role=%s "
+                        "channel_tenant_id=%s conversation_id=%s "
+                        "conversation_type=%s service_url=%s locale=%s",
                         org_id,
+                        profile_id,
+                        aad_object_id,
+                        sender_id,
                         sender_name,
+                        sender_role,
+                        cd_tenant_id,
+                        channel_chat_id,
+                        conv_type,
+                        service_url,
+                        locale,
                     )
                     await turn_context.send_activity(
                         MessageFactory.text(

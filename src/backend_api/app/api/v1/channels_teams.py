@@ -41,7 +41,7 @@ router = APIRouter(prefix="/v1/channels/teams", tags=["Teams"])
 # Per-process cache of (BotFrameworkAdapter, GraphClient) keyed by profile_id.
 # Avoids rebuilding the JWT/JWKS validator on every webhook hit. Invalidated
 # automatically when the profile's `app_id` rotates (cache key includes it).
-_adapter_cache: dict[tuple[uuid.UUID, str], Any] = {}
+_adapter_cache: dict[tuple[uuid.UUID, str, str], Any] = {}
 _graph_cache: dict[tuple[uuid.UUID, str], GraphClient] = {}
 
 
@@ -118,6 +118,7 @@ async def teams_messages(
         profile_id=profile_id,
         app_id=str(app_id),
         app_password=str(app_password),
+        tenant_id=str(tenant_id) if tenant_id else None,
         adapter_cls=BotFrameworkAdapter,
         settings_cls=BotFrameworkAdapterSettings,
     )
@@ -192,16 +193,26 @@ def _get_adapter(
     profile_id: uuid.UUID,
     app_id: str,
     app_password: str,
+    tenant_id: str | None,
     adapter_cls: Any,
     settings_cls: Any,
 ) -> Any:
     """Return a cached ``BotFrameworkAdapter`` for *profile_id*."""
-    key = (profile_id, app_id)
+    # Cache key includes tenant_id so a tenant rotation rebuilds the adapter.
+    key = (profile_id, app_id, tenant_id or "")
     cached = _adapter_cache.get(key)
     if cached is not None:
         return cached
 
-    bf_settings = settings_cls(app_id=app_id, app_password=app_password)
+    # ``channel_auth_tenant`` is required for single-tenant Entra App
+    # Registrations.  Without it the adapter falls back to the public Bot
+    # Framework tenant (``botframework.com``) and AAD returns AADSTS700016
+    # — "Application not found in directory 'Bot Framework'".
+    bf_settings = settings_cls(
+        app_id=app_id,
+        app_password=app_password,
+        channel_auth_tenant=tenant_id or None,
+    )
     adapter = adapter_cls(bf_settings)
 
     async def _on_turn_error(turn_context, error):
