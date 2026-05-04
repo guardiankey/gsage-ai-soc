@@ -31,6 +31,7 @@ gSage AI — GDN GuardianKey tool.
 
 ```json
 {
+  "api_key": "",
   "gdn_org_id": "",
   "url": ""
 }
@@ -40,7 +41,7 @@ gSage AI — GDN GuardianKey tool.
 
 | Field | Type | Required | Sensitive | Default | Description |
 | --- | --- | :---: | :---: | --- | --- |
-| `api_key` | `string` | — | ✓ | — | GDN API key sent in the X-API-Key header. Overrides TOOL_GDN_GUARDIANKEY__API_KEY env var. |
+| `api_key` | `string` | — | ✓ | `""` | GDN API key sent in the X-API-Key header. Overrides TOOL_GDN_GUARDIANKEY__API_KEY env var. |
 | `gdn_org_id` | `string` | — | — | `""` | Organisation ID in the GDN platform (hex string). Overrides TOOL_GDN_GUARDIANKEY__GDN_ORG_ID env var. |
 | `url` | `string` | — | — | `""` | GDN API base URL. The /api/v1 suffix is appended automatically if absent. Overrides TOOL_GDN_GUARDIANKEY__URL env var. |
 

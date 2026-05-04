@@ -24,7 +24,6 @@ The script is idempotent — running twice in a row produces zero diff.
 from __future__ import annotations
 
 import argparse
-import ast
 import inspect
 import json
 import re
@@ -40,6 +39,23 @@ sys.path.insert(0, str(ROOT))
 # Reuse the existing discovery helper rather than duplicating the
 # pkgutil walker — it already handles graceful import failures.
 from scripts.generate_env_defaults import discover_tools  # noqa: E402
+from scripts._doc_helpers import (  # noqa: E402
+    env_value_repr as _env_value_repr,
+    field_default,
+    first_paragraph,
+    md_bool,
+    md_escape_cell,
+    md_link,
+    placeholder_for as _placeholder_for,
+    render_config_example,
+    render_config_skeleton,
+    render_field_reference,
+    required_fields,
+    scan_loose_env_vars as _scan_loose_env_vars,
+    schema_properties,
+    schema_type,
+    write_if_changed,
+)
 
 TOOLS_PACKAGE = "src.mcp_server.tools"
 TOOLS_PATH = ROOT / "src" / "mcp_server" / "tools"
@@ -258,31 +274,8 @@ def output_path_for(group: ToolGroup, output_dir: Path) -> Path:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Schema helpers
+# Schema helpers (tool-specific bits; generic ones live in _doc_helpers)
 # ──────────────────────────────────────────────────────────────────────
-
-
-def schema_properties(schema: Optional[dict]) -> dict[str, dict]:
-    """Return the JSON-Schema-style properties map (handles flat fallback)."""
-    if not schema:
-        return {}
-    if "properties" in schema and isinstance(schema["properties"], dict):
-        return schema["properties"]
-    # Flat: top-level keys ARE the fields (legacy form). Skip JSON-Schema meta.
-    meta = {"type", "required", "additionalProperties", "description", "title"}
-    out: dict[str, dict] = {}
-    for k, v in schema.items():
-        if k in meta or not isinstance(v, dict):
-            continue
-        out[k] = v
-    return out
-
-
-def required_fields(schema: Optional[dict]) -> list[str]:
-    if not schema:
-        return []
-    req = schema.get("required") if isinstance(schema, dict) else None
-    return list(req) if isinstance(req, list) else []
 
 
 def merge_schemas(tools: list[ToolInfo]) -> tuple[dict[str, dict], list[str], dict[str, Any]]:
@@ -308,14 +301,6 @@ def merge_schemas(tools: list[ToolInfo]) -> tuple[dict[str, dict], list[str], di
     return props, required, defaults
 
 
-def field_default(props: dict[str, dict], defaults: dict, fname: str) -> Any:
-    """Return the most authoritative default for a field, if any."""
-    schema_default = props.get(fname, {}).get("default")
-    if schema_default is not None:
-        return schema_default
-    return defaults.get(fname)
-
-
 # ──────────────────────────────────────────────────────────────────────
 # Env-var name derivation
 # ──────────────────────────────────────────────────────────────────────
@@ -329,116 +314,9 @@ def env_var_name(scope: str, field_name: str) -> str:
     return f"TOOL_{scope.upper()}__{field_name.upper()}"
 
 
-# Loose env-var scan (AST) — pick up calls like ``os.environ.get("FOO", ...)``,
-# ``os.getenv("FOO", ...)`` and subscripts ``os.environ["FOO"]``.
-
-_OS_NAMES = {"os"}
-
-
-def _string_const(node: ast.AST) -> Optional[str]:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
-
-
 def scan_loose_env_vars(source_files: list[Path]) -> list[tuple[str, Optional[str]]]:
-    """Return a sorted, deduplicated list of ``(name, default)`` env reads."""
-    found: dict[str, Optional[str]] = {}
-    for fpath in source_files:
-        try:
-            text = fpath.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(text)
-        except Exception:
-            continue
-        for node in ast.walk(tree):
-            # os.environ.get("FOO"[, default]) and os.getenv("FOO"[, default])
-            if isinstance(node, ast.Call):
-                func = node.func
-                target: Optional[str] = None
-                if (
-                    isinstance(func, ast.Attribute)
-                    and isinstance(func.value, ast.Attribute)
-                    and isinstance(func.value.value, ast.Name)
-                    and func.value.value.id in _OS_NAMES
-                    and func.value.attr == "environ"
-                    and func.attr == "get"
-                ):
-                    target = "os.environ.get"
-                elif (
-                    isinstance(func, ast.Attribute)
-                    and isinstance(func.value, ast.Name)
-                    and func.value.id in _OS_NAMES
-                    and func.attr == "getenv"
-                ):
-                    target = "os.getenv"
-                if target and node.args:
-                    name = _string_const(node.args[0])
-                    if not name:
-                        continue
-                    default_val: Optional[str] = None
-                    if len(node.args) >= 2:
-                        c = _string_const(node.args[1])
-                        if c is not None:
-                            default_val = c
-                    # Skip TOOL_*__* — those are config-derived and already
-                    # rendered in the env table.
-                    if name.startswith("TOOL_") and "__" in name:
-                        continue
-                    found.setdefault(name, default_val)
-            # os.environ["FOO"]
-            if isinstance(node, ast.Subscript):
-                value = node.value
-                if (
-                    isinstance(value, ast.Attribute)
-                    and isinstance(value.value, ast.Name)
-                    and value.value.id in _OS_NAMES
-                    and value.attr == "environ"
-                ):
-                    key_node = node.slice
-                    name = _string_const(key_node)
-                    if name and not (name.startswith("TOOL_") and "__" in name):
-                        found.setdefault(name, None)
-    return sorted(found.items(), key=lambda kv: kv[0])
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Markdown rendering — small helpers
-# ──────────────────────────────────────────────────────────────────────
-
-
-def md_escape_cell(value: str) -> str:
-    """Escape pipes and newlines so Markdown table cells survive."""
-    return value.replace("\n", " ").replace("|", "\\|").strip()
-
-
-def md_bool(value: bool) -> str:
-    return "✓" if value else "—"
-
-
-def md_link(rel_path: str) -> str:
-    return f"[{rel_path}]({rel_path})"
-
-
-def first_paragraph(text: Optional[str]) -> str:
-    if not text:
-        return ""
-    for chunk in text.strip().split("\n\n"):
-        cleaned = chunk.strip()
-        if cleaned:
-            return cleaned
-    return text.strip()
-
-
-def schema_type(field_info: dict) -> str:
-    t = field_info.get("type")
-    if isinstance(t, list):
-        return " | ".join(str(x) for x in t)
-    if isinstance(t, str):
-        return t
-    if "enum" in field_info:
-        vals = field_info.get("enum") or []
-        return f"enum({', '.join(repr(v) for v in vals)})"
-    return "—"
+    """Wrapper around :func:`_doc_helpers.scan_loose_env_vars` skipping ``TOOL_*__*``."""
+    return _scan_loose_env_vars(source_files, skip_prefix="TOOL_")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -471,83 +349,6 @@ def render_tools_table(group: ToolGroup) -> str:
                 perms=md_escape_cell(perms),
                 appr=md_bool(t.requires_approval),
                 core=md_bool(t.core_tool),
-            )
-        )
-    return "\n".join(rows)
-
-
-def render_config_skeleton(
-    props: dict[str, dict], required: list[str], defaults: dict
-) -> str:
-    """Minimal JSON skeleton for the configtool.  Sensitive fields are omitted."""
-    skeleton: dict[str, Any] = {}
-    for fname in required:
-        finfo = props.get(fname, {})
-        if finfo.get("sensitive"):
-            continue
-        default = field_default(props, defaults, fname)
-        skeleton[fname] = default if default is not None else _placeholder_for(finfo)
-    if not skeleton:
-        return "{}"
-    return json.dumps(skeleton, indent=2, ensure_ascii=False)
-
-
-def render_config_example(props: dict[str, dict], defaults: dict) -> str:
-    """Example JSON with placeholders for every (non-sensitive) field."""
-    payload: dict[str, Any] = {}
-    for fname in sorted(props.keys()):
-        finfo = props[fname]
-        if finfo.get("sensitive"):
-            # Sensitive fields go through env vars, not the JSON.
-            continue
-        default = field_default(props, defaults, fname)
-        payload[fname] = default if default is not None else _placeholder_for(finfo)
-    if not payload:
-        return "{}"
-    return json.dumps(payload, indent=2, ensure_ascii=False)
-
-
-def _placeholder_for(finfo: dict) -> Any:
-    t = finfo.get("type")
-    if t == "boolean":
-        return False
-    if t == "integer":
-        return 0
-    if t == "number":
-        return 0.0
-    if t == "array":
-        return []
-    if t == "object":
-        return {}
-    enum_vals = finfo.get("enum")
-    if enum_vals:
-        return enum_vals[0]
-    return "<value>"
-
-
-def render_field_reference(
-    props: dict[str, dict], required: list[str], defaults: dict
-) -> str:
-    rows = [
-        "| Field | Type | Required | Sensitive | Default | Description |",
-        "| --- | --- | :---: | :---: | --- | --- |",
-    ]
-    for fname in sorted(props.keys()):
-        finfo = props[fname]
-        default = field_default(props, defaults, fname)
-        default_repr = (
-            "—" if default is None else f"`{json.dumps(default, ensure_ascii=False)}`"
-        )
-        if finfo.get("sensitive"):
-            default_repr = "—"
-        rows.append(
-            "| `{f}` | `{t}` | {req} | {sens} | {default} | {desc} |".format(
-                f=md_escape_cell(fname),
-                t=md_escape_cell(schema_type(finfo)),
-                req=md_bool(fname in required),
-                sens=md_bool(bool(finfo.get("sensitive"))),
-                default=md_escape_cell(default_repr),
-                desc=md_escape_cell(finfo.get("description") or "—"),
             )
         )
     return "\n".join(rows)
@@ -1036,34 +837,6 @@ def render_env_file(groups: list[ToolGroup]) -> str:
 
         out.append("")
     return "\n".join(out).rstrip() + "\n"
-
-
-def _env_value_repr(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return str(value)
-    if isinstance(value, (list, dict)):
-        return json.dumps(value, ensure_ascii=False)
-    return str(value)
-
-
-# ──────────────────────────────────────────────────────────────────────
-# IO helpers (idempotent writes + --check)
-# ──────────────────────────────────────────────────────────────────────
-
-
-def write_if_changed(path: Path, content: str, *, check_only: bool) -> bool:
-    """Return True if content differs from disk (and write unless check_only)."""
-    existing = path.read_text(encoding="utf-8") if path.exists() else None
-    if existing == content:
-        return False
-    if not check_only:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-    return True
 
 
 # ──────────────────────────────────────────────────────────────────────

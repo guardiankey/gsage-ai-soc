@@ -31,6 +31,7 @@ gSage AI — GravityZone Endpoints tool.
 
 ```json
 {
+  "api_key": "<value>",
   "base_url": "https://cloud.gravityzone.bitdefender.com/api"
 }
 ```

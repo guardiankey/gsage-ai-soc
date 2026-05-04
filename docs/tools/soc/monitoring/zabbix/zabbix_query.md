@@ -33,8 +33,10 @@ gSage AI — Zabbix read-only query tool.
 
 ```json
 {
+  "password": "<value>",
   "skip_version_check": false,
   "timeout": 30,
+  "token": "<value>",
   "url": "<value>",
   "username": "<value>",
   "verify_tls": true

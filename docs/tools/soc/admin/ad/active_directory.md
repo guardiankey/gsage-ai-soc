@@ -33,6 +33,7 @@ gSage AI — ad_read tool (Active Directory read-only).
   "base_dn": "",
   "domain": "",
   "ldap_bind_dn": "",
+  "ldap_bind_password": "",
   "ldap_connect_timeout_seconds": 10,
   "ldap_url": "",
   "ldap_verify_ssl": true,
@@ -52,7 +53,9 @@ gSage AI — ad_read tool (Active Directory read-only).
   "quarantine_ou": "",
   "ssh_command_timeout_seconds": 60,
   "ssh_host": "",
+  "ssh_known_hosts": "",
   "ssh_port": 22,
+  "ssh_private_key": "",
   "ssh_user": "",
   "write_enabled": false
 }
@@ -65,7 +68,7 @@ gSage AI — ad_read tool (Active Directory read-only).
 | `base_dn` | `string` | — | — | `""` | Base DN used as default search root for reads and as the organizational scope for protected-list matching. Example: 'DC=corp,DC=contoso,DC=local'. |
 | `domain` | `string` | — | — | `""` | AD domain DNS name, e.g. 'corp.contoso.local'. |
 | `ldap_bind_dn` | `string` | — | — | `""` | DN of the read-only service account used by ad_read. |
-| `ldap_bind_password` | `string` | — | ✓ | — | Password for ldap_bind_dn (stored encrypted). |
+| `ldap_bind_password` | `string` | — | ✓ | `""` | Password for ldap_bind_dn (stored encrypted). |
 | `ldap_connect_timeout_seconds` | `integer` | — | — | `10` | Connection + operation timeout (seconds). |
 | `ldap_url` | `string` | — | — | `""` | LDAP(S) server URL used by ad_read. Example: 'ldaps://dc01.corp.contoso.local:636'. |
 | `ldap_verify_ssl` | `boolean` | — | — | `true` | Validate the LDAP server TLS certificate. Default true. |
@@ -76,9 +79,9 @@ gSage AI — ad_read tool (Active Directory read-only).
 | `quarantine_ou` | `string` | — | — | `""` | OU DN where disabled users are moved when disable_user is called with move_to_quarantine=true. Example: 'OU=Disabled Users,DC=corp,DC=contoso,DC=local'. |
 | `ssh_command_timeout_seconds` | `integer` | — | — | `60` | Maximum time to wait for a pwsh script to complete. |
 | `ssh_host` | `string` | — | — | `""` | Windows jump host (FQDN or IP) with OpenSSH Server, PowerShell 7, and the RSAT ActiveDirectory module installed. |
-| `ssh_known_hosts` | `string` | — | ✓ | — | Optional OpenSSH known_hosts content used to pin the jump host's public key. When empty, host-key checking is disabled (operator is responsible for the network path). |
+| `ssh_known_hosts` | `string` | — | ✓ | `""` | Optional OpenSSH known_hosts content used to pin the jump host's public key. When empty, host-key checking is disabled (operator is responsible for the network path). |
 | `ssh_port` | `integer` | — | — | `22` | SSH port on the jump host (default 22). |
-| `ssh_private_key` | `string` | — | ✓ | — | PEM/OpenSSH private key content for ssh_user (stored encrypted). Passphrase-less keys only. |
+| `ssh_private_key` | `string` | — | ✓ | `""` | PEM/OpenSSH private key content for ssh_user (stored encrypted). Passphrase-less keys only. |
 | `ssh_user` | `string` | — | — | `""` | Local Windows / AD user that PowerShell should impersonate. Must have permission to run the AD cmdlets used by ad_write. |
 | `write_enabled` | `boolean` | — | — | `false` | Master switch for ad_write. When false, every write action fails with CONFIG_WRITE_DISABLED. Default false. |
 

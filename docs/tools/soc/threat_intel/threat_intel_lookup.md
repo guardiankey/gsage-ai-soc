@@ -28,7 +28,10 @@ gSage AI — Threat Intelligence Lookup tool.
 ### Example configtool model
 
 ```json
-{}
+{
+  "abuseipdb_api_key": "<value>",
+  "virustotal_api_key": "<value>"
+}
 ```
 
 ### Field reference

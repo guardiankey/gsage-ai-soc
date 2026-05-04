@@ -30,6 +30,7 @@ gSage AI — Curator reputation lists (read) tool.
 
 ```json
 {
+  "api_key": "<value>",
   "base_url": "http://curator:8000"
 }
 ```

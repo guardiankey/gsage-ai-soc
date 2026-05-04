@@ -31,6 +31,7 @@ gSage AI — Wiki.js page editor tool.
 
 ```json
 {
+  "api_token": "",
   "locale": "",
   "url": "",
   "writable_path": ""
@@ -41,7 +42,7 @@ gSage AI — Wiki.js page editor tool.
 
 | Field | Type | Required | Sensitive | Default | Description |
 | --- | --- | :---: | :---: | --- | --- |
-| `api_token` | `string` | — | ✓ | — | Bearer token for the Wiki.js GraphQL API. Generate in Administration > API Access. Overrides TOOL_WIKIJS_EDITOR__API_TOKEN env var. |
+| `api_token` | `string` | — | ✓ | `""` | Bearer token for the Wiki.js GraphQL API. Generate in Administration > API Access. Overrides TOOL_WIKIJS_EDITOR__API_TOKEN env var. |
 | `locale` | `string` | — | — | `""` | Default Wiki.js locale for page lookups and creation (e.g. 'en', 'pt'). Overrides TOOL_WIKIJS_EDITOR__LOCALE env var. |
 | `url` | `string` | — | — | `""` | Wiki.js base URL (e.g. http://wikijs:3000). Overrides TOOL_WIKIJS_EDITOR__URL env var. |
 | `writable_path` | `string` | — | — | `""` | Path prefix that the tool is allowed to write to (e.g. 'gsage/'). Pages outside this prefix are read-only. Overrides TOOL_WIKIJS_EDITOR__WRITABLE_PATH env var. |

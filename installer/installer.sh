@@ -4,7 +4,7 @@
 # Bundled layout (created by scripts_operations/build-release-bundle.sh):
 #   installer.sh, wizard.lib.sh, preflight.lib.sh, VERSION, MANIFEST.json,
 #   env.template, compose/docker-compose.yml,
-#   configure-email-channel.sh, configure-telegram-channel.sh,
+#   configure-email-channel.sh, configure-telegram-channel.sh, configure-teams-channel.sh,
 #   bin/{gsage-cli,gsage-admin,gsage-get-admin-key},
 #   requirements-operator.txt, cli_client/, admin_console/, src/..., scripts/,
 #   custom_code/, knowledge_base/, docker/{postgres,ollama}/, dbs/*/update.sh
@@ -18,7 +18,7 @@
 #       logs/{install,helpers}/
 #       dbs/, knowledge_base/, custom_code/
 #   /usr/local/bin/{gsage-cli,gsage-admin,gsage-get-admin-key,
-#                   gsage-configure-email,gsage-configure-telegram}
+#                   gsage-configure-email,gsage-configure-telegram,gsage-configure-teams}
 
 set -euo pipefail
 
@@ -216,7 +216,8 @@ install -m 0755 "$CURRENT_LINK/bin/gsage-get-admin-key" /usr/local/bin/gsage-get
 # symlinked (rather than copied) so they always track the active release.
 ln -sfn "$CURRENT_LINK/configure-email-channel.sh"    /usr/local/bin/gsage-configure-email
 ln -sfn "$CURRENT_LINK/configure-telegram-channel.sh" /usr/local/bin/gsage-configure-telegram
-echo "Installed: /usr/local/bin/gsage-{cli,admin,get-admin-key,configure-email,configure-telegram}"
+ln -sfn "$CURRENT_LINK/configure-teams-channel.sh"    /usr/local/bin/gsage-configure-teams
+echo "Installed: /usr/local/bin/gsage-{cli,admin,get-admin-key,configure-email,configure-telegram,configure-teams}"
 
 # ── 8. Bring the stack up ────────────────────────────────────────────
 echo ""
@@ -275,6 +276,7 @@ cat <<EOF
     gsage-get-admin-key        Reprint or rotate the bootstrap admin API key
     gsage-configure-email      Guided IMAP/SMTP mailbox setup for an organization
     gsage-configure-telegram   Guided Telegram bot channel setup for an organization
+    gsage-configure-teams      Guided Microsoft Teams bot channel setup for an organization
 
     Tip: list them with   ls /usr/local/bin/gsage-*
 
@@ -284,6 +286,9 @@ cat <<EOF
 
     # Configure a Telegram bot channel:
     sudo gsage-configure-telegram
+
+    # Configure a Microsoft Teams bot channel:
+    sudo gsage-configure-teams
 
   Installation log: $LOG_FILE_FINAL
 

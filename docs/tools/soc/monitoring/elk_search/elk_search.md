@@ -34,6 +34,7 @@ gSage AI — ``elk_search`` MCP tool.
 ```json
 {
   "allowed_index_patterns": [],
+  "api_key": "<value>",
   "ca_cert": "<value>",
   "cache_ttl_seconds": 60,
   "default_export_format": "csv",

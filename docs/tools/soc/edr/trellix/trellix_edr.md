@@ -30,7 +30,9 @@ gSage AI — Trellix EDR host quarantine status tool.
 
 ```json
 {
-  "client_id": "<value>"
+  "client_id": "<value>",
+  "client_secret": "<value>",
+  "x_api_key": "<value>"
 }
 ```
 
@@ -40,10 +42,12 @@ gSage AI — Trellix EDR host quarantine status tool.
 {
   "base_url_v2": "https://api.manage.trellix.com",
   "client_id": "<value>",
+  "client_secret": "<value>",
   "region": "us-east-1",
   "timeout": 60,
   "token_url": "https://auth.trellix.com/auth/realms/IAM/protocol/openid-connect/token",
-  "verify_tls": true
+  "verify_tls": true,
+  "x_api_key": "<value>"
 }
 ```
 
