@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
+import base64
 import httpx
 import redis.asyncio as redis
 
@@ -47,6 +48,54 @@ TOKEN_CACHE_KEY = "oauth:email:{account_id}"
 # Refresh tokens at least 60 seconds before they expire so in-flight
 # requests do not race with the rotation.
 TOKEN_REFRESH_LEEWAY = 60
+
+
+def _mask(value: Optional[str], keep: int = 4) -> str:
+    """Mask a credential string for logging, keeping the last *keep* chars."""
+    if not value:
+        return "<empty>"
+    if len(value) <= keep:
+        return "*" * len(value)
+    return f"{'*' * (len(value) - keep)}{value[-keep:]}"
+
+
+def _decode_jwt_payload_unverified(token: str) -> dict[str, Any]:
+    """Decode the payload of a JWT without verifying the signature.
+
+    Used **only for diagnostics**; never use the returned claims to make
+    security decisions. Returns ``{}`` if the token is not a parseable JWT.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        payload_b64 = parts[1]
+        # base64url with missing padding
+        padding = "=" * (-len(payload_b64) % 4)
+        decoded = base64.urlsafe_b64decode(payload_b64 + padding)
+        data = json.loads(decoded)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _summarise_token_for_log(token: str) -> dict[str, Any]:
+    """Extract diagnostic-friendly claims from an access token."""
+    claims = _decode_jwt_payload_unverified(token)
+    if not claims:
+        return {"jwt_decoded": False}
+    return {
+        "jwt_decoded": True,
+        "aud": claims.get("aud"),
+        "iss": claims.get("iss"),
+        "appid": claims.get("appid") or claims.get("azp"),
+        "tid": claims.get("tid"),
+        "roles": claims.get("roles"),
+        "scp": claims.get("scp"),
+        "idtyp": claims.get("idtyp"),
+        "app_displayname": claims.get("app_displayname"),
+        "oid": claims.get("oid"),
+    }
 
 
 class OAuthTokenError(Exception):
@@ -129,8 +178,13 @@ async def get_access_token(
             "scope": scope,
         }
         logger.info(
-            "OAuth2 token: requesting access_token account=%s tenant=%s scope=%s",
-            account.email, tenant_id, scope,
+            "OAuth2 token: requesting access_token account=%s tenant=%s "
+            "client_id=%s scope=%s endpoint=%s",
+            account.email,
+            tenant_id,
+            _mask(client_id),
+            scope,
+            token_url,
         )
         try:
             async with httpx.AsyncClient(timeout=30.0) as http:
@@ -141,6 +195,30 @@ async def get_access_token(
             ) from exc
 
         if resp.status_code >= 400:
+            # AAD returns JSON with `error`, `error_description`,
+            # `error_codes`, `correlation_id`, `trace_id`. Surface them
+            # explicitly to help diagnose mis-configuration.
+            err_payload: dict = {}
+            try:
+                err_payload = resp.json() or {}
+            except ValueError:
+                err_payload = {}
+            logger.error(
+                "OAuth2 token endpoint rejected request account=%s status=%d "
+                "error=%s error_description=%r error_codes=%s correlation_id=%s "
+                "trace_id=%s endpoint=%s tenant=%s scope=%s client_id=%s",
+                account.email,
+                resp.status_code,
+                err_payload.get("error"),
+                err_payload.get("error_description"),
+                err_payload.get("error_codes"),
+                err_payload.get("correlation_id"),
+                err_payload.get("trace_id"),
+                token_url,
+                tenant_id,
+                scope,
+                _mask(client_id),
+            )
             raise OAuthTokenError(
                 f"OAuth2 token endpoint returned HTTP {resp.status_code} "
                 f"for {account.email}: {resp.text[:500]}"
@@ -166,10 +244,47 @@ async def get_access_token(
         await redis_client.setex(
             cache_key, ttl, json.dumps({"access_token": access_token})
         )
+        token_info = _summarise_token_for_log(access_token)
         logger.info(
-            "OAuth2 token: cached new access_token account=%s ttl=%ds",
-            account.email, ttl,
+            "OAuth2 token: cached new access_token account=%s ttl=%ds "
+            "expires_in=%ds token_type=%s returned_scope=%s token_len=%d "
+            "claims=%s",
+            account.email,
+            ttl,
+            expires_in,
+            data.get("token_type"),
+            data.get("scope"),
+            len(access_token),
+            token_info,
         )
+
+        # Diagnostic guard: if this is an Exchange Online IMAP token but the
+        # required app-role is missing, surface a clear warning. Without
+        # `IMAP.AccessAsApp` in `roles`, EXO will reject XOAUTH2 with the
+        # opaque "AUTHENTICATE failed." message no matter what.
+        if token_info.get("jwt_decoded"):
+            roles = token_info.get("roles") or []
+            aud = token_info.get("aud") or ""
+            if "outlook.office" in str(aud) or "outlook.office365.com" in scope:
+                if "IMAP.AccessAsApp" not in roles:
+                    logger.warning(
+                        "OAuth2 token: missing 'IMAP.AccessAsApp' app role for "
+                        "account=%s. Token roles=%s. Add the application "
+                        "permission 'Office 365 Exchange Online → "
+                        "IMAP.AccessAsApp' to the app registration and grant "
+                        "admin consent.",
+                        account.email,
+                        roles,
+                    )
+                else:
+                    logger.info(
+                        "OAuth2 token: IMAP.AccessAsApp role present — if "
+                        "XOAUTH2 still fails, the service principal likely "
+                        "lacks FullAccess on the mailbox (run "
+                        "Add-MailboxPermission via Exchange Online "
+                        "PowerShell). account=%s",
+                        account.email,
+                    )
         return access_token
     finally:
         if owns_redis:

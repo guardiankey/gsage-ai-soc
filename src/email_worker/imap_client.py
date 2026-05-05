@@ -88,7 +88,14 @@ class IMAPClientWrapper:
         # Authentication: OAuth2 (XOAUTH2) for Microsoft 365 / Exchange
         # Online and any provider that disabled basic auth, otherwise
         # plain LOGIN with the stored password.
-        if getattr(acc, "auth_method", "basic") == "oauth2":
+        auth_method = getattr(acc, "auth_method", "basic")
+        logger.info(
+            "IMAPClientWrapper: authenticating — account=%s username=%s auth_method=%s",
+            acc.email,
+            acc.imap_username,
+            auth_method,
+        )
+        if auth_method == "oauth2":
             from src.shared.services.oauth_token import get_access_token
 
             try:
@@ -97,10 +104,48 @@ class IMAPClientWrapper:
                 raise ConnectionError(
                     f"OAuth2 token acquisition failed for {acc.email}: {exc}"
                 ) from exc
+            logger.info(
+                "IMAPClientWrapper: sending XOAUTH2 — account=%s username=%s "
+                "token_len=%d token_prefix=%s",
+                acc.email,
+                acc.imap_username,
+                len(token),
+                token[:6] if token else "<empty>",
+            )
             response = await self._client.xoauth2(acc.imap_username, token)
         else:
             response = await self._client.login(acc.imap_username, acc.imap_password)
         if response.result != "OK":
+            decoded_lines = [
+                line.decode(errors="replace") if isinstance(line, (bytes, bytearray)) else str(line)
+                for line in (response.lines or [])
+            ]
+            if auth_method == "oauth2":
+                logger.error(
+                    "IMAPClientWrapper: XOAUTH2 rejected by server — account=%s "
+                    "username=%s result=%s lines=%s. Common causes: "
+                    "(1) imap_username must be the mailbox UPN (the address of "
+                    "the mailbox being accessed), not the app-registration name; "
+                    "(2) the Azure AD app must have the IMAP.AccessAsApp "
+                    "*application* permission with admin consent granted; "
+                    "(3) the service principal must have been authorised on "
+                    "this mailbox via Exchange Online PowerShell "
+                    "(New-ServicePrincipal + Add-MailboxPermission with "
+                    "FullAccess).",
+                    acc.email,
+                    acc.imap_username,
+                    response.result,
+                    decoded_lines,
+                )
+            else:
+                logger.error(
+                    "IMAPClientWrapper: LOGIN rejected by server — account=%s "
+                    "username=%s result=%s lines=%s",
+                    acc.email,
+                    acc.imap_username,
+                    response.result,
+                    decoded_lines,
+                )
             raise ConnectionError(
                 f"IMAP login failed for {acc.email}: {response.lines}"
             )
