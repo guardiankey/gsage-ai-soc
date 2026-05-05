@@ -477,11 +477,21 @@ class EntraOIDCProvider(BaseAuthProvider):
         # Direct claim
         groups = claims.get("groups")
         if isinstance(groups, list) and groups:
-            return [str(g) for g in groups]
+            resolved = [str(g) for g in groups]
+            logger.info(
+                "entra_oidc: resolved %d group(s) for oid=%s via id_token claim: %s",
+                len(resolved), user_oid, resolved,
+            )
+            return resolved
 
         # Overage indicator: _claim_names.groups points to a Graph endpoint
         claim_names = claims.get("_claim_names") or {}
         if "groups" not in claim_names:
+            logger.info(
+                "entra_oidc: no groups claim and no overage marker for oid=%s — "
+                "user has no group memberships exposed to this app registration",
+                user_oid,
+            )
             return []
 
         if not access_token:
@@ -507,7 +517,12 @@ class EntraOIDCProvider(BaseAuthProvider):
                 return []
             data = resp.json() or {}
             value = data.get("value") or []
-            return [str(g) for g in value]
+            resolved = [str(g) for g in value]
+            logger.info(
+                "entra_oidc: resolved %d group(s) for oid=%s via Graph getMemberObjects: %s",
+                len(resolved), user_oid, resolved,
+            )
+            return resolved
         except Exception as exc:
             logger.warning("entra_oidc: Graph fallback failed — %s", exc)
             return []

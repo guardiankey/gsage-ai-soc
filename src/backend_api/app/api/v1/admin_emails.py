@@ -11,6 +11,7 @@ Routes (prefix: /v1/orgs/{org_id}/admin):
 
 from __future__ import annotations
 
+import logging
 import socket
 import uuid
 from typing import Annotated
@@ -28,6 +29,8 @@ from src.backend_api.app.schemas.admin import (
 )
 from src.shared.models.email_account import GSageEmailAccount
 from src.shared.models.user_organization import GSageUserOrganization
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -262,8 +265,25 @@ async def test_email_account(
     if acc is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email account not found")
 
+    logger.info(
+        "email-account test: starting — account=%s id=%s auth_method=%s "
+        "imap=%s:%d (tls=%s verify=%s user=%s) "
+        "smtp=%s:%d (tls=%s verify=%s user=%s)",
+        acc.email, acc.id, acc.auth_method,
+        acc.imap_host, acc.imap_port, acc.imap_use_tls, acc.imap_verify_ssl,
+        acc.imap_username,
+        acc.smtp_host, acc.smtp_port, acc.smtp_use_tls, acc.smtp_verify_ssl,
+        acc.smtp_username,
+    )
+
     imap_ok, imap_error = await _test_imap(acc)
     smtp_ok, smtp_error = await _test_smtp(acc)
+
+    logger.info(
+        "email-account test: done — account=%s imap_ok=%s imap_error=%s "
+        "smtp_ok=%s smtp_error=%s",
+        acc.email, imap_ok, imap_error, smtp_ok, smtp_error,
+    )
 
     return EmailConnectionTestResult(
         imap_ok=imap_ok,
@@ -282,7 +302,15 @@ async def _test_imap(acc: GSageEmailAccount) -> tuple[bool, str | None]:
         if acc.auth_method == "oauth2":
             from src.shared.services.oauth_token import get_access_token
 
+            logger.info(
+                "email-account test [IMAP]: acquiring OAuth2 token — account=%s",
+                acc.email,
+            )
             token = await asyncio.wait_for(get_access_token(acc), timeout=10.0)
+            logger.info(
+                "email-account test [IMAP]: token acquired — account=%s token_len=%d",
+                acc.email, len(token),
+            )
             loop = asyncio.get_event_loop()
             await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: _imap_login_oauth2(acc, token)),
@@ -294,10 +322,22 @@ async def _test_imap(acc: GSageEmailAccount) -> tuple[bool, str | None]:
                 loop.run_in_executor(None, lambda: _imap_login(acc)),
                 timeout=5.0,
             )
+        logger.info("email-account test [IMAP]: success — account=%s", acc.email)
         return True, None
     except asyncio.TimeoutError:
+        logger.warning(
+            "email-account test [IMAP]: timeout after 5s — account=%s host=%s:%d",
+            acc.email, acc.imap_host, acc.imap_port,
+        )
         return False, "Connection timed out after 5 seconds"
     except Exception as exc:
+        logger.error(
+            "email-account test [IMAP]: failure — account=%s host=%s:%d "
+            "auth_method=%s username=%s error=%s",
+            acc.email, acc.imap_host, acc.imap_port, acc.auth_method,
+            acc.imap_username, exc,
+            exc_info=True,
+        )
         return False, str(exc)
 
 
@@ -345,8 +385,43 @@ def _imap_login_oauth2(acc: GSageEmailAccount, token: str) -> None:
     else:
         conn = imaplib.IMAP4(acc.imap_host, acc.imap_port, timeout=5)
     try:
-        sasl = build_xoauth2_string(acc.imap_username or acc.email, token)
-        conn.authenticate("XOAUTH2", lambda _challenge: sasl.encode("utf-8"))
+        try:
+            caps = " ".join(
+                c.decode(errors="replace") if isinstance(c, bytes) else str(c)
+                for c in (conn.capabilities or ())
+            )
+            logger.info(
+                "email-account test [IMAP]: connected — account=%s caps=%s",
+                acc.email, caps,
+            )
+        except Exception:
+            pass
+        username = acc.imap_username or acc.email
+        sasl = build_xoauth2_string(username, token)
+        logger.info(
+            "email-account test [IMAP]: sending XOAUTH2 — account=%s username=%s "
+            "token_len=%d",
+            acc.email, username, len(token),
+        )
+        try:
+            typ, data = conn.authenticate("XOAUTH2", lambda _challenge: sasl.encode("utf-8"))
+        except imaplib.IMAP4.error as exc:
+            decoded = str(exc)
+            logger.error(
+                "email-account test [IMAP]: XOAUTH2 rejected — account=%s "
+                "username=%s error=%s. Common causes: "
+                "(1) imap_username must be the mailbox UPN; "
+                "(2) the AAD app needs Office 365 Exchange Online > "
+                "IMAP.AccessAsApp (application) with admin consent; "
+                "(3) the service principal needs FullAccess on the mailbox "
+                "(Add-MailboxPermission via Exchange Online PowerShell).",
+                acc.email, username, decoded,
+            )
+            raise
+        logger.info(
+            "email-account test [IMAP]: XOAUTH2 accepted — account=%s typ=%s data=%r",
+            acc.email, typ, data,
+        )
         conn.logout()
     finally:
         try:
@@ -363,7 +438,15 @@ async def _test_smtp(acc: GSageEmailAccount) -> tuple[bool, str | None]:
         if acc.auth_method == "oauth2":
             from src.shared.services.oauth_token import get_access_token
 
+            logger.info(
+                "email-account test [SMTP]: acquiring OAuth2 token — account=%s",
+                acc.email,
+            )
             token = await asyncio.wait_for(get_access_token(acc), timeout=10.0)
+            logger.info(
+                "email-account test [SMTP]: token acquired — account=%s token_len=%d",
+                acc.email, len(token),
+            )
             loop = asyncio.get_event_loop()
             await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: _smtp_login_oauth2(acc, token)),
@@ -375,10 +458,22 @@ async def _test_smtp(acc: GSageEmailAccount) -> tuple[bool, str | None]:
                 loop.run_in_executor(None, lambda: _smtp_login(acc)),
                 timeout=5.0,
             )
+        logger.info("email-account test [SMTP]: success — account=%s", acc.email)
         return True, None
     except asyncio.TimeoutError:
+        logger.warning(
+            "email-account test [SMTP]: timeout after 5s — account=%s host=%s:%d",
+            acc.email, acc.smtp_host, acc.smtp_port,
+        )
         return False, "Connection timed out after 5 seconds"
     except Exception as exc:
+        logger.error(
+            "email-account test [SMTP]: failure — account=%s host=%s:%d "
+            "auth_method=%s username=%s error=%s",
+            acc.email, acc.smtp_host, acc.smtp_port, acc.auth_method,
+            acc.smtp_username, exc,
+            exc_info=True,
+        )
         return False, str(exc)
 
 
@@ -422,19 +517,96 @@ def _smtp_login_oauth2(acc: GSageEmailAccount, token: str) -> None:
         ssl_ctx.verify_mode = ssl.CERT_NONE
     if acc.smtp_use_tls and acc.smtp_port == 465:
         conn = smtplib.SMTP_SSL(acc.smtp_host, acc.smtp_port, timeout=5, context=ssl_ctx)
+        logger.info(
+            "email-account test [SMTP]: implicit-TLS connected — account=%s host=%s:%d",
+            acc.email, acc.smtp_host, acc.smtp_port,
+        )
     elif acc.smtp_use_tls:
         conn = smtplib.SMTP(acc.smtp_host, acc.smtp_port, timeout=5)
         conn.ehlo()
         conn.starttls(context=ssl_ctx)
         conn.ehlo()
+        logger.info(
+            "email-account test [SMTP]: STARTTLS negotiated — account=%s host=%s:%d "
+            "features=%s",
+            acc.email, acc.smtp_host, acc.smtp_port,
+            list((conn.esmtp_features or {}).keys()),
+        )
     else:
         conn = smtplib.SMTP(acc.smtp_host, acc.smtp_port, timeout=5)
+        conn.ehlo()
+        logger.info(
+            "email-account test [SMTP]: plain connected — account=%s features=%s",
+            acc.email, list((conn.esmtp_features or {}).keys()),
+        )
     try:
-        sasl = build_xoauth2_string(acc.smtp_username or acc.email, token)
+        auth_features = (conn.esmtp_features or {}).get("auth", "")
+        logger.info(
+            "email-account test [SMTP]: auth mechanisms advertised — account=%s auth=%r",
+            acc.email, auth_features,
+        )
+        if "XOAUTH2" not in (auth_features or "").upper():
+            logger.warning(
+                "email-account test [SMTP]: server does not advertise XOAUTH2 — "
+                "account=%s. For Office 365 verify SMTP AUTH is enabled on the "
+                "mailbox (Set-CASMailbox -SmtpClientAuthenticationDisabled \\$false) "
+                "and tenant-wide (Set-TransportConfig "
+                "-SmtpClientAuthenticationDisabled \\$false).",
+                acc.email,
+            )
+        username = acc.smtp_username or acc.email
+        sasl = build_xoauth2_string(username, token)
         sasl_b64 = base64.b64encode(sasl.encode("utf-8")).decode("ascii")
+        logger.info(
+            "email-account test [SMTP]: sending AUTH XOAUTH2 — account=%s "
+            "username=%s token_len=%d",
+            acc.email, username, len(token),
+        )
         code, msg = conn.docmd("AUTH", f"XOAUTH2 {sasl_b64}")
+        msg_decoded = (
+            msg.decode(errors="replace") if isinstance(msg, (bytes, bytearray))
+            else str(msg)
+        )
+        # 334 is a continuation challenge — server sent base64-encoded JSON
+        # describing the failure. Decode and surface it.
+        if code == 334:
+            try:
+                challenge_json = base64.b64decode(msg_decoded).decode(
+                    "utf-8", errors="replace"
+                )
+            except Exception:
+                challenge_json = msg_decoded
+            # ACK the continuation so the server returns final status.
+            final_code, final_msg = conn.docmd("")
+            final_decoded = (
+                final_msg.decode(errors="replace")
+                if isinstance(final_msg, (bytes, bytearray)) else str(final_msg)
+            )
+            logger.error(
+                "email-account test [SMTP]: XOAUTH2 challenge=%s final=%d %s — "
+                "account=%s. Common causes: "
+                "(1) smtp_username must be the mailbox UPN; "
+                "(2) the AAD app needs Office 365 Exchange Online > "
+                "SMTP.SendAsApp (application) with admin consent; "
+                "(3) Add-MailboxPermission grants the SP send-as on the mailbox; "
+                "(4) tenant SMTP AUTH must not be disabled.",
+                challenge_json, final_code, final_decoded, acc.email,
+            )
+            raise RuntimeError(
+                f"SMTP XOAUTH2 failed: {final_code} {final_decoded} "
+                f"(challenge={challenge_json})"
+            )
         if code < 200 or code >= 300:
-            raise RuntimeError(f"SMTP XOAUTH2 failed: {code} {msg!r}")
+            logger.error(
+                "email-account test [SMTP]: XOAUTH2 rejected — account=%s "
+                "code=%d msg=%s",
+                acc.email, code, msg_decoded,
+            )
+            raise RuntimeError(f"SMTP XOAUTH2 failed: {code} {msg_decoded!r}")
+        logger.info(
+            "email-account test [SMTP]: XOAUTH2 accepted — account=%s code=%d msg=%s",
+            acc.email, code, msg_decoded,
+        )
     finally:
         try:
             conn.quit()

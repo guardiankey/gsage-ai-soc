@@ -129,6 +129,20 @@ async def upsert_external_user(
     group_mapping: dict = provider_config.get("group_mapping") or {}
     default_role: str = provider_config.get("default_role") or "viewer"
 
+    # Debug aid: log what the provider returned vs. what is configured.
+    # The mapping is matched by GSageGroup.name (NOT slug); group_mapping keys
+    # must equal the raw external identifiers returned by the provider — for
+    # Entra OIDC those are the security-group Object IDs (UUIDs).
+    matched_ext = [g for g in result.groups if g in group_mapping]
+    unmatched_ext = [g for g in result.groups if g not in group_mapping]
+    logger.info(
+        "user_sync: provider='%s' user='%s' org='%s' — external_groups=%s "
+        "matched=%s unmatched=%s configured_keys=%s",
+        result.provider_name, identity.email, org.slug,
+        list(result.groups), matched_ext, unmatched_ext,
+        list(group_mapping.keys()),
+    )
+
     # Role priority order (highest → lowest)
     _ROLE_PRIORITY = {"owner": 4, "admin": 3, "member": 2, "viewer": 1}
     resolved_role = default_role
@@ -188,6 +202,11 @@ async def upsert_external_user(
             continue
         for local_group_name in mapping_entry.get("groups") or []:
             desired_local_groups.add(local_group_name)
+
+    logger.info(
+        "user_sync: resolved role='%s' desired_local_groups=%s for user='%s' in org='%s'",
+        resolved_role, sorted(desired_local_groups), identity.email, org.slug,
+    )
 
     if desired_local_groups or result.groups:
         await _sync_group_memberships(
