@@ -114,6 +114,17 @@ async def upsert_external_user(
                 "user_sync: re-activated user '%s'", identity.email
             )
 
+    # When the provider is Entra OIDC the external_id is the AAD Object ID
+    # (oid claim). Automatically populate teams_aad_object_id so Teams messages
+    # can be resolved to this user without requiring manual admin configuration.
+    if result.provider_name == "entra_oidc" and identity.external_id:
+        if user.teams_aad_object_id != identity.external_id:
+            user.teams_aad_object_id = identity.external_id
+            logger.info(
+                "user_sync: set teams_aad_object_id=%s for user '%s'",
+                identity.external_id, identity.email,
+            )
+
     # ── 2. Resolve target role from group_mapping ────────────────────────
     group_mapping: dict = provider_config.get("group_mapping") or {}
     default_role: str = provider_config.get("default_role") or "viewer"
@@ -271,6 +282,61 @@ async def _sync_group_memberships(
     await db.flush()
 
 
+# Department-scoped role priority (no "owner" at dept level).
+_DEPT_ROLE_PRIORITY = {"admin": 3, "member": 2, "viewer": 1}
+_DEPT_DEFAULT_ROLE = "member"
+
+
+def _extract_dept_assignments(mapping_entry: dict) -> dict[str, str]:
+    """Return a ``{dept_name: dept_role}`` map for a single group_mapping entry.
+
+    Schema (all keys optional, additive):
+      - ``department``  : str             — single department name.
+      - ``departments`` : list[str]       — multiple department names.
+      - ``dept_role``   : str | list[str] — role inside the dept(s).
+          * If a single string, it applies to every department in the entry.
+          * If a list shorter than the department list, the **last** value is
+            repeated to pad it (so a 1-element list also works as "apply to all").
+          * If longer than the department list, extra values are ignored.
+          * Missing or unknown role falls back to ``member``.
+    """
+    dept_names: list[str] = []
+
+    single = mapping_entry.get("department")
+    if isinstance(single, str) and single.strip():
+        dept_names.append(single.strip())
+
+    multi = mapping_entry.get("departments")
+    if isinstance(multi, list):
+        for d in multi:
+            if isinstance(d, str) and d.strip() and d.strip() not in dept_names:
+                dept_names.append(d.strip())
+
+    if not dept_names:
+        return {}
+
+    raw_roles = mapping_entry.get("dept_role")
+    if isinstance(raw_roles, str):
+        roles = [raw_roles]
+    elif isinstance(raw_roles, list):
+        roles = [r for r in raw_roles if isinstance(r, str)]
+    else:
+        roles = []
+
+    # Pad shorter list by repeating the last value; if empty, default to "member".
+    if not roles:
+        roles = [_DEPT_DEFAULT_ROLE]
+    while len(roles) < len(dept_names):
+        roles.append(roles[-1])
+
+    out: dict[str, str] = {}
+    for name, role in zip(dept_names, roles):
+        if role not in _DEPT_ROLE_PRIORITY:
+            role = _DEPT_DEFAULT_ROLE
+        out[name] = role
+    return out
+
+
 async def _sync_department_memberships(
     db: AsyncSession,
     user: GSageUser,
@@ -281,34 +347,49 @@ async def _sync_department_memberships(
 ) -> None:
     """Sync department memberships from provider group_mapping.
 
-    Each group_mapping entry may specify a ``department`` key with the
-    department name to assign the user to.  When ``auto_create_departments``
-    is True (default: False) missing departments are created automatically.
+    Each ``group_mapping`` entry may specify ``department`` (str) and/or
+    ``departments`` (list[str]) plus an optional ``dept_role`` (str or
+    list[str]).  See :func:`_extract_dept_assignments` for details.
+
+    When the same department is assigned by multiple matched groups, the
+    highest-priority dept role wins (admin > member > viewer).
+
+    When ``auto_create_departments`` is True (default: False) missing
+    departments are created automatically.
+
+    Stale memberships (departments the user is currently in but no longer
+    matched by any group) are **removed**.  This is a full sync so SSO
+    remains the source of truth.
 
     If no department mapping is found at all the user is placed in the
     org's default department.
     """
     auto_create: bool = bool(provider_config.get("auto_create_departments", False))
 
-    # Collect desired department names from mapping
-    desired_dept_names: set[str] = set()
+    # ── 1. Build desired_depts: {dept_name: dept_role} from all matched groups ──
+    desired_depts: dict[str, str] = {}
     for ext_group in external_groups:
         mapping_entry = group_mapping.get(ext_group)
         if not mapping_entry:
             continue
-        dept_name: Optional[str] = mapping_entry.get("department")
-        if dept_name:
-            desired_dept_names.add(dept_name)
+        for dept_name, role in _extract_dept_assignments(mapping_entry).items():
+            current = desired_depts.get(dept_name)
+            if current is None or _DEPT_ROLE_PRIORITY.get(role, 0) > _DEPT_ROLE_PRIORITY.get(current, 0):
+                desired_depts[dept_name] = role
 
-    if not desired_dept_names:
-        # Fallback: ensure user is in the default department
+    if not desired_depts:
+        # Fallback: ensure user is in the default department.
+        # We do NOT prune other memberships here — admins may have manually
+        # placed the user in additional departments.
         await dept_svc.ensure_user_in_default_department(db, user_id=user.id, org_id=org.id)
         return
 
     from src.shared.models.department import GSageDepartment
 
-    for dept_name in desired_dept_names:
-        # Find department by name within org
+    # ── 2. Resolve / create departments and apply memberships ───────────────
+    desired_dept_ids: set[uuid.UUID] = set()
+
+    for dept_name, dept_role in desired_depts.items():
         dept_res = await db.execute(
             select(GSageDepartment).where(
                 GSageDepartment.org_id == org.id,
@@ -320,7 +401,8 @@ async def _sync_department_memberships(
         if dept is None:
             if not auto_create:
                 logger.debug(
-                    "user_sync: dept '%s' not found in org '%s' — auto_create_departments=False, skip",
+                    "user_sync: dept '%s' not found in org '%s' — "
+                    "auto_create_departments=False, skip",
                     dept_name, org.slug,
                 )
                 continue
@@ -330,19 +412,59 @@ async def _sync_department_memberships(
                 name=dept_name,
             )
             logger.info(
-                "user_sync: auto-created department '%s' in org '%s'", dept_name, org.slug
+                "user_sync: auto-created department '%s' in org '%s'",
+                dept_name, org.slug,
             )
 
-        try:
-            await dept_svc.add_member(
-                db=db,
-                dept_id=dept.id,
-                org_id=org.id,
-                user_id=user.id,
-            )
-            logger.debug("user_sync: added user '%s' to department '%s'", user.email, dept_name)
-        except dept_svc.DepartmentConflict:
-            # Already a member — that's fine
-            pass
+        desired_dept_ids.add(dept.id)
+
+        existing = await dept_svc.get_membership(db, user_id=user.id, dept_id=dept.id)
+        if existing is None:
+            try:
+                await dept_svc.add_member(
+                    db=db,
+                    dept_id=dept.id,
+                    org_id=org.id,
+                    user_id=user.id,
+                    role=dept_role,
+                )
+                logger.debug(
+                    "user_sync: added user '%s' to dept '%s' (role=%s)",
+                    user.email, dept_name, dept_role,
+                )
+            except dept_svc.DepartmentConflict:
+                pass
+        else:
+            changed = False
+            if not existing.is_active:
+                existing.is_active = True
+                changed = True
+            if existing.role != dept_role:
+                logger.info(
+                    "user_sync: updating dept role for '%s' in '%s': %s → %s",
+                    user.email, dept_name, existing.role, dept_role,
+                )
+                existing.role = dept_role
+                changed = True
+            if changed:
+                await db.flush()
+
+    # ── 3. Remove stale memberships (full sync) ─────────────────────────────
+    current = await dept_svc.get_user_departments(db, user_id=user.id, org_id=org.id)
+    for membership in current:
+        if membership.dept_id not in desired_dept_ids:
+            try:
+                await dept_svc.remove_member(
+                    db=db,
+                    dept_id=membership.dept_id,
+                    org_id=org.id,
+                    user_id=user.id,
+                )
+                logger.debug(
+                    "user_sync: removed user '%s' from stale dept_id=%s",
+                    user.email, membership.dept_id,
+                )
+            except dept_svc.DepartmentNotFound:
+                pass
 
     await db.flush()

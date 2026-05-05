@@ -68,6 +68,9 @@ from src.shared.models.datastore import GSageDataStore, GSageDataStoreRecord
 from src.shared.models.department import GSageDepartment
 from src.shared.models.user_department import GSageUserDepartment, DepartmentRole
 
+# SSO email domain → org mapping
+from src.shared.models.org_email_domain import GSageOrgEmailDomain
+
 __all__ = [
     # Base
     "Base",
@@ -128,4 +131,6 @@ __all__ = [
     "GSageDepartment",
     "GSageUserDepartment",
     "DepartmentRole",
+    # SSO email domain mapping
+    "GSageOrgEmailDomain",
 ]

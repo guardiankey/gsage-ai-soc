@@ -36,7 +36,16 @@
     "loggingIn": "Entrando...",
     "showPassword": "Mostrar senha",
     "hidePassword": "Ocultar senha",
-    "logout": "Sair"
+    "logout": "Sair",
+    "continue": "Continuar",
+    "continueWithEmail": "Informe seu e-mail para continuar",
+    "signInWithMicrosoft": "Entrar com Microsoft",
+    "signInWithProvider": "Entrar com {{provider}}",
+    "changeEmail": "Trocar e-mail",
+    "or": "ou",
+    "completingSso": "Entrando...",
+    "ssoFailed": "Falha no SSO. Tente novamente.",
+    "ssoError": "Falha no login: {{error}}"
   },
   "chat": {
     "newConversation": "Nova conversa",

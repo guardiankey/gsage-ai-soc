@@ -79,13 +79,13 @@ class GSageChannelMessage(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="Channel name: telegram | discord | slack | whatsapp",
     )
     channel_chat_id: Mapped[str] = mapped_column(
-        String(100),
+        String(512),
         nullable=False,
         index=True,
         comment="Channel-native chat/conversation identifier (e.g. Telegram chat_id)",
     )
     channel_message_id: Mapped[str] = mapped_column(
-        String(100),
+        String(512),
         nullable=False,
         comment="Channel-native message identifier for idempotency",
     )

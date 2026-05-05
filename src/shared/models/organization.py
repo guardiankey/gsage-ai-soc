@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from src.shared.models.email_account import GSageEmailAccount
     from src.shared.models.group import GSageGroup
     from src.shared.models.interface_profile import GSageInterfaceProfile
+    from src.shared.models.org_email_domain import GSageOrgEmailDomain
     from src.shared.models.tenant_session import GSageTenantSession
     from src.shared.models.user_organization import GSageUserOrganization
 
@@ -154,6 +155,13 @@ class GSageOrganization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="GSageDepartment.name",
+    )
+    email_domains: Mapped[List["GSageOrgEmailDomain"]] = relationship(
+        "GSageOrgEmailDomain",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="GSageOrgEmailDomain.domain",
     )
 
     @property

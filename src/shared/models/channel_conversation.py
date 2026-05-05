@@ -63,7 +63,7 @@ class GSageChannelConversation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="Channel name: telegram | discord | slack | whatsapp",
     )
     channel_chat_id: Mapped[str] = mapped_column(
-        String(100),
+        String(512),
         nullable=False,
         comment="Channel-native chat/conversation identifier",
     )

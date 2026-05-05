@@ -36,7 +36,16 @@
     "loggingIn": "Iniciando sesión...",
     "showPassword": "Mostrar contraseña",
     "hidePassword": "Ocultar contraseña",
-    "logout": "Cerrar sesión"
+    "logout": "Cerrar sesión",
+    "continue": "Continuar",
+    "continueWithEmail": "Ingrese su correo para continuar",
+    "signInWithMicrosoft": "Iniciar sesión con Microsoft",
+    "signInWithProvider": "Iniciar sesión con {{provider}}",
+    "changeEmail": "Cambiar correo",
+    "or": "o",
+    "completingSso": "Iniciando sesión...",
+    "ssoFailed": "Error en el SSO. Inténtalo de nuevo.",
+    "ssoError": "Error de inicio de sesión: {{error}}"
   },
   "chat": {
     "newConversation": "Nueva conversación",

@@ -36,7 +36,16 @@
     "loggingIn": "Wird angemeldet...",
     "showPassword": "Passwort anzeigen",
     "hidePassword": "Passwort verbergen",
-    "logout": "Abmelden"
+    "logout": "Abmelden",
+    "continue": "Weiter",
+    "continueWithEmail": "Geben Sie Ihre E-Mail-Adresse ein, um fortzufahren",
+    "signInWithMicrosoft": "Mit Microsoft anmelden",
+    "signInWithProvider": "Mit {{provider}} anmelden",
+    "changeEmail": "E-Mail ändern",
+    "or": "oder",
+    "completingSso": "Anmeldung läuft...",
+    "ssoFailed": "SSO fehlgeschlagen. Bitte erneut versuchen.",
+    "ssoError": "Anmeldung fehlgeschlagen: {{error}}"
   },
   "chat": {
     "newConversation": "Neue Unterhaltung",

@@ -15,6 +15,8 @@ from src.backend_api.app.api.v1 import (
     approval_rules,
     approvals,
     auth,
+    auth_lookup,
+    auth_sso,
     background_tasks,
     channels_teams,
     chat,
@@ -34,6 +36,8 @@ api_router = APIRouter()
 # Routes that do NOT require tenant auth (no rate limiting)
 api_router.include_router(health.router, prefix="/v1", tags=["Health"])
 api_router.include_router(auth.router, prefix="/v1/auth", tags=["Auth"])
+api_router.include_router(auth_lookup.router, prefix="/v1/auth", tags=["Auth"])
+api_router.include_router(auth_sso.router, prefix="/v1/auth", tags=["Auth SSO"])
 
 # Microsoft Teams webhook — auth is enforced by Bot Framework JWT validation
 # inside ``BotFrameworkAdapter.process_activity`` (not gsage tenant auth).

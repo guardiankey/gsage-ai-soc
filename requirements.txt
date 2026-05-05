@@ -65,3 +65,4 @@ duckdb>=1.0,<2           # In-process SQL engine used by core CSV tools (csv_que
 pyarrow>=16,<22          # Required by polars.DataFrame.to_arrow() in csv_query (zero-copy DuckDB register)
 chardet>=5.2,<6          # Encoding auto-detection for CSV loader
 rt>=3,<4                 # Request Tracker REST 2.0 client used by RT tools (rt.rest2.AsyncRt)
+authlib>=1.3,<2          # OIDC id_token validation (Microsoft Entra ID SSO)

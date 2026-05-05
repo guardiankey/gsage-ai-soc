@@ -12,6 +12,7 @@ import { RegisterPage } from '@/pages/RegisterPage'
 import { OTPVerifyPage } from '@/pages/OTPVerifyPage'
 import { OTPSetupPage } from '@/pages/OTPSetupPage'
 import { KbDownloadPage } from '@/pages/KbDownloadPage'
+import { SsoCallbackPage } from '@/pages/SsoCallbackPage'
 
 // Lazy-loaded pages
 const ChatPage = lazy(() => import('@/pages/ChatPage'))
@@ -71,6 +72,7 @@ export default function App() {
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/otp-verify" element={<OTPVerifyPage />} />
               <Route path="/otp-setup" element={<OTPSetupPage />} />
+              <Route path="/sso/complete" element={<SsoCallbackPage />} />
 
               {/* KB download deep link — handles auth gating and triggers blob download */}
               <Route path="/kb/download/:jobId" element={<KbDownloadPage />} />

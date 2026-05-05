@@ -238,3 +238,37 @@ export async function updateOrgOtpConfig(orgId: string, data: OrgOTPConfigReques
   return response.data
 }
 
+// ---- SSO discovery + completion ----
+
+export interface SsoProviderInfo {
+  name: string
+  display_name: string
+  start_url: string
+}
+
+export interface AuthLookupResponse {
+  org_slug: string | null
+  allow_password_login: boolean
+  sso_providers: SsoProviderInfo[]
+}
+
+export async function lookupAuth(email: string): Promise<AuthLookupResponse> {
+  const response = await apiClient.post<AuthLookupResponse>(
+    '/v1/auth/lookup',
+    { email },
+    { _skipRedirectOn401: true } as never,
+  )
+  return response.data
+}
+
+export async function completeSsoLogin(sessionToken: string): Promise<TokenResponse> {
+  const response = await apiClient.post<TokenResponse>(
+    '/v1/auth/sso/complete',
+    { session_token: sessionToken },
+    { _skipRedirectOn401: true } as never,
+  )
+  const tokens = response.data
+  finalizeLogin(tokens)
+  return tokens
+}
+

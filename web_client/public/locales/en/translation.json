@@ -36,7 +36,16 @@
     "loggingIn": "Signing in...",
     "showPassword": "Show password",
     "hidePassword": "Hide password",
-    "logout": "Sign out"
+    "logout": "Sign out",
+    "continue": "Continue",
+    "continueWithEmail": "Enter your email to continue",
+    "signInWithMicrosoft": "Sign in with Microsoft",
+    "signInWithProvider": "Sign in with {{provider}}",
+    "changeEmail": "Change email",
+    "or": "or",
+    "completingSso": "Signing you in...",
+    "ssoFailed": "Single sign-on failed. Please try again.",
+    "ssoError": "Sign-in failed: {{error}}"
   },
   "chat": {
     "newConversation": "New conversation",

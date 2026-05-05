@@ -36,7 +36,16 @@
     "loggingIn": "جاري تسجيل الدخول...",
     "showPassword": "إظهار كلمة المرور",
     "hidePassword": "إخفاء كلمة المرور",
-    "logout": "تسجيل الخروج"
+    "logout": "تسجيل الخروج",
+    "continue": "متابعة",
+    "continueWithEmail": "أدخل بريدك الإلكتروني للمتابعة",
+    "signInWithMicrosoft": "تسجيل الدخول باستخدام Microsoft",
+    "signInWithProvider": "تسجيل الدخول باستخدام {{provider}}",
+    "changeEmail": "تغيير البريد الإلكتروني",
+    "or": "أو",
+    "completingSso": "جاري تسجيل الدخول...",
+    "ssoFailed": "فشل تسجيل الدخول الموحد. حاول مرة أخرى.",
+    "ssoError": "فشل تسجيل الدخول: {{error}}"
   },
   "chat": {
     "newConversation": "محادثة جديدة",

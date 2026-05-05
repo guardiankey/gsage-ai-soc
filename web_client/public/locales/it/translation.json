@@ -36,7 +36,16 @@
     "loggingIn": "Accesso in corso...",
     "showPassword": "Mostra password",
     "hidePassword": "Nascondi password",
-    "logout": "Disconnetti"
+    "logout": "Disconnetti",
+    "continue": "Continua",
+    "continueWithEmail": "Inserisci la tua email per continuare",
+    "signInWithMicrosoft": "Accedi con Microsoft",
+    "signInWithProvider": "Accedi con {{provider}}",
+    "changeEmail": "Cambia email",
+    "or": "o",
+    "completingSso": "Accesso in corso...",
+    "ssoFailed": "SSO non riuscito. Riprova.",
+    "ssoError": "Accesso non riuscito: {{error}}"
   },
   "chat": {
     "newConversation": "Nuova conversazione",

@@ -10,6 +10,7 @@ import argparse
 import sys
 from typing import Sequence
 
+from src.ops_cli import auth_providers as auth_providers_cmd
 from src.ops_cli.channels import email as email_cmd
 from src.ops_cli.channels import teams as teams_cmd
 from src.ops_cli.channels import telegram as telegram_cmd
@@ -34,6 +35,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     teams_parser = ch_sub.add_parser("teams", help="Manage Microsoft Teams interface profiles")
     teams_cmd.register(teams_parser)
+
+    # ── auth-providers ───────────────────────────────────────
+    ap = sub.add_parser(
+        "auth-providers",
+        help="Configure per-org authentication chain, SSO providers, and email domains",
+    )
+    auth_providers_cmd.register(ap)
 
     return parser
 
