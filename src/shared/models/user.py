@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
+import uuid
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, LargeBinary, String, Table, Text
 from sqlalchemy.dialects.postgresql import UUID
@@ -71,6 +72,19 @@ class GSageUser(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Profile
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Default department selected when the user logs in (web client falls back
+    # to the user's first active department when this is NULL).
+    default_dept_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("gsage_departments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment=(
+            "Default department to open at login. NULL means the client "
+            "auto-picks the first active department of the active org."
+        ),
+    )
 
     # Email addresses (Phase 7 — email identification)
     secondary_emails: Mapped[Optional[str]] = mapped_column(

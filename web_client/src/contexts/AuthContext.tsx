@@ -48,13 +48,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         orgId = user.memberships.find((m) => m.is_active)?.org_id ?? user.memberships[0].org_id
         localStorage.setItem('org_id', orgId)
       }
-      // If we don't have a dept yet, pick the default dept of the current org
+      // If we don't have a dept yet, prefer the user's configured
+      // default_dept_id (when it belongs to the active org); otherwise
+      // fall back to the first active department of the active org.
       let deptId = localStorage.getItem('dept_id')
       if (!deptId && orgId) {
         const membership = user.memberships.find((m) => m.org_id === orgId)
-        const defaultDept = membership?.departments?.find((d) => d.is_active)
-        if (defaultDept) {
-          deptId = defaultDept.dept_id
+        const activeDepts = membership?.departments?.filter((d) => d.is_active) ?? []
+        const preferred = user.default_dept_id
+          ? activeDepts.find((d) => d.dept_id === user.default_dept_id)
+          : undefined
+        const chosen = preferred ?? activeDepts[0]
+        if (chosen) {
+          deptId = chosen.dept_id
           localStorage.setItem('dept_id', deptId)
         }
       }

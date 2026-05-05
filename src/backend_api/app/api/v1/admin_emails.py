@@ -431,7 +431,12 @@ def _imap_login_oauth2(acc: GSageEmailAccount, token: str) -> None:
 
 
 async def _test_smtp(acc: GSageEmailAccount) -> tuple[bool, str | None]:
-    """Non-blocking SMTP login test with 5-second timeout."""
+    """Non-blocking SMTP login test with 15-second overall timeout.
+
+    STARTTLS + 2x EHLO + AUTH XOAUTH2 against Office 365 routinely takes
+    longer than 5s on the first connect (TLS handshake + auth round-trips),
+    so the bound is generous.
+    """
     import asyncio
 
     try:
@@ -450,22 +455,24 @@ async def _test_smtp(acc: GSageEmailAccount) -> tuple[bool, str | None]:
             loop = asyncio.get_event_loop()
             await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: _smtp_login_oauth2(acc, token)),
-                timeout=5.0,
+                timeout=15.0,
             )
         else:
             loop = asyncio.get_event_loop()
             await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: _smtp_login(acc)),
-                timeout=5.0,
+                timeout=15.0,
             )
         logger.info("email-account test [SMTP]: success — account=%s", acc.email)
         return True, None
     except asyncio.TimeoutError:
         logger.warning(
-            "email-account test [SMTP]: timeout after 5s — account=%s host=%s:%d",
+            "email-account test [SMTP]: timeout after 15s — account=%s host=%s:%d. "
+            "Check the last [SMTP] log line above to see which step (connect / "
+            "STARTTLS / EHLO / AUTH) was in progress when the timeout fired.",
             acc.email, acc.smtp_host, acc.smtp_port,
         )
-        return False, "Connection timed out after 5 seconds"
+        return False, "Connection timed out after 15 seconds"
     except Exception as exc:
         logger.error(
             "email-account test [SMTP]: failure — account=%s host=%s:%d "
@@ -515,16 +522,35 @@ def _smtp_login_oauth2(acc: GSageEmailAccount, token: str) -> None:
         ssl_ctx = ssl.create_default_context()
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = ssl.CERT_NONE
+    logger.info(
+        "email-account test [SMTP]: connecting — account=%s host=%s:%d "
+        "use_tls=%s implicit_ssl=%s",
+        acc.email, acc.smtp_host, acc.smtp_port,
+        acc.smtp_use_tls, acc.smtp_use_tls and acc.smtp_port == 465,
+    )
     if acc.smtp_use_tls and acc.smtp_port == 465:
-        conn = smtplib.SMTP_SSL(acc.smtp_host, acc.smtp_port, timeout=5, context=ssl_ctx)
+        conn = smtplib.SMTP_SSL(acc.smtp_host, acc.smtp_port, timeout=10, context=ssl_ctx)
         logger.info(
             "email-account test [SMTP]: implicit-TLS connected — account=%s host=%s:%d",
             acc.email, acc.smtp_host, acc.smtp_port,
         )
     elif acc.smtp_use_tls:
-        conn = smtplib.SMTP(acc.smtp_host, acc.smtp_port, timeout=5)
+        conn = smtplib.SMTP(acc.smtp_host, acc.smtp_port, timeout=10)
+        logger.info(
+            "email-account test [SMTP]: TCP connected, sending EHLO #1 — account=%s",
+            acc.email,
+        )
         conn.ehlo()
+        logger.info(
+            "email-account test [SMTP]: EHLO #1 ok, starting TLS — account=%s features=%s",
+            acc.email, list((conn.esmtp_features or {}).keys()),
+        )
         conn.starttls(context=ssl_ctx)
+        logger.info(
+            "email-account test [SMTP]: STARTTLS handshake done, sending EHLO #2 — "
+            "account=%s",
+            acc.email,
+        )
         conn.ehlo()
         logger.info(
             "email-account test [SMTP]: STARTTLS negotiated — account=%s host=%s:%d "
@@ -533,7 +559,7 @@ def _smtp_login_oauth2(acc: GSageEmailAccount, token: str) -> None:
             list((conn.esmtp_features or {}).keys()),
         )
     else:
-        conn = smtplib.SMTP(acc.smtp_host, acc.smtp_port, timeout=5)
+        conn = smtplib.SMTP(acc.smtp_host, acc.smtp_port, timeout=10)
         conn.ehlo()
         logger.info(
             "email-account test [SMTP]: plain connected — account=%s features=%s",

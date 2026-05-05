@@ -69,6 +69,7 @@ class UserOut(BaseModel):
     full_name: str
     is_active: bool
     created_at: datetime
+    default_dept_id: Optional[uuid.UUID] = None
 
     model_config = {"from_attributes": True}
 
@@ -98,11 +99,14 @@ class MeResponse(UserOut):
 
 
 class UpdateProfileRequest(BaseModel):
-    full_name: str
+    full_name: Optional[str] = None
+    default_dept_id: Optional[uuid.UUID] = None
 
     @field_validator("full_name")
     @classmethod
-    def full_name_not_empty(cls, v: str) -> str:
+    def full_name_not_empty(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
         v = v.strip()
         if not v:
             raise ValueError("full_name cannot be empty")

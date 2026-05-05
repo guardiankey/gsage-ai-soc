@@ -205,6 +205,10 @@
     "passwordMismatch": "As senhas não coincidem",
     "passwordChanged": "Senha alterada com sucesso",
     "profileUpdated": "Perfil atualizado com sucesso",
+    "defaultDept": "Departamento padrão",
+    "defaultDeptNone": "Nenhum (selecionar o primeiro disponível)",
+    "defaultDeptHint": "Departamento selecionado automaticamente ao fazer login.",
+    "defaultDeptUpdated": "Departamento padrão atualizado",
     "externalAuthNoPassword": "Conta externa não suporta troca de senha"
   },
   "apiKeys": {

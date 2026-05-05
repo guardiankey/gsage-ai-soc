@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { User, Mail, Building2, Pencil, KeyRound, Loader2, ShieldCheck, ShieldOff, RefreshCw } from 'lucide-react'
+import { User, Mail, Building2, Pencil, KeyRound, Loader2, ShieldCheck, ShieldOff, RefreshCw, Layers } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -11,13 +11,16 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuth } from '@/contexts/AuthContext'
 import { updateProfile, changePassword, otpStatus, otpDisable, regenerateBackupCodes } from '@/api/auth'
 import { toast } from 'sonner'
 
+const NO_DEFAULT_DEPT = '__none__'
+
 export default function ProfilePage() {
   const { t } = useTranslation()
-  const { user, orgId, refreshUser } = useAuth()
+  const { user, orgId, refreshUser, switchDept } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -54,6 +57,17 @@ export default function ProfilePage() {
       await refreshUser()
       toast.success(t('profile.profileUpdated'))
       setEditOpen(false)
+    },
+    onError: () => toast.error(t('common.error')),
+  })
+
+  const defaultDeptMut = useMutation({
+    mutationFn: (deptId: string | null) => updateProfile({ default_dept_id: deptId }),
+    onSuccess: async (_data, deptId) => {
+      await refreshUser()
+      // Switch the active department immediately so the UI reflects the new default.
+      if (deptId) switchDept(deptId)
+      toast.success(t('profile.defaultDeptUpdated'))
     },
     onError: () => toast.error(t('common.error')),
   })
@@ -120,6 +134,21 @@ export default function ProfilePage() {
   }
 
   const pwdMismatch = confirmPwd.length > 0 && newPwd !== confirmPwd
+
+  // Flatten active departments across all memberships, with org name prefix
+  // when the user belongs to more than one organization.
+  const allDepts = (user.memberships ?? []).flatMap((m) =>
+    (m.departments ?? [])
+      .filter((d) => d.is_active)
+      .map((d) => ({
+        dept_id: d.dept_id,
+        dept_name: d.dept_name,
+        org_id: m.org_id,
+        org_name: m.org_name,
+      })),
+  )
+  const showOrgPrefix = (user.memberships?.length ?? 0) > 1
+  const currentDefaultDeptId = user.default_dept_id ?? null
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -205,6 +234,44 @@ export default function ProfilePage() {
                       </div>
                     ))}
                   </div>
+                </div>
+              </>
+            )}
+
+            {allDepts.length > 0 && (
+              <>
+                <Separator />
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-muted-foreground" />
+                    <Label htmlFor="default-dept" className="text-xs text-muted-foreground">
+                      {t('profile.defaultDept')}
+                    </Label>
+                  </div>
+                  <Select
+                    value={currentDefaultDeptId ?? NO_DEFAULT_DEPT}
+                    onValueChange={(v) =>
+                      defaultDeptMut.mutate(v === NO_DEFAULT_DEPT ? null : v)
+                    }
+                    disabled={defaultDeptMut.isPending}
+                  >
+                    <SelectTrigger id="default-dept" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_DEFAULT_DEPT}>
+                        {t('profile.defaultDeptNone')}
+                      </SelectItem>
+                      {allDepts.map((d) => (
+                        <SelectItem key={d.dept_id} value={d.dept_id}>
+                          {showOrgPrefix ? `${d.org_name} — ${d.dept_name}` : d.dept_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {t('profile.defaultDeptHint')}
+                  </p>
                 </div>
               </>
             )}

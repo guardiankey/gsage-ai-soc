@@ -206,6 +206,10 @@
     "passwordMismatch": "Passwords do not match",
     "passwordChanged": "Password changed successfully",
     "profileUpdated": "Profile updated successfully",
+    "defaultDept": "Default department",
+    "defaultDeptNone": "None (auto-pick first available)",
+    "defaultDeptHint": "Department automatically selected when you sign in.",
+    "defaultDeptUpdated": "Default department updated",
     "externalAuthNoPassword": "External account does not support password change"
   },
   "apiKeys": {

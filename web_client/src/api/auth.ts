@@ -50,6 +50,7 @@ export interface MeResponse {
   full_name: string
   is_active: boolean
   is_superuser: boolean
+  default_dept_id?: string | null
   memberships: UserMembership[]
 }
 
@@ -169,7 +170,10 @@ export async function getMe(): Promise<MeResponse> {
   return response.data
 }
 
-export async function updateProfile(data: { full_name: string }): Promise<MeResponse> {
+export async function updateProfile(data: {
+  full_name?: string
+  default_dept_id?: string | null
+}): Promise<MeResponse> {
   const response = await apiClient.patch<MeResponse>('/v1/auth/me', data)
   return response.data
 }

@@ -648,6 +648,7 @@ async def _build_me_response(user: GSageUser, db: AsyncSession) -> MeResponse:
         full_name=user.full_name,
         is_active=user.is_active,
         created_at=user.created_at,
+        default_dept_id=user.default_dept_id,
         memberships=[
             OrgMembershipOut(
                 org_id=m.org_id,
@@ -678,8 +679,42 @@ async def update_me(
     user: GSageUser = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> MeResponse:
-    """Update the authenticated user's editable profile fields (currently: full_name)."""
-    user.full_name = body.full_name
+    """Update the authenticated user's editable profile fields.
+
+    Editable fields: ``full_name``, ``default_dept_id``. Pass ``None`` (or omit
+    the field) to leave it unchanged. To clear ``default_dept_id`` send the
+    JSON value ``null`` together with ``model_fields_set`` containing the key
+    (i.e. include ``"default_dept_id": null`` in the request body).
+    """
+    fields_set = body.model_fields_set
+
+    if "full_name" in fields_set and body.full_name is not None:
+        user.full_name = body.full_name
+
+    if "default_dept_id" in fields_set:
+        new_dept_id = body.default_dept_id
+        if new_dept_id is None:
+            user.default_dept_id = None
+        else:
+            # Ensure the user is an active member of the chosen department
+            # and that the department itself is active.
+            membership_check = await db.execute(
+                select(GSageUserDepartment)
+                .join(GSageDepartment, GSageUserDepartment.dept_id == GSageDepartment.id)
+                .where(
+                    GSageUserDepartment.user_id == user.id,
+                    GSageUserDepartment.dept_id == new_dept_id,
+                    GSageUserDepartment.is_active == True,  # noqa: E712
+                    GSageDepartment.is_active == True,  # noqa: E712
+                )
+            )
+            if membership_check.scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="default_dept_id must reference an active department the user belongs to",
+                )
+            user.default_dept_id = new_dept_id
+
     await db.commit()
     await db.refresh(user)
     return await _build_me_response(user, db)

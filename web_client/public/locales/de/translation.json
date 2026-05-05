@@ -206,6 +206,10 @@
     "passwordMismatch": "Passwörter stimmen nicht überein",
     "passwordChanged": "Passwort erfolgreich geändert",
     "profileUpdated": "Profil erfolgreich aktualisiert",
+    "defaultDept": "Standardabteilung",
+    "defaultDeptNone": "Keine (erste verfügbare wählen)",
+    "defaultDeptHint": "Abteilung wird beim Anmelden automatisch ausgewählt.",
+    "defaultDeptUpdated": "Standardabteilung aktualisiert",
     "externalAuthNoPassword": "Externes Konto unterstützt keine Passwortänderung"
   },
   "apiKeys": {

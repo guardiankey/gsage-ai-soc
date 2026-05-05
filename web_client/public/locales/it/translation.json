@@ -206,6 +206,10 @@
     "passwordMismatch": "Le password non corrispondono",
     "passwordChanged": "Password cambiata con successo",
     "profileUpdated": "Profilo aggiornato con successo",
+    "defaultDept": "Dipartimento predefinito",
+    "defaultDeptNone": "Nessuno (scegli il primo disponibile)",
+    "defaultDeptHint": "Dipartimento selezionato automaticamente all'accesso.",
+    "defaultDeptUpdated": "Dipartimento predefinito aggiornato",
     "externalAuthNoPassword": "L'account esterno non supporta il cambio password"
   },
   "apiKeys": {

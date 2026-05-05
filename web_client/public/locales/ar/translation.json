@@ -206,6 +206,10 @@
     "passwordMismatch": "كلمتا المرور غير متطابقتين",
     "passwordChanged": "تم تغيير كلمة المرور بنجاح",
     "profileUpdated": "تم تحديث الملف الشخصي بنجاح",
+    "defaultDept": "القسم الافتراضي",
+    "defaultDeptNone": "لا شيء (اختيار أول قسم متاح)",
+    "defaultDeptHint": "القسم الذي يتم تحديده تلقائيًا عند تسجيل الدخول.",
+    "defaultDeptUpdated": "تم تحديث القسم الافتراضي",
     "externalAuthNoPassword": "الحساب الخارجي لا يدعم تغيير كلمة المرور"
   },
   "apiKeys": {

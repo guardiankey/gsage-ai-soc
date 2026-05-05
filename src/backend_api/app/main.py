@@ -98,6 +98,16 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
 
+    # Configure structured logging (stdout JSON + ES handler) for the backend
+    # service. Without this call the root logger stays at WARNING level and
+    # logger.info(...) messages from src.shared.* are silently dropped.
+    from src.shared.logging import configure_logging  # noqa: PLC0415
+
+    configure_logging(
+        service_name="backend",
+        level="DEBUG" if settings.debug else "INFO",
+    )
+
     app = FastAPI(
         title="gSage AI",
         version="1.0.0",

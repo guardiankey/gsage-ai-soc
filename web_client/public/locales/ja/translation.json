@@ -206,6 +206,10 @@
     "passwordMismatch": "パスワードが一致しません",
     "passwordChanged": "パスワードが正常に変更されました",
     "profileUpdated": "プロフィールが正常に更新されました",
+    "defaultDept": "デフォルト部門",
+    "defaultDeptNone": "なし（最初に利用可能なものを自動選択）",
+    "defaultDeptHint": "サインイン時に自動的に選択される部門です。",
+    "defaultDeptUpdated": "デフォルト部門を更新しました",
     "externalAuthNoPassword": "外部アカウントはパスワード変更をサポートしていません"
   },
   "apiKeys": {

@@ -154,30 +154,29 @@ class IMAPClientWrapper:
         self._connected = True
         logger.info("IMAPClientWrapper: authenticated — account=%s", acc.email)
 
-        # Fetch capabilities to determine supported commands and log for diagnostics.
+        # Read capabilities directly from the protocol object (aioimaplib
+        # populates this set from the server greeting / post-LOGIN CAPABILITY
+        # response). Office 365 advertises UIDPLUS, so this drives whether we
+        # use UID SEARCH or fall back to plain SEARCH.
         try:
-            cap_resp = await self._client.capability()
-            cap_str = " ".join(
-                part.decode(errors="replace") if isinstance(part, bytes) else str(part)
-                for part in cap_resp.lines
-                if part
-            )
-            # aioimaplib raises Abort before sending UID SEARCH if the server
-            # does not advertise UIDPLUS. Detect this proactively so we can
-            # fall back to plain SEARCH without ever attempting a UID command.
-            self._uid_search_supported = "UIDPLUS" in cap_str.upper()
+            raw_caps = getattr(self._client.protocol, "capabilities", None) or set()
+            cap_set = {
+                (c.decode(errors="replace") if isinstance(c, bytes) else str(c)).upper()
+                for c in raw_caps
+            }
+            self._uid_search_supported = "UIDPLUS" in cap_set
             logger.info(
                 "IMAPClientWrapper: IMAP capabilities — account=%s uid_search=%s caps=%s",
                 acc.email,
                 self._uid_search_supported,
-                cap_str,
+                sorted(cap_set),
             )
         except Exception as cap_exc:
             # If we cannot determine capabilities, assume UID SEARCH is NOT
             # supported — safer than assuming it is and crashing repeatedly.
             self._uid_search_supported = False
             logger.warning(
-                "IMAPClientWrapper: capability fetch failed, assuming no UIDPLUS "
+                "IMAPClientWrapper: capability inspection failed, assuming no UIDPLUS "
                 "— account=%s error=%s",
                 acc.email,
                 cap_exc,
@@ -416,6 +415,11 @@ class IMAPClientWrapper:
         Uses ``UID SEARCH`` when supported; falls back to plain ``SEARCH``
         (returning sequence numbers) for servers that reject ``UID SEARCH``.
         """
+        # Office 365 IMAP only accepts CHARSET=US-ASCII; aioimaplib's
+        # search() defaults to UTF-8 and the server replies BADCHARSET.
+        # Pass charset=None so the CHARSET token is omitted \u2014 "UNSEEN" is
+        # pure ASCII so omitting CHARSET is always safe. The uid() raw-
+        # command path never sends CHARSET, so it does not need the kwarg.
         if self._uid_search_supported:
             try:
                 search_resp = await self._client.uid("SEARCH", "UNSEEN")
@@ -428,7 +432,7 @@ class IMAPClientWrapper:
                     self._account.email,
                 )
                 self._uid_search_supported = False
-                search_resp = await self._client.search("UNSEEN")
+                search_resp = await self._client.search("UNSEEN", charset=None)
             else:
                 if search_resp.result != "OK":
                     logger.warning(
@@ -440,7 +444,7 @@ class IMAPClientWrapper:
                     return
 
         if not self._uid_search_supported:
-            search_resp = await self._client.search("UNSEEN")
+            search_resp = await self._client.search("UNSEEN", charset=None)
             if search_resp.result != "OK":
                 logger.warning(
                     "IMAPClientWrapper._process_new_messages: SEARCH failed — account=%s lines=%s",
