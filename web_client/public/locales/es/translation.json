@@ -522,7 +522,9 @@
       "membersUpdated": "Miembros actualizados",
       "deptScope": "Ámbito de departamento",
       "allDepartments": "Todos (nivel org)",
-      "entriesOtherScopes": "entradas en otros ámbitos"
+      "entriesOtherScopes": "entradas en otros ámbitos",
+      "managedBySso": "Gestionado por SSO",
+      "managedBySsoHint": "Este grupo está gestionado automáticamente por la sincronización SSO. No se puede editar manualmente."
     },
     "toolConfigs": {
       "title": "Configuraciones de Herramientas",

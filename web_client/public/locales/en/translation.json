@@ -552,7 +552,9 @@
       "membersUpdated": "Members updated",
       "deptScope": "Department scope",
       "allDepartments": "All (org-wide)",
-      "entriesOtherScopes": "entries assigned in other scopes"
+      "entriesOtherScopes": "entries assigned in other scopes",
+      "managedBySso": "Managed by SSO",
+      "managedBySsoHint": "This group is managed automatically by SSO sync. It cannot be edited manually."
     },
     "toolConfigs": {
       "title": "Tool Configurations",

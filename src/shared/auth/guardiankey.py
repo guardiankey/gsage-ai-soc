@@ -91,7 +91,7 @@ class GuardianKeyService:
             "clientReverse": client_reverse,
             "userName": username,
             "authMethod": "",
-            "loginFailed": login_failed,
+            "loginFailed": str(login_failed),
             "userAgent": user_agent[:500],
             "psychometricTyped": "",
             "psychometricImage": "",
@@ -154,18 +154,43 @@ class GuardianKeyService:
             }
             url = f"{settings.gk_api_url.rstrip('/')}/v2/checkaccess"
 
+            logger.debug(
+                "GuardianKey: POST %s authgroup=%s message_len=%d",
+                url, settings.gk_authgroup_id, len(message_json),
+            )
             async with httpx.AsyncClient(timeout=settings.gk_timeout_seconds) as client:
                 resp = await client.post(url, json=body)
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "GuardianKey: HTTP %d from %s body=%s",
+                        resp.status_code, url, resp.text[:500],
+                    )
                 resp.raise_for_status()
+                raw_body = resp.text
                 data = resp.json()
 
+            response_str = str(data.get("response", "ERROR"))
+            if response_str == "ERROR":
+                # API responded 200 OK but returned ERROR — usually a hash
+                # mismatch, unknown authgroup/org, or a malformed message.
+                logger.warning(
+                    "GuardianKey: API returned ERROR — raw=%s "
+                    "(check GK_KEY/GK_IV/GK_AUTHGROUP_ID/GK_ORG_ID and message format)",
+                    raw_body[:500],
+                )
+                logger.debug(
+                    "GuardianKey: ERROR sent message=%s hash=%s authgroupId=%s",
+                    message_json[:1000], hash_val, settings.gk_authgroup_id,
+                )
             return GKResponse(
-                response=str(data.get("response", "ERROR")),
+                response=response_str,
                 risk=float(data.get("risk", 0.0)),
             )
 
         except Exception as exc:
-            logger.warning("GuardianKey check_access failed (fail-open): %s", exc)
+            logger.warning(
+                "GuardianKey check_access failed (fail-open): %r", exc,
+            )
             return GKResponse(response="ERROR", risk=0.0)
 
     async def notify_event(
@@ -200,8 +225,17 @@ class GuardianKeyService:
             }
             url = f"{settings.gk_api_url.rstrip('/')}/v2/checkaccess"
 
+            logger.debug(
+                "GuardianKey: POST %s (notify) authgroup=%s",
+                url, settings.gk_authgroup_id,
+            )
             async with httpx.AsyncClient(timeout=settings.gk_timeout_seconds) as client:
-                await client.post(url, json=body)
+                resp = await client.post(url, json=body)
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "GuardianKey notify: HTTP %d from %s body=%s",
+                        resp.status_code, url, resp.text[:500],
+                    )
 
         except Exception as exc:
-            logger.warning("GuardianKey notify_event failed: %s", exc)
+            logger.warning("GuardianKey notify_event failed: %r", exc)

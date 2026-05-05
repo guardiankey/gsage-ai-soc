@@ -469,22 +469,28 @@ class IMAPClientWrapper:
                 )
                 return
 
-        # Parse UID/sequence-number list from response lines.
+        # Parse UID/sequence-number list from the first line of the SEARCH
+        # response. Subsequent lines may contain unrelated untagged responses
+        # (e.g. ``* 8 EXISTS`` that arrived while the command was in flight)
+        # whose numeric tokens would otherwise be confused with search hits
+        # \u2014 leading to FETCHes for UIDs that do not exist and a
+        # ``The specified message set is invalid`` rejection from the server.
         ids: list[str] = []
-        for part in search_resp.lines:
-            if isinstance(part, bytes):
-                tokens = part.decode(errors="replace").split()
-                ids.extend(t for t in tokens if t.isdigit())
-            elif isinstance(part, str):
-                ids.extend(t for t in part.split() if t.isdigit())
+        if search_resp.lines:
+            first = search_resp.lines[0]
+            if isinstance(first, bytes):
+                first = first.decode(errors="replace")
+            if isinstance(first, str):
+                ids = [t for t in first.split() if t.isdigit()]
 
-        logger.debug(
+        logger.info(
             "IMAPClientWrapper._process_new_messages: found %d UNSEEN message(s) "
-            "— account=%s uid_search=%s ids=%s",
+            "\u2014 account=%s uid_search=%s ids=%s raw_lines=%s",
             len(ids),
             self._account.email,
             self._uid_search_supported,
             ids,
+            search_resp.lines,
         )
 
         for msg_id in ids:
@@ -493,6 +499,15 @@ class IMAPClientWrapper:
                     fetch_resp = await self._client.uid("FETCH", msg_id, "(RFC822)")
                 else:
                     fetch_resp = await self._client.fetch(msg_id, "(RFC822)")
+                # Server may reject the FETCH (e.g. UID expunged between
+                # SEARCH and FETCH, or a stale UID). Skip and move on.
+                if fetch_resp.result != "OK":
+                    logger.info(
+                        "IMAPClientWrapper._process_new_messages: FETCH %s returned "
+                        "\u2014 account=%s id=%s lines=%s \u2014 skipping",
+                        fetch_resp.result, self._account.email, msg_id, fetch_resp.lines,
+                    )
+                    continue
                 raw = _extract_rfc822(fetch_resp)
                 if raw:
                     # Pass msg_id (UID or seq number) so the callback can
@@ -501,7 +516,7 @@ class IMAPClientWrapper:
                 else:
                     logger.warning(
                         "IMAPClientWrapper._process_new_messages: empty RFC822 body "
-                        "— account=%s id=%s fetch_lines=%s",
+                        "\u2014 account=%s id=%s fetch_lines=%s",
                         self._account.email,
                         msg_id,
                         fetch_resp.lines,

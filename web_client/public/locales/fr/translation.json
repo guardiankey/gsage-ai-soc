@@ -522,7 +522,9 @@
       "membersUpdated": "Membres mis à jour",
       "deptScope": "Périmètre de département",
       "allDepartments": "Tous (à l'échelle de l'org)",
-      "entriesOtherScopes": "entrées dans d'autres périmètres"
+      "entriesOtherScopes": "entrées dans d'autres périmètres",
+      "managedBySso": "Géré par SSO",
+      "managedBySsoHint": "Ce groupe est géré automatiquement par la synchronisation SSO. Il ne peut pas être modifié manuellement."
     },
     "toolConfigs": {
       "title": "Configurations d'Outils",

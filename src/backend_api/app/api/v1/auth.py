@@ -347,17 +347,51 @@ async def _guardiankey_check(
 
     settings = get_settings()
     if not settings.gk_enabled:
+        _logger.debug("GuardianKey: disabled (gk_enabled=false), skipping")
         return
 
     client_ip = _client_ip(request) or ""
     user_agent = request.headers.get("User-Agent", "")[:500]
+
+    # Surface configuration gaps loudly — with gk_enabled=true but missing
+    # credentials the API call would fail silently (fail-open) and look
+    # exactly like "GuardianKey not integrated".
+    missing = [
+        name for name, value in (
+            ("GK_ORG_ID", settings.gk_org_id),
+            ("GK_AUTHGROUP_ID", settings.gk_authgroup_id),
+            ("GK_KEY", settings.gk_key),
+            ("GK_IV", settings.gk_iv),
+        ) if not value
+    ]
+    if missing:
+        _logger.warning(
+            "GuardianKey: enabled but missing required settings %s — "
+            "requests will be rejected by the API. Check .env on backend_api.",
+            missing,
+        )
+
     gk = GuardianKeyService()
 
     if login_failed:
+        _logger.info(
+            "GuardianKey: notify_event (failed login) — user=%s ip=%s url=%s/v2/checkaccess",
+            username, client_ip, settings.gk_api_url.rstrip("/"),
+        )
         await gk.notify_event(username, username, client_ip, user_agent, login_failed=1)
         return
 
+    _logger.info(
+        "GuardianKey: check_access — user=%s ip=%s url=%s/v2/checkaccess",
+        username, client_ip, settings.gk_api_url.rstrip("/"),
+    )
     result = await gk.check_access(username, username, client_ip, user_agent)
+    _logger.info(
+        "GuardianKey: check_access result — user=%s response=%s risk=%.3f "
+        "should_block=%s should_notify=%s",
+        username, result.response, result.risk,
+        result.should_block, result.should_notify,
+    )
     if result.should_notify:
         _logger.warning(
             "GuardianKey risk notification for '%s': response=%s risk=%.3f",

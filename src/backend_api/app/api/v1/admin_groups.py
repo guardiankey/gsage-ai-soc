@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.backend_api.app.api.deps import get_db, require_org_admin
+from src.shared.auth.user_sync import is_managed_group_name
 from src.backend_api.app.schemas.admin import (
     GroupCreate,
     GroupDetail,
@@ -149,6 +150,11 @@ async def create_group(
     db: AsyncSession = Depends(get_db),
 ) -> GroupOut:
     """Create a new group in the organization."""
+    if is_managed_group_name(payload.name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Group names starting with '_tpl:' are reserved for SSO sync.",
+        )
     clash = await db.execute(
         select(GSageGroup).where(
             GSageGroup.org_id == org_id,
@@ -238,6 +244,12 @@ async def update_group(
     if group is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
 
+    if is_managed_group_name(group.name):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This group is managed by SSO sync and cannot be edited manually.",
+        )
+
     if payload.name is not None and payload.name != group.name:
         clash = await db.execute(
             select(GSageGroup).where(
@@ -289,6 +301,12 @@ async def delete_group(
     if group is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
 
+    if is_managed_group_name(group.name):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This group is managed by SSO sync and cannot be deleted manually.",
+        )
+
     affected_user_ids = [u.id for u in group.users]
 
     await db.delete(group)
@@ -327,6 +345,12 @@ async def update_group_members(
     group = result.scalar_one_or_none()
     if group is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+
+    if is_managed_group_name(group.name):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This group is managed by SSO sync; membership is reconciled at login.",
+        )
 
     # Capture old members for cache invalidation
     old_user_ids = {u.id for u in group.users}
@@ -424,6 +448,12 @@ async def update_group_permissions(
     group = result.scalar_one_or_none()
     if group is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+
+    if is_managed_group_name(group.name):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This group is managed by SSO sync; permissions come from the template.",
+        )
 
     # Capture members for cache invalidation after commit
     affected_user_ids = [u.id for u in group.users]

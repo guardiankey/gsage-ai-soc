@@ -522,7 +522,9 @@
       "membersUpdated": "Mitglieder aktualisiert",
       "deptScope": "Abteilungsbereich",
       "allDepartments": "Alle (organisationsweit)",
-      "entriesOtherScopes": "Einträge in anderen Bereichen"
+      "entriesOtherScopes": "Einträge in anderen Bereichen",
+      "managedBySso": "Über SSO verwaltet",
+      "managedBySsoHint": "Diese Gruppe wird automatisch durch die SSO-Synchronisierung verwaltet. Sie kann nicht manuell bearbeitet werden."
     },
     "toolConfigs": {
       "title": "Tool-Konfigurationen",

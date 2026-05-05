@@ -522,7 +522,9 @@
       "membersUpdated": "メンバーが更新されました",
       "deptScope": "部門スコープ",
       "allDepartments": "すべて（組織全体）",
-      "entriesOtherScopes": "他のスコープのエントリ"
+      "entriesOtherScopes": "他のスコープのエントリ",
+      "managedBySso": "SSOにより管理",
+      "managedBySsoHint": "このグループはSSO同期によって自動管理されています。手動編集はできません。"
     },
     "toolConfigs": {
       "title": "ツール設定",

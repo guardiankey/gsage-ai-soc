@@ -149,7 +149,9 @@ export default function GroupsPage() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {groups?.map((g) => (
+              {groups?.map((g) => {
+                const managed = g.name.startsWith('_tpl:')
+                return (
                 <tr key={g.id} className="hover:bg-muted/30 transition-colors">
                   <td className="px-4 py-3">
                     <button
@@ -158,6 +160,11 @@ export default function GroupsPage() {
                     >
                       {g.name}
                     </button>
+                    {managed && (
+                      <Badge variant="secondary" className="ml-2 text-xs" title={t('admin.groups.managedBySsoHint')}>
+                        {t('admin.groups.managedBySso')}
+                      </Badge>
+                    )}
                     {g.description && (
                       <p className="text-xs text-muted-foreground mt-0.5">{g.description}</p>
                     )}
@@ -175,16 +182,30 @@ export default function GroupsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 justify-end">
-                      <Button variant="ghost" size="icon" onClick={() => openDetail(g)}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => openDetail(g)}
+                        disabled={managed}
+                        title={managed ? t('admin.groups.managedBySsoHint') : undefined}
+                      >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteTarget(g)}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive"
+                        onClick={() => setDeleteTarget(g)}
+                        disabled={managed}
+                        title={managed ? t('admin.groups.managedBySsoHint') : undefined}
+                      >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
               {groups?.length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">{t('common.noResults')}</td>

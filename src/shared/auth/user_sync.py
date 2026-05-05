@@ -26,18 +26,47 @@ import logging
 import uuid
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import and_, delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.shared.auth.base import AuthResult
-from src.shared.models.group import GSageGroup
+from src.shared.models.group import GSageGroup, gsage_group_permissions
 from src.shared.models.organization import GSageOrganization
+from src.shared.models.permission import GSagePermission
 from src.shared.models.user import GSageUser, gsage_user_groups
 from src.shared.models.user_organization import GSageUserOrganization
 from src.shared.services import department_service as dept_svc
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Managed (SSO-synced) template groups
+#
+# Permission templates declared at the org level
+# (``GSageOrganization.auth_config["permission_templates"]``) are materialised
+# into local ``GSageGroup`` rows whose names follow a fixed naming convention:
+#
+#   - ``_tpl:<template_name>``                          → global (dept_id NULL)
+#   - ``_tpl:<template_name>:dept=<dept_uuid>``         → dept-scoped
+#
+# These groups are owned by the SSO sync code; the admin API refuses to mutate
+# them (see ``MANAGED_GROUP_PREFIX`` checks in ``admin_groups``).
+# ---------------------------------------------------------------------------
+
+MANAGED_GROUP_PREFIX = "_tpl:"
+
+
+def is_managed_group_name(name: str) -> bool:
+    """Return True for SSO-managed permission-template groups."""
+    return isinstance(name, str) and name.startswith(MANAGED_GROUP_PREFIX)
+
+
+def _managed_group_name(template: str, dept_id: Optional[uuid.UUID]) -> str:
+    if dept_id is None:
+        return f"{MANAGED_GROUP_PREFIX}{template}"
+    return f"{MANAGED_GROUP_PREFIX}{template}:dept={dept_id}"
 
 
 async def upsert_external_user(
@@ -226,6 +255,62 @@ async def upsert_external_user(
         external_groups=result.groups,
         provider_config=provider_config,
     )
+
+    # ── 6. Sync managed permission-template groups ──────────────────────────
+    # Templates live at the org level (not per-provider) so they can be
+    # reused across SSO providers.  Each matched ``group_mapping`` entry can
+    # declare:
+    #   - ``permission_templates_global``: list[str]
+    #   - ``permission_templates_depts``: list[list[str]] (positional, see
+    #     ``_extract_template_assignments``)
+    template_catalog: dict = {}
+    try:
+        template_catalog = (org.auth_config or {}).get("permission_templates") or {}
+    except Exception:  # noqa: BLE001 — auth_config decryption errors must not block login
+        logger.exception(
+            "user_sync: failed to read permission_templates from org '%s' auth_config",
+            org.slug,
+        )
+
+    aggregated_global: set[str] = set()
+    aggregated_by_dept: dict[str, set[str]] = {}
+    for ext_group in result.groups:
+        mapping_entry = group_mapping.get(ext_group)
+        if not mapping_entry:
+            continue
+        glb, by_dept = _extract_template_assignments(
+            mapping_entry, user_email=identity.email, org_slug=org.slug,
+        )
+        aggregated_global.update(glb)
+        for dn, tpls in by_dept.items():
+            aggregated_by_dept.setdefault(dn, set()).update(tpls)
+
+    # Always run the sync (even with no templates) so stale ``_tpl:*``
+    # memberships from previous logins are pruned.
+    await _sync_managed_template_groups(
+        db=db,
+        user=user,
+        org=org,
+        templates_global=aggregated_global,
+        templates_by_dept_name=aggregated_by_dept,
+        template_catalog=template_catalog,
+    )
+
+    # Invalidate the runtime permission cache for this user — group/dept
+    # membership and template-derived permissions may have changed.
+    try:
+        from src.shared.cache.permissions_cache import (
+            get_perm_redis_client,
+            invalidate_user_permissions,
+        )
+        rc = get_perm_redis_client()
+        if rc is not None:
+            await invalidate_user_permissions(rc, org.id, user.id)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "user_sync: failed to invalidate permission cache for user '%s'",
+            identity.email,
+        )
 
     return user, membership
 
@@ -485,5 +570,351 @@ async def _sync_department_memberships(
                 )
             except dept_svc.DepartmentNotFound:
                 pass
+
+    await db.flush()
+
+
+# ---------------------------------------------------------------------------
+# Permission-template synchronisation
+# ---------------------------------------------------------------------------
+
+
+def _extract_template_assignments(
+    mapping_entry: dict,
+    *,
+    user_email: str,
+    org_slug: str,
+) -> tuple[list[str], dict[str, list[str]]]:
+    """Parse ``permission_templates_global`` / ``permission_templates_depts``.
+
+    Returns a tuple:
+      - ``templates_global``: list of template names applied org-wide.
+      - ``templates_by_dept_name``: ``{dept_name: [template, ...]}`` for the
+        dept-scoped templates of this entry.
+
+    Validation rules (mirrors the design notes — invalid shapes log a warning
+    and contribute nothing rather than aborting the whole login):
+
+    * ``permission_templates_global`` must be a list of strings.
+    * ``permission_templates_depts`` must be a list of lists of strings whose
+      outer length is ``0``, ``1`` or ``len(departments)``.
+        - length ``1`` → the inner list is applied to every dept of the entry.
+        - length matching ``len(departments)`` → positional 1:1 alignment.
+        - any other length → warning + skip.
+    * Templates referenced here are merely names; existence in the catalog is
+      validated later by :func:`_sync_managed_template_groups`.
+    """
+    templates_global: list[str] = []
+    raw_global = mapping_entry.get("permission_templates_global")
+    if isinstance(raw_global, list):
+        for t in raw_global:
+            if isinstance(t, str) and t.strip():
+                templates_global.append(t.strip())
+    elif raw_global is not None:
+        logger.warning(
+            "user_sync: invalid permission_templates_global for user='%s' "
+            "org='%s' (expected list, got %s)",
+            user_email, org_slug, type(raw_global).__name__,
+        )
+
+    templates_by_dept_name: dict[str, list[str]] = {}
+    raw_depts = mapping_entry.get("permission_templates_depts")
+    if raw_depts is None:
+        return templates_global, templates_by_dept_name
+    if not isinstance(raw_depts, list):
+        logger.warning(
+            "user_sync: invalid permission_templates_depts for user='%s' "
+            "org='%s' (expected list of lists, got %s)",
+            user_email, org_slug, type(raw_depts).__name__,
+        )
+        return templates_global, templates_by_dept_name
+    if not raw_depts:
+        return templates_global, templates_by_dept_name
+
+    # Build the ordered department list of THIS entry, mirroring the rules
+    # in ``_extract_dept_assignments`` (department + departments, dedup'd).
+    dept_names: list[str] = []
+    single = mapping_entry.get("department")
+    if isinstance(single, str) and single.strip():
+        dept_names.append(single.strip())
+    multi = mapping_entry.get("departments")
+    if isinstance(multi, list):
+        for d in multi:
+            if isinstance(d, str) and d.strip() and d.strip() not in dept_names:
+                dept_names.append(d.strip())
+
+    if not dept_names:
+        logger.warning(
+            "user_sync: permission_templates_depts present but no "
+            "department/departments declared (user='%s' org='%s') — skipping",
+            user_email, org_slug,
+        )
+        return templates_global, templates_by_dept_name
+
+    # Validate outer length.
+    if len(raw_depts) == 1:
+        broadcast = [t for t in raw_depts[0] if isinstance(t, str) and t.strip()]
+        for dn in dept_names:
+            templates_by_dept_name.setdefault(dn, []).extend(broadcast)
+    elif len(raw_depts) == len(dept_names):
+        for dn, tpl_list in zip(dept_names, raw_depts):
+            if not isinstance(tpl_list, list):
+                logger.warning(
+                    "user_sync: invalid inner type in permission_templates_depts "
+                    "for dept='%s' user='%s' org='%s'",
+                    dn, user_email, org_slug,
+                )
+                continue
+            cleaned = [t for t in tpl_list if isinstance(t, str) and t.strip()]
+            templates_by_dept_name.setdefault(dn, []).extend(cleaned)
+    else:
+        logger.warning(
+            "user_sync: permission_templates_depts length mismatch "
+            "(got %d, expected 0/1/%d) for user='%s' org='%s' — skipping "
+            "dept-scoped templates of this mapping entry",
+            len(raw_depts), len(dept_names), user_email, org_slug,
+        )
+
+    return templates_global, templates_by_dept_name
+
+
+async def _ensure_managed_group(
+    db: AsyncSession,
+    org: GSageOrganization,
+    name: str,
+    description: str,
+) -> GSageGroup:
+    """Find-or-create the managed group with the given canonical name."""
+    res = await db.execute(
+        select(GSageGroup).where(
+            GSageGroup.org_id == org.id,
+            GSageGroup.name == name,
+        )
+    )
+    group = res.scalar_one_or_none()
+    if group is None:
+        group = GSageGroup(org_id=org.id, name=name, description=description)
+        db.add(group)
+        await db.flush()
+        logger.info(
+            "user_sync: created managed group '%s' in org '%s'",
+            name, org.slug,
+        )
+    return group
+
+
+async def _reconcile_managed_group_permissions(
+    db: AsyncSession,
+    group: GSageGroup,
+    permission_ids: set[uuid.UUID],
+    dept_id: Optional[uuid.UUID],
+) -> None:
+    """Make ``group``'s permissions for the given dept scope match exactly.
+
+    Operates only on rows that already match the same ``dept_id`` scope —
+    other dept-scoped rows for the same group are left untouched (so that a
+    single managed group could in theory hold rows for multiple scopes,
+    although in practice each managed group is scoped to one dept).
+    """
+    # Current rows for this (group, scope)
+    if dept_id is None:
+        scope_filter = gsage_group_permissions.c.dept_id.is_(None)
+    else:
+        scope_filter = gsage_group_permissions.c.dept_id == dept_id
+    cur_res = await db.execute(
+        select(gsage_group_permissions.c.permission_id).where(
+            and_(
+                gsage_group_permissions.c.group_id == group.id,
+                scope_filter,
+            )
+        )
+    )
+    current_ids = {row[0] for row in cur_res.all()}
+
+    to_add = permission_ids - current_ids
+    to_remove = current_ids - permission_ids
+
+    if to_remove:
+        await db.execute(
+            delete(gsage_group_permissions).where(
+                and_(
+                    gsage_group_permissions.c.group_id == group.id,
+                    scope_filter,
+                    gsage_group_permissions.c.permission_id.in_(to_remove),
+                )
+            )
+        )
+    if to_add:
+        await db.execute(
+            insert(gsage_group_permissions).values(
+                [
+                    {
+                        "group_id": group.id,
+                        "permission_id": pid,
+                        "dept_id": dept_id,
+                    }
+                    for pid in to_add
+                ]
+            )
+        )
+    if to_add or to_remove:
+        await db.flush()
+
+
+async def _resolve_template_permission_ids(
+    db: AsyncSession,
+    template_catalog: dict,
+    template_name: str,
+    *,
+    org_slug: str,
+) -> Optional[set[uuid.UUID]]:
+    """Return the permission IDs declared by a template, or None if missing.
+
+    Unknown permission tags within a template are logged and skipped.
+    """
+    tpl = template_catalog.get(template_name)
+    if not isinstance(tpl, dict):
+        logger.warning(
+            "user_sync: permission template '%s' not found in org '%s' "
+            "auth_config — skipping",
+            template_name, org_slug,
+        )
+        return None
+    raw_perms = tpl.get("permissions") or []
+    if not isinstance(raw_perms, list):
+        logger.warning(
+            "user_sync: permission template '%s' has invalid permissions "
+            "field (expected list) — skipping",
+            template_name,
+        )
+        return None
+    tags = [t for t in raw_perms if isinstance(t, str) and t.strip()]
+    if not tags:
+        return set()
+    res = await db.execute(
+        select(GSagePermission.id, GSagePermission.tag).where(
+            GSagePermission.tag.in_(tags)
+        )
+    )
+    rows = res.all()
+    found_tags = {r[1] for r in rows}
+    missing = set(tags) - found_tags
+    if missing:
+        logger.warning(
+            "user_sync: permission template '%s' references unknown tags %s — "
+            "ignored (org='%s')",
+            template_name, sorted(missing), org_slug,
+        )
+    return {r[0] for r in rows}
+
+
+async def _sync_managed_template_groups(
+    db: AsyncSession,
+    user: GSageUser,
+    org: GSageOrganization,
+    templates_global: set[str],
+    templates_by_dept_name: dict[str, set[str]],
+    template_catalog: dict,
+) -> None:
+    """Materialise permission templates as managed local groups + memberships.
+
+    See module-level comment for the naming convention.
+
+    Stale-removal: the user is removed from any managed group (``_tpl:*``) in
+    this org that is not in the desired set computed from the current login.
+    Empty managed groups are kept (cheap; safer than racing other concurrent
+    logins).
+    """
+    if not template_catalog and not templates_global and not templates_by_dept_name:
+        # Nothing to do AND nothing to clean up beyond stale memberships.
+        # We still need to prune the user from any old _tpl:* rows.
+        pass
+
+    # ── 1. Resolve dept names → dept_ids (org-scoped) ───────────────────────
+    dept_ids_by_name: dict[str, uuid.UUID] = {}
+    if templates_by_dept_name:
+        from src.shared.models.department import GSageDepartment
+        dres = await db.execute(
+            select(GSageDepartment.id, GSageDepartment.name).where(
+                GSageDepartment.org_id == org.id,
+                GSageDepartment.name.in_(templates_by_dept_name.keys()),
+            )
+        )
+        dept_ids_by_name = {row[1]: row[0] for row in dres.all()}
+        for dn in set(templates_by_dept_name) - set(dept_ids_by_name):
+            logger.warning(
+                "user_sync: permission_templates_depts references unknown "
+                "department '%s' in org '%s' — templates skipped",
+                dn, org.slug,
+            )
+
+    # ── 2. Build desired set of (group_name, template, dept_id, perm_ids) ───
+    desired: list[tuple[str, str, Optional[uuid.UUID], set[uuid.UUID]]] = []
+
+    for tpl in sorted(templates_global):
+        perm_ids = await _resolve_template_permission_ids(
+            db, template_catalog, tpl, org_slug=org.slug
+        )
+        if perm_ids is None:
+            continue
+        gname = _managed_group_name(tpl, None)
+        desired.append((gname, tpl, None, perm_ids))
+
+    for dept_name, tpl_set in templates_by_dept_name.items():
+        dept_id = dept_ids_by_name.get(dept_name)
+        if dept_id is None:
+            continue
+        for tpl in sorted(tpl_set):
+            perm_ids = await _resolve_template_permission_ids(
+                db, template_catalog, tpl, org_slug=org.slug
+            )
+            if perm_ids is None:
+                continue
+            gname = _managed_group_name(tpl, dept_id)
+            desired.append((gname, tpl, dept_id, perm_ids))
+
+    desired_group_names = {d[0] for d in desired}
+
+    # ── 3. Apply: ensure group, reconcile perms, add membership ─────────────
+    res = await db.execute(
+        select(GSageUser)
+        .where(GSageUser.id == user.id)
+        .options(selectinload(GSageUser.groups))
+    )
+    user_with_groups = res.scalar_one()
+    current_managed = {
+        g for g in user_with_groups.groups
+        if g.org_id == org.id and is_managed_group_name(g.name)
+    }
+    current_managed_names = {g.name for g in current_managed}
+
+    for gname, tpl, dept_id, perm_ids in desired:
+        if dept_id is None:
+            description = (
+                f"Auto-managed by SSO — permission template '{tpl}' (org-wide). "
+                "Do not edit manually."
+            )
+        else:
+            description = (
+                f"Auto-managed by SSO — permission template '{tpl}' "
+                f"scoped to dept_id={dept_id}. Do not edit manually."
+            )
+        group = await _ensure_managed_group(db, org, gname, description)
+        await _reconcile_managed_group_permissions(db, group, perm_ids, dept_id)
+        if gname not in current_managed_names:
+            user_with_groups.groups.append(group)
+            logger.info(
+                "user_sync: added user '%s' to managed group '%s'",
+                user.email, gname,
+            )
+
+    # ── 4. Stale removal: drop user from managed groups no longer desired ──
+    for group in list(current_managed):
+        if group.name not in desired_group_names:
+            user_with_groups.groups.remove(group)
+            logger.info(
+                "user_sync: removed user '%s' from stale managed group '%s'",
+                user.email, group.name,
+            )
 
     await db.flush()

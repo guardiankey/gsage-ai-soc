@@ -522,7 +522,9 @@
       "membersUpdated": "تم تحديث الأعضاء",
       "deptScope": "نطاق القسم",
       "allDepartments": "الكل (على مستوى المؤسسة)",
-      "entriesOtherScopes": "مدخلات في نطاقات أخرى"
+      "entriesOtherScopes": "مدخلات في نطاقات أخرى",
+      "managedBySso": "مُدار بواسطة SSO",
+      "managedBySsoHint": "هذه المجموعة تتم إدارتها تلقائياً بواسطة مزامنة SSO ولا يمكن تعديلها يدوياً."
     },
     "toolConfigs": {
       "title": "إعدادات الأدوات",

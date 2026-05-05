@@ -153,6 +153,35 @@ def register(parser: argparse.ArgumentParser) -> None:
     gc.add_argument("--provider", required=True)
     gc.set_defaults(_func=_run_get_config)
 
+    # get-templates (raw JSON dump of org-level permission_templates)
+    gt = sub.add_parser(
+        "get-templates",
+        help="Print the org-level permission_templates JSON (for round-trip editing)",
+    )
+    gt.add_argument("--org-id", default=None)
+    gt.add_argument("--org-slug", default=None)
+    gt.set_defaults(_func=_run_get_templates)
+
+    # set-templates (replace the entire permission_templates dict)
+    st = sub.add_parser(
+        "set-templates",
+        help=(
+            "Replace org-level permission_templates from JSON read on stdin. "
+            "Pass an empty object '{}' to clear."
+        ),
+    )
+    st.add_argument("--org-id", default=None)
+    st.add_argument("--org-slug", default=None)
+    st.add_argument(
+        "--stdin",
+        dest="from_stdin",
+        action="store_true",
+        required=True,
+        help="Read the templates JSON from stdin (required for safety).",
+    )
+    st.add_argument("--json", dest="json_out", action="store_true")
+    st.set_defaults(_func=_run_set_templates)
+
     # domain add/list/remove
     dom = sub.add_parser("domain", help="Manage email-domain → org mappings")
     dom_sub = dom.add_subparsers(dest="domain_action", required=True)
@@ -199,6 +228,14 @@ def _run_get_mapping(args: argparse.Namespace) -> int:
 
 def _run_get_config(args: argparse.Namespace) -> int:
     return asyncio.run(_get_config_async(args))
+
+
+def _run_get_templates(args: argparse.Namespace) -> int:
+    return asyncio.run(_get_templates_async(args))
+
+
+def _run_set_templates(args: argparse.Namespace) -> int:
+    return asyncio.run(_set_templates_async(args))
 
 
 def _run_domain_add(args: argparse.Namespace) -> int:
@@ -521,6 +558,107 @@ async def _get_config_async(args: argparse.Namespace) -> int:
     # them. Treat the resulting file as a secret.
     json.dump(cfg, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Implementation: get-templates / set-templates (org-level permission templates)
+# ---------------------------------------------------------------------------
+
+
+async def _get_templates_async(args: argparse.Namespace) -> int:
+    from src.shared.database import _get_session_maker  # noqa: PLC0415
+    from src.shared.models import GSageOrganization  # noqa: PLC0415
+
+    session_maker = _get_session_maker()
+    async with session_maker() as db:
+        org_id = await resolve_org_id(db, org_id=args.org_id, org_slug=args.org_slug)
+        org = await db.get(GSageOrganization, org_id)
+        if org is None:
+            print(f"ERROR: org {org_id} not found", file=sys.stderr)
+            return 1
+        templates = (org.auth_config or {}).get("permission_templates") or {}
+
+    json.dump(templates, sys.stdout, indent=2, ensure_ascii=False)
+    sys.stdout.write("\n")
+    return 0
+
+
+def _validate_templates_payload(payload: object) -> tuple[Optional[dict], Optional[str]]:
+    """Validate the shape of a templates payload.
+
+    Returns ``(cleaned, error)``. On error ``cleaned`` is None.
+    """
+    if not isinstance(payload, dict):
+        return None, "templates payload must be a JSON object"
+
+    cleaned: dict = {}
+    for name, body in payload.items():
+        if not isinstance(name, str) or not name.strip():
+            return None, f"invalid template name: {name!r}"
+        if ":" in name:
+            return None, (
+                f"template name '{name}' must not contain ':' "
+                "(reserved for managed-group naming)"
+            )
+        if not isinstance(body, dict):
+            return None, f"template '{name}': value must be an object"
+        perms = body.get("permissions")
+        if not isinstance(perms, list) or not all(
+            isinstance(p, str) and p.strip() for p in perms
+        ):
+            return None, (
+                f"template '{name}': 'permissions' must be a list of permission tags"
+            )
+        description = body.get("description")
+        if description is not None and not isinstance(description, str):
+            return None, f"template '{name}': 'description' must be a string"
+        entry: dict = {"permissions": list(perms)}
+        if description:
+            entry["description"] = description
+        cleaned[name.strip()] = entry
+    return cleaned, None
+
+
+async def _set_templates_async(args: argparse.Namespace) -> int:
+    from src.shared.database import _get_session_maker  # noqa: PLC0415
+    from src.shared.models import GSageOrganization  # noqa: PLC0415
+
+    raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError as exc:
+        print(f"ERROR: invalid JSON on stdin: {exc}", file=sys.stderr)
+        return 2
+
+    cleaned, err = _validate_templates_payload(payload)
+    if err is not None:
+        print(f"ERROR: {err}", file=sys.stderr)
+        return 2
+    assert cleaned is not None
+
+    session_maker = _get_session_maker()
+    async with session_maker() as db:
+        org_id = await resolve_org_id(db, org_id=args.org_id, org_slug=args.org_slug)
+        org = await db.get(GSageOrganization, org_id)
+        if org is None:
+            print(f"ERROR: org {org_id} not found", file=sys.stderr)
+            return 1
+        all_config: dict[str, Any] = dict(org.auth_config or {})
+        all_config["permission_templates"] = cleaned
+        org.auth_config = all_config
+        await db.commit()
+
+    print_result(
+        {
+            "status": "ok",
+            "message": (
+                f"set {len(cleaned)} permission template(s) on org '{org.slug}'"
+            ),
+            "details": {"templates": sorted(cleaned.keys())},
+        },
+        json_out=args.json_out,
+    )
     return 0
 
 

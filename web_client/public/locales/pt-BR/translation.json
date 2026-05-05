@@ -551,7 +551,9 @@
       "membersUpdated": "Membros atualizados",
       "deptScope": "Escopo de departamento",
       "allDepartments": "Todos (org-wide)",
-      "entriesOtherScopes": "entradas em outros escopos"
+      "entriesOtherScopes": "entradas em outros escopos",
+      "managedBySso": "Gerenciado pelo SSO",
+      "managedBySsoHint": "Este grupo é gerenciado automaticamente pela sincronização SSO. Não pode ser editado manualmente."
     },
     "toolConfigs": {
       "title": "Configurações de Ferramentas",

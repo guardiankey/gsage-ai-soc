@@ -34,6 +34,7 @@ from src.backend_api.app.api.deps import get_db
 from src.backend_api.app.schemas.auth import TokenResponse
 from src.shared.auth import oidc_state
 from src.shared.auth.backends.entra_oidc import EntraOIDCProvider
+from src.shared.auth.guardiankey import GuardianKeyService
 from src.shared.auth.registry import get_registry
 from src.shared.auth.user_sync import upsert_external_user
 from src.shared.config.settings import get_settings
@@ -47,6 +48,69 @@ from src.shared.security.auth import (
 from src.backend_api.app.core.tenant import permissions_for_role
 
 logger = logging.getLogger(__name__)
+
+
+def _client_ip(request: Request) -> str:
+    """Extract the client IP, honouring X-Forwarded-For when behind a proxy."""
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return ""
+
+
+async def _gk_notify_failed(request: Request, username: str, reason: str) -> None:
+    """Fire-and-forget notification to GuardianKey for an SSO failure.
+
+    No-op when GuardianKey is disabled. Failures here are swallowed by the
+    service (fail-open).
+    """
+    settings = get_settings()
+    if not settings.gk_enabled:
+        return
+    client_ip = _client_ip(request)
+    user_agent = request.headers.get("User-Agent", "")[:500]
+    logger.info(
+        "GuardianKey: SSO notify_event (failed) — user=%s ip=%s reason=%s",
+        username, client_ip, reason,
+    )
+    await GuardianKeyService().notify_event(
+        username, username, client_ip, user_agent, login_failed=1,
+    )
+
+
+async def _gk_check_or_block(request: Request, username: str) -> bool:
+    """Run GuardianKey check_access for an SSO success.
+
+    Returns ``True`` when the login is allowed (or GK is disabled / errored —
+    fail-open), ``False`` when GK responded BLOCK and the caller must redirect
+    to the login page with an error.
+    """
+    settings = get_settings()
+    if not settings.gk_enabled:
+        return True
+    client_ip = _client_ip(request)
+    user_agent = request.headers.get("User-Agent", "")[:500]
+    logger.info(
+        "GuardianKey: SSO check_access — user=%s ip=%s url=%s/v2/checkaccess",
+        username, client_ip, settings.gk_api_url.rstrip("/"),
+    )
+    result = await GuardianKeyService().check_access(
+        username, username, client_ip, user_agent,
+    )
+    logger.info(
+        "GuardianKey: SSO check_access result — user=%s response=%s risk=%.3f "
+        "should_block=%s should_notify=%s",
+        username, result.response, result.risk,
+        result.should_block, result.should_notify,
+    )
+    if result.should_notify:
+        logger.warning(
+            "GuardianKey SSO risk notification for '%s': response=%s risk=%.3f",
+            username, result.response, result.risk,
+        )
+    return not result.should_block
 
 router = APIRouter()
 
@@ -249,6 +313,9 @@ async def sso_callback(
         logger.warning(
             "sso_callback: IdP returned error %s — %s", error, error_description
         )
+        # IdP-side failure — we usually don't have the user identity here, so
+        # the GK notify uses the error code as the username placeholder.
+        await _gk_notify_failed(request, f"sso:{error}", reason="idp_error")
         return RedirectResponse(
             url=f"{_public_base()}/login?sso_error={error}", status_code=302
         )
@@ -280,6 +347,11 @@ async def sso_callback(
             "sso_callback: exchange failed — %s / %s",
             auth_result.error_type, auth_result.error_message,
         )
+        await _gk_notify_failed(
+            request,
+            (auth_result.identity.email if auth_result.identity else "sso:exchange_failed"),
+            reason="exchange_failed",
+        )
         return RedirectResponse(
             url=f"{_public_base()}/login?sso_error=auth_failed", status_code=302
         )
@@ -296,6 +368,9 @@ async def sso_callback(
                 "sso_callback: refusing unknown user %s (auto_provision_users=False)",
                 auth_result.identity.email,
             )
+            await _gk_notify_failed(
+                request, auth_result.identity.email, reason="user_not_provisioned",
+            )
             return RedirectResponse(
                 url=f"{_public_base()}/login?sso_error=user_not_provisioned",
                 status_code=302,
@@ -303,6 +378,17 @@ async def sso_callback(
 
     user, membership = await upsert_external_user(db, org, auth_result, config)
     await db.commit()
+
+    # GuardianKey post-credential risk check. BLOCK → redirect to login with
+    # a generic error (no info leak about whether the account exists or is
+    # restricted). NOTIFY/HARD_NOTIFY/ERROR → proceed (logged inside helper).
+    if not await _gk_check_or_block(request, user.email):
+        logger.warning(
+            "sso_callback: GuardianKey blocked SSO login for %s", user.email,
+        )
+        return RedirectResponse(
+            url=f"{_public_base()}/login?sso_error=blocked", status_code=302,
+        )
 
     # Issue a one-shot session token; the SPA exchanges it for the real JWTs.
     session_token = secrets.token_urlsafe(32)
