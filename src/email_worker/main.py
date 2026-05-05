@@ -273,9 +273,11 @@ class EmailWorker:
                             except Exception as move_exc:
                                 logger.error(
                                     "EmailWorker._on_new_email: move_to_folder failed — "
-                                    "uid=%s error=%s",
+                                    "uid=%s folder=%s error=%r",
                                     uid,
+                                    settings.email_unknown_sender_folder,
                                     move_exc,
+                                    exc_info=True,
                                 )
                             return
 

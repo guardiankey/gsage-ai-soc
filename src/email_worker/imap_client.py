@@ -154,22 +154,16 @@ class IMAPClientWrapper:
         self._connected = True
         logger.info("IMAPClientWrapper: authenticated — account=%s", acc.email)
 
-        # Read capabilities directly from the protocol object (aioimaplib
-        # populates this set from the server greeting / post-LOGIN CAPABILITY
-        # response). Office 365 advertises UIDPLUS, so this drives whether we
-        # use UID SEARCH or fall back to plain SEARCH.
+        # aioimaplib parses CAPABILITY from the server greeting / post-LOGIN
+        # untagged response and exposes has_capability() for callers.
+        # Office 365 advertises UIDPLUS, so this drives whether we use UID-
+        # based commands or plain commands.
         try:
-            raw_caps = getattr(self._client.protocol, "capabilities", None) or set()
-            cap_set = {
-                (c.decode(errors="replace") if isinstance(c, bytes) else str(c)).upper()
-                for c in raw_caps
-            }
-            self._uid_search_supported = "UIDPLUS" in cap_set
+            self._uid_search_supported = bool(self._client.has_capability("UIDPLUS"))
             logger.info(
-                "IMAPClientWrapper: IMAP capabilities — account=%s uid_search=%s caps=%s",
+                "IMAPClientWrapper: IMAP capabilities — account=%s uid_search=%s",
                 acc.email,
                 self._uid_search_supported,
-                sorted(cap_set),
             )
         except Exception as cap_exc:
             # If we cannot determine capabilities, assume UID SEARCH is NOT
@@ -177,7 +171,7 @@ class IMAPClientWrapper:
             self._uid_search_supported = False
             logger.warning(
                 "IMAPClientWrapper: capability inspection failed, assuming no UIDPLUS "
-                "— account=%s error=%s",
+                "— account=%s error=%r",
                 acc.email,
                 cap_exc,
             )
@@ -360,20 +354,41 @@ class IMAPClientWrapper:
             uid:         IMAP UID or sequence number (string).
             folder_name: Destination folder name (e.g., "Unknown-Senders").
         """
+        logger.info(
+            "IMAPClientWrapper.move_to_folder: starting — uid=%s dest=%s account=%s "
+            "uid_mode=%s",
+            uid, folder_name, self._account.email, self._uid_search_supported,
+        )
         await self.create_folder_if_needed(folder_name)
 
         # Try RFC 6851 IMAP MOVE.
-        if self._uid_search_supported:
-            move_resp = await self._client.uid("MOVE", uid, folder_name)
-        else:
-            move_resp = await self._client.move(uid, folder_name)
-        if move_resp.result == "OK":
-            logger.debug(
+        try:
+            if self._uid_search_supported:
+                move_resp = await self._client.uid("MOVE", uid, folder_name)
+            else:
+                move_resp = await self._client.move(uid, folder_name)
+        except Exception as exc:
+            logger.warning(
+                "IMAPClientWrapper.move_to_folder: MOVE raised — uid=%s dest=%s "
+                "error=%r — will try COPY+EXPUNGE fallback",
+                uid, folder_name, exc,
+            )
+            move_resp = None
+
+        if move_resp is not None and move_resp.result == "OK":
+            logger.info(
                 "IMAPClientWrapper.move_to_folder: MOVE ok — uid=%s dest=%s",
                 uid,
                 folder_name,
             )
             return
+
+        if move_resp is not None:
+            logger.info(
+                "IMAPClientWrapper.move_to_folder: MOVE returned %s — falling back "
+                "to COPY+EXPUNGE — uid=%s dest=%s lines=%s",
+                move_resp.result, uid, folder_name, move_resp.lines,
+            )
 
         # Fallback: COPY + flag + expunge.
         if self._uid_search_supported:
@@ -383,8 +398,9 @@ class IMAPClientWrapper:
             await self._client.copy(uid, folder_name)
             await self._client.store(uid, "+FLAGS", "(\\Deleted)")
         await self._client.expunge()
-        logger.debug(
-            "IMAPClientWrapper.move_to_folder: COPY+EXPUNGE fallback — uid=%s dest=%s",
+        logger.info(
+            "IMAPClientWrapper.move_to_folder: COPY+EXPUNGE fallback ok — "
+            "uid=%s dest=%s",
             uid,
             folder_name,
         )
@@ -490,6 +506,19 @@ class IMAPClientWrapper:
                         msg_id,
                         fetch_resp.lines,
                     )
+            except aioimaplib.CommandTimeout:
+                # Server stopped responding (often after a BYE on the
+                # previous command). The connection is dead — abort the
+                # batch and let idle_loop reconnect. Re-raising preserves
+                # the existing reconnect/back-off path.
+                logger.warning(
+                    "IMAPClientWrapper._process_new_messages: FETCH timed out — "
+                    "connection likely dead, triggering reconnect — account=%s id=%s",
+                    self._account.email,
+                    msg_id,
+                )
+                self._connected = False
+                raise
             except Exception as exc:
                 logger.error(
                     "IMAPClientWrapper._process_new_messages: fetch failed — account=%s id=%s error=%s",
