@@ -365,3 +365,308 @@ async def _run_pandoc(cmd: list[str], input_data: bytes) -> bytes:
 
     log.debug("pandoc: cmd=%r produced %d bytes", cmd, len(stdout))
     return stdout
+
+
+# ---------------------------------------------------------------------------
+# CSV helpers
+# ---------------------------------------------------------------------------
+
+# Regex matching a Markdown pipe-table separator row (``|---|---|`` or ``---|---``).
+_MD_TABLE_SEPARATOR_RE = re.compile(
+    r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$"
+)
+
+
+def rows_to_csv(
+    rows: list[dict],
+    headers: Optional[list[str]] = None,
+) -> bytes:
+    """Render a list of dict rows as CSV bytes (``excel`` dialect, UTF-8 BOM).
+
+    Parameters
+    ----------
+    rows:
+        List of dictionaries — each one represents a row.
+    headers:
+        Optional explicit column order. If omitted, columns are derived from
+        the union of keys across all rows (preserving first-seen order).
+
+    Raises
+    ------
+    ValueError
+        If *rows* is empty (and no *headers* supplied) or contains non-dict items.
+    """
+    import csv  # noqa: PLC0415
+
+    if not isinstance(rows, list):
+        raise ValueError("'rows' must be a list of dictionaries.")
+
+    if headers is None:
+        seen: dict[str, None] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError("Each row must be a dictionary.")
+            for k in row.keys():
+                if k not in seen:
+                    seen[str(k)] = None
+        headers = list(seen.keys())
+
+    if not headers:
+        raise ValueError(
+            "Cannot generate CSV: no columns inferred and no rows provided."
+        )
+
+    buf = io.StringIO()
+    # UTF-8 BOM so Excel auto-detects the encoding.
+    buf.write("\ufeff")
+    writer = csv.DictWriter(buf, fieldnames=headers, dialect="excel", extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("Each row must be a dictionary.")
+        writer.writerow({h: ("" if row.get(h) is None else str(row.get(h))) for h in headers})
+    return buf.getvalue().encode("utf-8")
+
+
+def markdown_table_to_csv(md_text: str) -> bytes:
+    """Convert the first Markdown pipe-table found in *md_text* to CSV bytes.
+
+    Recognises GitHub-flavoured pipe tables::
+
+        | col1 | col2 |
+        |------|------|
+        | a    | b    |
+
+    Returns CSV with header row preserved.
+
+    Raises
+    ------
+    ValueError
+        If no Markdown table is found in *md_text*.
+    """
+    lines = md_text.splitlines()
+    for i, line in enumerate(lines):
+        if i + 1 >= len(lines):
+            break
+        if "|" not in line:
+            continue
+        if not _MD_TABLE_SEPARATOR_RE.match(lines[i + 1]):
+            continue
+        # Found a header row at line *i*; collect rows until a blank line or
+        # a line without ``|``.
+        header_cells = _split_md_row(line)
+        data_rows: list[list[str]] = []
+        j = i + 2
+        while j < len(lines):
+            row_line = lines[j]
+            if not row_line.strip() or "|" not in row_line:
+                break
+            data_rows.append(_split_md_row(row_line))
+            j += 1
+
+        rows = [
+            {header_cells[k]: (cells[k] if k < len(cells) else "") for k in range(len(header_cells))}
+            for cells in data_rows
+        ]
+        return rows_to_csv(rows, headers=header_cells)
+
+    raise ValueError("No Markdown pipe-table found in the supplied content.")
+
+
+def _split_md_row(line: str) -> list[str]:
+    """Split a Markdown table row line into trimmed cell values."""
+    line = line.strip()
+    if line.startswith("|"):
+        line = line[1:]
+    if line.endswith("|"):
+        line = line[:-1]
+    return [cell.strip() for cell in line.split("|")]
+
+
+# ---------------------------------------------------------------------------
+# ZIP / Pandoc-bundle helpers
+# ---------------------------------------------------------------------------
+
+# Hard limits on extracted ZIP bundles — protect against zip-bombs and
+# resource exhaustion in the API container.
+_ZIP_MAX_TOTAL_BYTES = 10 * 1024 * 1024  # 10 MB uncompressed
+_ZIP_MAX_FILES = 50
+_ZIP_MAX_PATH_LEN = 200
+
+# Pandoc bundle conventions
+_BUNDLE_DEFAULTS_FILENAMES = ("defaults.yaml", "defaults.yml")
+
+
+def extract_template_zip(zip_bytes: bytes, dest_dir: str) -> str:
+    """Safely extract a Pandoc bundle ZIP into *dest_dir*.
+
+    Implements zip-slip protection: every entry's resolved absolute path
+    must remain inside *dest_dir*. Enforces total-size, file-count and
+    path-length limits to prevent zip-bombs.
+
+    Parameters
+    ----------
+    zip_bytes:
+        Raw bytes of the ZIP archive.
+    dest_dir:
+        Existing directory where files should be extracted.
+
+    Returns
+    -------
+    str
+        Absolute path to the directory that should be passed to pandoc as
+        cwd / ``--resource-path``. If the archive contains a single
+        top-level directory wrapping all entries, that subdirectory is
+        returned; otherwise *dest_dir* itself is returned.
+
+    Raises
+    ------
+    ValueError
+        If the archive violates any safety limit or contains unsafe paths.
+    """
+    import os  # noqa: PLC0415
+    import zipfile  # noqa: PLC0415
+
+    dest_abs = os.path.realpath(dest_dir)
+    if not os.path.isdir(dest_abs):
+        raise ValueError(f"Destination directory does not exist: {dest_dir!r}")
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"Invalid ZIP archive: {exc}") from exc
+
+    with zf:
+        infolist = zf.infolist()
+        if len(infolist) > _ZIP_MAX_FILES:
+            raise ValueError(
+                f"ZIP bundle has too many entries ({len(infolist)} > {_ZIP_MAX_FILES})."
+            )
+        total_size = sum(info.file_size for info in infolist)
+        if total_size > _ZIP_MAX_TOTAL_BYTES:
+            raise ValueError(
+                f"ZIP bundle uncompressed size {total_size} exceeds limit "
+                f"{_ZIP_MAX_TOTAL_BYTES} bytes."
+            )
+
+        top_level: set[str] = set()
+        for info in infolist:
+            name = info.filename
+            if not name or name.endswith("/"):
+                # Directory entry — still validate path safety.
+                pass
+            if len(name) > _ZIP_MAX_PATH_LEN:
+                raise ValueError(f"ZIP entry path too long: {name!r}")
+            if name.startswith("/") or ".." in name.replace("\\", "/").split("/"):
+                raise ValueError(f"Unsafe ZIP entry path: {name!r}")
+
+            target = os.path.realpath(os.path.join(dest_abs, name))
+            if not (target == dest_abs or target.startswith(dest_abs + os.sep)):
+                raise ValueError(f"ZIP entry escapes destination: {name!r}")
+
+            # Track the first path segment to detect a single-root wrapper dir.
+            first_seg = name.replace("\\", "/").split("/", 1)[0]
+            if first_seg:
+                top_level.add(first_seg)
+
+        zf.extractall(dest_abs)
+
+    # If the archive wraps everything inside a single top-level directory,
+    # return that directory so pandoc can find ``defaults.yaml`` directly.
+    if len(top_level) == 1:
+        only = next(iter(top_level))
+        candidate = os.path.join(dest_abs, only)
+        if os.path.isdir(candidate):
+            return candidate
+    return dest_abs
+
+
+def find_bundle_defaults_file(bundle_dir: str) -> Optional[str]:
+    """Locate ``defaults.yaml`` (or ``.yml``) inside a Pandoc bundle directory.
+
+    Returns the absolute path or ``None`` if not found.
+    """
+    import os  # noqa: PLC0415
+
+    for name in _BUNDLE_DEFAULTS_FILENAMES:
+        candidate = os.path.join(bundle_dir, name)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+async def pandoc_run_with_defaults(
+    input_md: str,
+    bundle_dir: str,
+    defaults_filename: str = "defaults.yaml",
+) -> bytes:
+    """Run pandoc with a ``--defaults=<defaults>`` file inside *bundle_dir*.
+
+    The pandoc subprocess runs with ``cwd=bundle_dir`` so all relative paths
+    (template, resource-path, includes, …) inside the defaults file resolve
+    against the bundle.
+
+    Parameters
+    ----------
+    input_md:
+        Markdown source to feed via stdin.
+    bundle_dir:
+        Absolute path to the bundle directory containing the defaults file.
+    defaults_filename:
+        Name of the defaults file inside the bundle. Defaults to ``defaults.yaml``.
+
+    Returns
+    -------
+    bytes
+        Raw bytes produced by pandoc on stdout (typically PDF).
+
+    Raises
+    ------
+    FileNotFoundError
+        If pandoc is not installed or the defaults file is missing.
+    RuntimeError
+        If pandoc exits with a non-zero status.
+    """
+    import os  # noqa: PLC0415
+
+    defaults_path = os.path.join(bundle_dir, defaults_filename)
+    if not os.path.isfile(defaults_path):
+        raise FileNotFoundError(
+            f"Pandoc defaults file not found in bundle: {defaults_path!r}"
+        )
+
+    cmd = [
+        _PANDOC_BIN,
+        f"--defaults={defaults_filename}",
+        "--output=-",
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=bundle_dir,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"pandoc binary not found. Ensure pandoc is installed (cmd: {cmd[0]!r})."
+        )
+
+    stdout, stderr = await asyncio.wait_for(
+        proc.communicate(input=strip_non_bmp(input_md).encode("utf-8")),
+        timeout=_PANDOC_TIMEOUT * 2,  # bundle/LaTeX runs are slower
+    )
+
+    if proc.returncode != 0:
+        err_msg = stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"pandoc exited with code {proc.returncode}: {err_msg}"
+        )
+
+    log.debug(
+        "pandoc-bundle: cwd=%s defaults=%s produced %d bytes",
+        bundle_dir, defaults_filename, len(stdout),
+    )
+    return stdout

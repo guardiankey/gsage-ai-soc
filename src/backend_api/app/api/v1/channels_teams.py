@@ -25,7 +25,7 @@ import logging
 import uuid
 from typing import Any, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Path, Request, status
+from fastapi import APIRouter, Header, HTTPException, Path, Request, WebSocket, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -156,6 +156,188 @@ async def teams_messages(
         raise
 
     return {"status": "ok"}
+
+
+# ── Bot Framework Streaming Extension (WebSocket) ──────────────────────────
+
+
+@router.websocket("/{profile_id}/messages")
+async def teams_messages_stream(
+    websocket: WebSocket,
+    profile_id: uuid.UUID,
+) -> None:
+    """WebSocket endpoint for the Bot Framework Streaming Extensions.
+
+    When *Streaming* is enabled in the Azure Bot resource the Bot Framework
+    Service connects here via ``wss://…/v1/channels/teams/{profile_id}/messages``
+    instead of calling the POST endpoint.  This allows the bot to send
+    incremental (streaming) replies to Teams users without buffering the full
+    response first.
+
+    Flow
+    ----
+    1. FastAPI accepts the WebSocket upgrade.
+    2. A thin adapter bridges Starlette's WebSocket to the
+       ``botframework.streaming.WebSocket`` ABC expected by
+       ``WebSocketServer``.
+    3. Incoming Bot Framework activity frames are handled by
+       ``_StreamingActivityHandler``, which delegates to the shared
+       ``handle_teams_turn`` callback — exactly as the HTTP POST path does.
+    4. The connection stays open until the Bot Framework Service closes it.
+
+    Azure Bot config
+    ----------------
+    Check **Streaming** (preview) in *Azure Bot → Settings → Messaging endpoint*
+    and set the endpoint to ``wss://your-domain/api/v1/channels/teams/{profile_id}/messages``.
+    """
+    # Lazy imports — same pattern as teams_messages to keep startup fast.
+    from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings
+    from botframework.streaming.request_handler import RequestHandler as BFRequestHandler
+    from botframework.streaming.streaming_response import (
+        StreamingResponse as BFStreamingResponse,
+    )
+    from botframework.streaming.transport.web_socket.web_socket import (
+        WebSocket as BFWebSocketABC,
+        WebSocketMessage as BFWSMessage,
+    )
+    from botframework.streaming.transport.web_socket.web_socket_close_status import (
+        WebSocketCloseStatus,
+    )
+    from botframework.streaming.transport.web_socket.web_socket_message_type import (
+        WebSocketMessageType,
+    )
+    from botframework.streaming.transport.web_socket.web_socket_server import (
+        WebSocketServer,
+    )
+    from botframework.streaming.transport.web_socket.web_socket_state import (
+        WebSocketState,
+    )
+
+    profile = await _load_active_profile(profile_id)
+    cfg = profile.interface_config or {}
+    app_id = cfg.get("app_id") or ""
+    app_password = cfg.get("app_password") or ""
+    tenant_id = cfg.get("tenant_id")
+
+    if not (app_id and app_password):
+        logger.error(
+            "teams_messages_stream: profile %s missing app_id/app_password",
+            profile_id,
+        )
+        await websocket.close(code=1008)  # Policy Violation
+        return
+
+    adapter = _get_adapter(
+        profile_id=profile_id,
+        app_id=str(app_id),
+        app_password=str(app_password),
+        tenant_id=str(tenant_id) if tenant_id else None,
+        adapter_cls=BotFrameworkAdapter,
+        settings_cls=BotFrameworkAdapterSettings,
+    )
+    graph = (
+        _get_graph_client(profile_id, str(app_id), str(app_password), str(tenant_id))
+        if tenant_id
+        else None
+    )
+
+    # ── Bridge Starlette WebSocket → botframework.streaming.WebSocket ABC ──
+    class _StarletteWSAdapter(BFWebSocketABC):
+        """Adapts a Starlette WebSocket to the botframework.streaming WebSocket ABC."""
+
+        def __init__(self, ws: WebSocket) -> None:
+            self._ws = ws
+            self._state = WebSocketState.OPEN
+
+        @property
+        def status(self) -> WebSocketState:
+            return self._state
+
+        def dispose(self) -> None:
+            self._state = WebSocketState.CLOSED
+
+        async def close(
+            self, close_status: WebSocketCloseStatus, status_description: str
+        ) -> None:
+            self._state = WebSocketState.CLOSED
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+
+        async def receive(self) -> BFWSMessage:
+            try:
+                raw = await self._ws.receive()
+                if raw.get("type") == "websocket.receive":
+                    data = raw.get("bytes") or (raw.get("text") or "").encode()
+                    return BFWSMessage(
+                        data=list(data),
+                        message_type=WebSocketMessageType.BINARY,
+                    )
+                # websocket.disconnect or unknown
+                self._state = WebSocketState.CLOSED
+                return BFWSMessage(data=[], message_type=WebSocketMessageType.CLOSE)
+            except Exception:
+                self._state = WebSocketState.CLOSED
+                raise
+
+        async def send(
+            self, buffer: Any, message_type: WebSocketMessageType, end_of_message: bool
+        ) -> None:
+            raw: bytes = bytes(buffer) if buffer else b""
+            if message_type == WebSocketMessageType.TEXT:
+                await self._ws.send_text(raw.decode("utf-8"))
+            else:
+                await self._ws.send_bytes(raw)
+
+    # ── RequestHandler: processes each streaming activity frame ─────────────
+    class _StreamingActivityHandler(BFRequestHandler):
+        """Processes incoming Bot Framework activity requests from the stream."""
+
+        async def process_request(
+            self, request: Any, bflogger: Any, context: Any
+        ) -> BFStreamingResponse:
+            from botbuilder.schema import Activity
+
+            try:
+                body_str = await request.read_body_as_str()
+                activity = Activity().deserialize(__import__("json").loads(body_str))
+
+                async def _on_turn(turn_context: Any) -> None:
+                    await handle_teams_turn(
+                        profile=profile,
+                        turn_context=turn_context,
+                        graph_client=graph,
+                    )
+
+                await adapter.process_activity(activity, "", _on_turn)
+                return BFStreamingResponse.ok()
+            except Exception:
+                logger.exception(
+                    "teams_messages_stream: error processing activity — profile_id=%s",
+                    profile_id,
+                )
+                return BFStreamingResponse.internal_server_error(
+                    "Internal error processing activity"
+                )
+
+    await websocket.accept()
+
+    bf_socket = _StarletteWSAdapter(websocket)
+    server = WebSocketServer(socket=bf_socket, request_handler=_StreamingActivityHandler())
+
+    try:
+        closed_signal = await server.start()
+        await closed_signal
+    except Exception:
+        logger.exception(
+            "teams_messages_stream: WebSocket error — profile_id=%s", profile_id
+        )
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 # ── Helpers ────────────────────────────────────────────────────────────

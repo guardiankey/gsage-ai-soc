@@ -1,12 +1,21 @@
 """gSage AI — generate_document MCP tool.
 
-Generates a document from a template and Markdown content.
+Generates a document from optional template + Markdown content (or tabular
+data for CSV output).
 
 Always runs in background (Celery).
 
-Template types
---------------
-- **Markdown templates** (``text/markdown``):
+Template sources
+----------------
+- **No template** (``template_id`` omitted)
+    Built-in templates are used:
+      * ``output_format="csv"`` — no template, see CSV section.
+      * ``pandoc=true`` and ``output_format="pdf"`` — built-in
+        ``pandoc_gsage`` bundle (cover page, TOC, gSage colors).
+      * Otherwise — built-in ``default`` Markdown template (gSage CSS).
+- **Built-in selector** ``template_id="builtin:<name>"``
+    Explicitly select a packaged built-in (``default`` or ``pandoc_gsage``).
+- **Markdown templates** (``text/markdown``)
     1. ``parse_md_front_matter`` — extract CSS / metadata from front-matter
     2. ``render_jinja2_template`` — inject ``variables`` + ``{"content": content}``
     3. Convert to the requested output format:
@@ -14,13 +23,21 @@ Template types
         - ``html`` → ``md_to_html(css=css)``
         - ``docx`` → ``md_to_html`` → ``html_to_docx``
         - ``pdf``  → ``md_to_html`` → ``html_to_pdf``
-
-- **DOCX templates** (``application/vnd.openxmlformats-officedocument…``):
+- **DOCX templates** (``application/vnd.openxmlformats-officedocument…``)
     1. ``fill_docx_template`` — replace ``{{key}}`` placeholders
-    2. Convert to the requested output format:
-        - ``docx`` → filled DOCX (no further conversion)
-        - ``pdf``  → ``docx_to_pdf``
-        - ``html`` / ``md`` → error (UNSUPPORTED_OUTPUT_FORMAT)
+    2. Convert to ``docx`` or ``pdf`` (``html``/``md`` not supported).
+- **Pandoc bundle (.zip)**
+    Multi-file Pandoc bundle containing ``defaults.yaml`` plus a LaTeX
+    template, images, etc. Extracted to a sandbox temp dir, then
+    ``pandoc --defaults=defaults.yaml`` is invoked there. Only ``pdf``
+    output is supported.
+
+CSV output
+----------
+``output_format="csv"`` does not need a template. Row data is taken from:
+  1. The ``rows`` parameter (preferred) — list of dictionaries.
+  2. JSON list embedded in ``content`` (auto-detected).
+  3. The first GitHub-flavoured Markdown pipe-table found in ``content``.
 
 Required permissions: ``files:read``, ``files:write``
 """
@@ -47,55 +64,110 @@ _MIME_DOCX = (
 _MIME_PDF = "application/pdf"
 _MIME_HTML = "text/html"
 _MIME_MD = "text/markdown"
+_MIME_CSV = "text/csv"
+_MIME_ZIP = "application/zip"
 
-_OUTPUT_FORMATS = ("docx", "pdf", "html", "md")
+_OUTPUT_FORMATS = ("docx", "pdf", "html", "md", "csv")
+
+# Prefix used in ``template_id`` to explicitly select a built-in template.
+_BUILTIN_PREFIX = "builtin:"
 
 
 class GenerateDocumentTool(BaseTool):
     """
-    Generate a document from a template and Markdown content.
+    Generate a document from optional template + Markdown content.
 
-    The tool downloads the specified template, renders it with the supplied
-    content and optional variables, converts to the desired output format,
-    and stores the result as a downloadable file.
+    The tool optionally downloads a template, renders it with the supplied
+    content and variables, converts to the desired output format, and
+    stores the result as a downloadable file.
+
+    **Template is optional.** When ``template_id`` is omitted, a built-in
+    template is selected automatically:
+
+    - ``output_format="csv"`` — no template (rows-to-CSV pipeline).
+    - ``pandoc=true`` + ``output_format="pdf"`` — built-in ``pandoc_gsage``
+      bundle (LaTeX cover page + TOC + gSage colors).
+    - Otherwise — built-in ``default`` Markdown template (gSage CSS).
+
+    Pass ``template_id="builtin:default"`` or ``"builtin:pandoc_gsage"`` to
+    explicitly select a packaged built-in.
 
     **Supported template types:**
 
-    - Markdown templates (``text/markdown``): support all output formats
-      (``docx``, ``pdf``, ``html``, ``md``).
+    - Markdown templates (``text/markdown``): support all non-CSV output
+      formats (``docx``, ``pdf``, ``html``, ``md``).
     - DOCX templates: only support ``docx`` and ``pdf`` output.
-      Requesting ``html`` or ``md`` from a DOCX template returns an error.
+    - Pandoc bundles (``application/zip``): multi-file Pandoc bundle with
+      ``defaults.yaml``; only ``pdf`` output supported.
 
-    **Conversion** relies on pandoc — it must be installed in the container.
+    **Conversion** relies on pandoc and (for ``pdf`` via Pandoc bundles) a
+    LaTeX engine — both must be installed in the container.
 
     **Template variables:** Use ``list_templates`` with
     ``include_variables=true`` to discover which ``{{placeholders}}`` a
-    template expects.  The ``content`` variable is always available; any
-    additional variables must be passed via the ``variables`` parameter.
-    If a required variable is missing, the tool returns a
-    ``MISSING_VARIABLES`` error listing the expected names.
+    template expects. The ``content`` variable is always available.
 
-    Required parameters
-    -------------------
-    template_id (str):
-        UUID of the template file (use ``list_templates`` to find it).
-    content (str):
-        Markdown content injected into the template via the
-        ``{{content}}`` placeholder (or as the body for Markdown templates).
+    **YAML front-matter for PDF cover / title page (pandoc bundles).**
+    When generating PDF via the built-in ``pandoc_gsage`` bundle (or any
+    Pandoc bundle that enables ``titlepage``), the cover page is rendered
+    from the YAML front-matter at the **top of ``content``**. The agent
+    should always prepend a front-matter block with the relevant fields,
+    for example::
+
+        ---
+        title: "Whitepaper \u2013 Topic"
+        subtitle: "Optional subtitle"
+        author: "Author or team name"
+        date: "November 2025"
+        subject: "Short subject / abstract line"
+        ---
+
+        # Section 1
+        …
+
+    Without these fields the resulting PDF will have an empty cover page
+    and no document title in the metadata. ``title`` is the most
+    important; ``author``, ``date``, ``subtitle`` and ``subject`` are
+    optional but recommended.
+
+    **Do NOT manually number sections** when using ``pandoc_gsage`` (or any
+    pandoc bundle with ``numbersections: true``). Pandoc auto-numbers all
+    headings. Write headings as ``# Scope`` / ``## Subsection`` — never as
+    ``# 1. Scope`` or ``## 1.1 Subsection``, otherwise the numbers will
+    appear duplicated (e.g. ``1 1. Scope``).
+        Markdown content injected into the template (``{{content}}``), or
+        the source for CSV output (JSON list / Markdown table) when
+        ``rows`` is not supplied.
 
     Optional parameters
     -------------------
+    template_id (str):
+        UUID of an uploaded template OR ``"builtin:<name>"``. Omit to use
+        the auto-selected built-in.
     output_format (str):
-        ``"docx"`` (default), ``"pdf"``, ``"html"``, or ``"md"``.
+        ``"docx"`` (default), ``"pdf"``, ``"html"``, ``"md"``, or ``"csv"``.
+    pandoc (bool):
+        When true (and no ``template_id``), use the built-in
+        ``pandoc_gsage`` bundle for PDF output. Default false.
+    rows (list[object]):
+        Tabular data for CSV output. Each item must be a JSON object.
+    headers (list[str]):
+        Optional explicit column order for CSV output.
     variables (dict):
         Additional template variables merged with ``{"content": content}``.
-        Use ``list_templates(include_variables=true)`` to discover which
-        variables a template expects.
     output_filename (str):
         Override the output filename base (without extension).
 
     Permission: ``files:read``, ``files:write``
     Timeout: 120 s · Always background
+
+    **Recovery from lost results.** Because this tool runs in the background,
+    the ``ToolResult`` carrying the generated ``file_id`` may not always be
+    delivered back to the agent (e.g. long pandoc runs, dropped streams).
+    If the agent needs to reference a recently generated document but no
+    longer has its ``file_id``, call ``list_recent_artifacts`` (optionally
+    with ``tool_name="generate_document"``) to recover the metadata of the
+    most recent files produced in the current chat session.
     """
 
     name: ClassVar[str] = "generate_document"
@@ -111,28 +183,72 @@ class GenerateDocumentTool(BaseTool):
 
     params_schema: ClassVar[dict] = {
         "type": "object",
-        "required": ["template_id", "content"],
+        "required": ["content"],
         "properties": {
             "template_id": {
                 "type": "string",
                 "description": (
-                    "UUID of the template to use. "
-                    "Obtain valid IDs from the 'list_templates' tool."
+                    "Optional. UUID of an uploaded template, or "
+                    "'builtin:default' / 'builtin:pandoc_gsage' to select a "
+                    "packaged built-in. When omitted, a built-in template "
+                    "is chosen automatically based on output_format and pandoc."
                 ),
             },
             "content": {
                 "type": "string",
                 "description": (
-                    "Markdown content to inject into the template. "
-                    "Available as the '{{content}}' variable inside the template."
+                    "Markdown content (or JSON / Markdown table for CSV). "
+                    "Available as the '{{content}}' variable inside Markdown "
+                    "and DOCX templates. "
+                    "For PDF via pandoc bundles (e.g. 'builtin:pandoc_gsage' "
+                    "or pandoc=true), prepend a YAML front-matter block with "
+                    "document metadata so the cover/title page is populated, "
+                    "e.g. '---\\ntitle: \"...\"\\nsubtitle: \"...\"\\nauthor: \"...\"\\n"
+                    "date: \"...\"\\nsubject: \"...\"\\n---'. Without front-matter "
+                    "the cover page will be blank. "
+                    "IMPORTANT: do NOT manually number headings (no '# 1. Scope', "
+                    "no '## 1.1 Subsection') — the pandoc bundle auto-numbers "
+                    "sections; manual numbering causes duplicated numbers like "
+                    "'1 1. Scope'."
                 ),
             },
             "output_format": {
                 "type": "string",
                 "enum": list(_OUTPUT_FORMATS),
                 "description": (
-                    "Output format. 'docx' (default), 'pdf', 'html', or 'md'. "
-                    "DOCX templates only support 'docx' and 'pdf'."
+                    "Output format. 'docx' (default), 'pdf', 'html', 'md', "
+                    "or 'csv'. DOCX templates only support 'docx'/'pdf'. "
+                    "Pandoc bundles (zip) only support 'pdf'. CSV ignores "
+                    "any template_id."
+                ),
+            },
+            "pandoc": {
+                "type": "boolean",
+                "description": (
+                    "When true and no template_id is supplied, render PDF "
+                    "via the built-in 'pandoc_gsage' Pandoc/LaTeX bundle "
+                    "(cover page, TOC, gSage colors). Ignored otherwise. "
+                    "Remember to include YAML front-matter (title, author, "
+                    "date, subject, subtitle) at the top of 'content' so the "
+                    "cover page is populated."
+                ),
+            },
+            "rows": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": (
+                    "Tabular rows for CSV output. Each item is a JSON object "
+                    "(column name -> value). Takes priority over 'content' "
+                    "when output_format='csv'."
+                ),
+            },
+            "headers": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional explicit column order for CSV output. When "
+                    "omitted, columns are inferred from the union of keys "
+                    "across all rows (first-seen order)."
                 ),
             },
             "variables": {
@@ -165,26 +281,38 @@ class GenerateDocumentTool(BaseTool):
         from src.shared.services.document_converter import (  # noqa: PLC0415
             docx_to_pdf,
             extract_template_variables,
+            extract_template_zip,
             fill_docx_template,
+            find_bundle_defaults_file,
             html_to_docx,
             html_to_pdf,
+            markdown_table_to_csv,
             md_to_html,
+            pandoc_run_with_defaults,
             parse_md_front_matter,
             render_jinja2_template,
+            rows_to_csv,
+        )
+        from src.shared.services.document_templates import (  # noqa: PLC0415
+            BUILTIN_DEFAULT_MD,
+            BUILTIN_PANDOC_GSAGE,
+            get_builtin_pandoc_bundle_dir,
+            get_builtin_template_bytes,
         )
         from src.shared.database import _get_session_maker  # noqa: PLC0415
 
         t0 = time.monotonic()
 
         # ── Validate params ───────────────────────────────────────────────
-        template_id: str = str(params.get("template_id", "")).strip()
+        template_id_raw: str = str(params.get("template_id") or "").strip()
         content: str = str(params.get("content", ""))
         output_format: str = str(params.get("output_format") or "docx").lower()
         raw_variables = params.get("variables") or {}
         output_filename_override: Optional[str] = params.get("output_filename")
+        use_pandoc: bool = bool(params.get("pandoc") or False)
+        rows_param = params.get("rows")
+        headers_param = params.get("headers")
 
-        if not template_id:
-            return self._failure("INVALID_INPUT", "'template_id' is required.")
         if output_format not in _OUTPUT_FORMATS:
             return self._failure(
                 "INVALID_INPUT",
@@ -198,33 +326,102 @@ class GenerateDocumentTool(BaseTool):
         )
         variables["content"] = content
 
-        # ── Load template from MinIO ──────────────────────────────────────
-        load_result = await self._load_file(
-            file_id=template_id,
-            org_id=str(agent_context.org_id),
-            user_id=str(agent_context.user_id),
-            dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
-            max_bytes=10 * 1024 * 1024,
-        )
+        # ── CSV pipeline (no template) ────────────────────────────────────
+        if output_format == "csv":
+            try:
+                csv_bytes = _build_csv_bytes(
+                    rows_param=rows_param,
+                    headers_param=headers_param,
+                    content=content,
+                    rows_to_csv=rows_to_csv,
+                    markdown_table_to_csv=markdown_table_to_csv,
+                )
+            except ValueError as exc:
+                elapsed = int((time.monotonic() - t0) * 1000)
+                return self._failure(
+                    "INVALID_INPUT",
+                    f"Cannot build CSV: {exc}",
+                    execution_time_ms=elapsed,
+                )
 
-        if load_result is None:
-            elapsed = int((time.monotonic() - t0) * 1000)
-            return self._failure(
-                "TEMPLATE_NOT_FOUND",
-                f"Template '{template_id}' not found or access denied.",
-                execution_time_ms=elapsed,
+            base_name = output_filename_override or "report"
+            return await self._store_and_return(
+                output_bytes=csv_bytes,
+                out_content_type=_MIME_CSV,
+                out_ext="csv",
+                base_name=base_name,
+                template_label="csv",
+                template_id_label=template_id_raw or "csv",
+                output_format=output_format,
+                agent_context=agent_context,
+                t0=t0,
+                session_maker_factory=_get_session_maker,
             )
 
-        template_bytes: bytes = load_result["data"]
-        template_filename: str = load_result["filename"]
-        template_content_type: str = load_result["content_type"]
+        # ── Resolve template source ──────────────────────────────────────
+        try:
+            template_bytes, template_filename, template_content_type = await self._resolve_template(
+                template_id_raw=template_id_raw,
+                output_format=output_format,
+                use_pandoc=use_pandoc,
+                agent_context=agent_context,
+                get_builtin_template_bytes=get_builtin_template_bytes,
+                get_builtin_pandoc_bundle_dir=get_builtin_pandoc_bundle_dir,
+                BUILTIN_DEFAULT_MD=BUILTIN_DEFAULT_MD,
+                BUILTIN_PANDOC_GSAGE=BUILTIN_PANDOC_GSAGE,
+            )
+        except _TemplateNotFound as exc:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            return self._failure(
+                "TEMPLATE_NOT_FOUND", str(exc), execution_time_ms=elapsed
+            )
+        except _UnsupportedOutputFormat as exc:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            return self._failure(
+                "UNSUPPORTED_OUTPUT_FORMAT", str(exc), execution_time_ms=elapsed
+            )
+        except _BuiltinPandocBundle as bundle:
+            # Special path: render directly from the on-disk built-in bundle.
+            try:
+                pdf_bytes = await pandoc_run_with_defaults(
+                    input_md=content,
+                    bundle_dir=str(bundle.bundle_dir),
+                )
+            except FileNotFoundError as exc:
+                elapsed = int((time.monotonic() - t0) * 1000)
+                return self._failure(
+                    "PANDOC_NOT_FOUND",
+                    f"pandoc or built-in bundle missing: {exc}",
+                    retryable=False,
+                    execution_time_ms=elapsed,
+                )
+            except RuntimeError as exc:
+                elapsed = int((time.monotonic() - t0) * 1000)
+                return self._failure(
+                    "PANDOC_ERROR",
+                    f"pandoc conversion failed: {exc}",
+                    retryable=False,
+                    execution_time_ms=elapsed,
+                )
+
+            base_name = output_filename_override or "document"
+            return await self._store_and_return(
+                output_bytes=pdf_bytes,
+                out_content_type=_MIME_PDF,
+                out_ext="pdf",
+                base_name=base_name,
+                template_label=f"builtin:{BUILTIN_PANDOC_GSAGE}",
+                template_id_label=f"builtin:{BUILTIN_PANDOC_GSAGE}",
+                output_format=output_format,
+                agent_context=agent_context,
+                t0=t0,
+                session_maker_factory=_get_session_maker,
+            )
 
         base_name = output_filename_override or _stem(template_filename)
 
-        # ── Validate template variables ───────────────────────────────────
-        # For Markdown templates, extract expected variables and warn about
-        # any that are missing from the supplied `variables` dict.
-        is_md_template = template_content_type not in (_MIME_DOCX, "application/zip")
+        # ── Validate template variables (Markdown templates only) ─────────
+        is_md_template = template_content_type == _MIME_MD
         if is_md_template:
             template_text = template_bytes.decode("utf-8", errors="replace")
             expected_vars = extract_template_variables(template_text)
@@ -246,9 +443,11 @@ class GenerateDocumentTool(BaseTool):
         try:
             output_bytes, out_content_type, out_ext = await _convert(
                 template_bytes=template_bytes,
+                template_filename=template_filename,
                 template_content_type=template_content_type,
                 output_format=output_format,
                 variables=variables,
+                content=content,
                 render_jinja2_template=render_jinja2_template,
                 parse_md_front_matter=parse_md_front_matter,
                 md_to_html=md_to_html,
@@ -256,6 +455,9 @@ class GenerateDocumentTool(BaseTool):
                 html_to_pdf=html_to_pdf,
                 fill_docx_template=fill_docx_template,
                 docx_to_pdf=docx_to_pdf,
+                extract_template_zip=extract_template_zip,
+                find_bundle_defaults_file=find_bundle_defaults_file,
+                pandoc_run_with_defaults=pandoc_run_with_defaults,
             )
         except _UnsupportedOutputFormat as exc:
             elapsed = int((time.monotonic() - t0) * 1000)
@@ -289,10 +491,9 @@ class GenerateDocumentTool(BaseTool):
                 execution_time_ms=elapsed,
             )
         except RuntimeError as exc:
-            # pandoc exits with non-zero status → RuntimeError from _run_pandoc
             log.error(
                 "generate_document: pandoc error for template %s: %s",
-                template_id, exc,
+                template_id_raw or "<builtin>", exc,
             )
             elapsed = int((time.monotonic() - t0) * 1000)
             return self._failure(
@@ -301,9 +502,19 @@ class GenerateDocumentTool(BaseTool):
                 retryable=False,
                 execution_time_ms=elapsed,
             )
+        except ValueError as exc:
+            # Bad ZIP / unsafe paths / etc.
+            elapsed = int((time.monotonic() - t0) * 1000)
+            return self._failure(
+                "INVALID_TEMPLATE",
+                f"Invalid template content: {exc}",
+                retryable=False,
+                execution_time_ms=elapsed,
+            )
         except Exception as exc:
             log.exception(
-                "generate_document: conversion error for template %s", template_id
+                "generate_document: conversion error for template %s",
+                template_id_raw or "<builtin>",
             )
             elapsed = int((time.monotonic() - t0) * 1000)
             return self._failure(
@@ -313,10 +524,106 @@ class GenerateDocumentTool(BaseTool):
                 execution_time_ms=elapsed,
             )
 
-        # ── Store generated file ──────────────────────────────────────────
+        return await self._store_and_return(
+            output_bytes=output_bytes,
+            out_content_type=out_content_type,
+            out_ext=out_ext,
+            base_name=base_name,
+            template_label=template_filename,
+            template_id_label=template_id_raw or f"builtin:{BUILTIN_DEFAULT_MD}",
+            output_format=output_format,
+            agent_context=agent_context,
+            t0=t0,
+            session_maker_factory=_get_session_maker,
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers (instance methods kept here to reuse self._load_file / self._store_file)
+    # ------------------------------------------------------------------
+
+    async def _resolve_template(
+        self,
+        *,
+        template_id_raw: str,
+        output_format: str,
+        use_pandoc: bool,
+        agent_context: AgentContext,
+        get_builtin_template_bytes,
+        get_builtin_pandoc_bundle_dir,
+        BUILTIN_DEFAULT_MD: str,
+        BUILTIN_PANDOC_GSAGE: str,
+    ) -> tuple[bytes, str, str]:
+        """Resolve the template source.
+
+        Returns ``(template_bytes, template_filename, template_content_type)``.
+        Raises :class:`_BuiltinPandocBundle` to signal a built-in pandoc-bundle
+        path (handled separately by the caller because it does not need
+        in-memory template bytes), or :class:`_TemplateNotFound` when an
+        uploaded template can't be loaded.
+        """
+        # Explicit built-in selector
+        if template_id_raw.startswith(_BUILTIN_PREFIX):
+            name = template_id_raw[len(_BUILTIN_PREFIX):].strip().lower()
+            if name == BUILTIN_PANDOC_GSAGE:
+                if output_format != "pdf":
+                    raise _UnsupportedOutputFormat(
+                        "Built-in 'pandoc_gsage' bundle only supports 'pdf' output."
+                    )
+                raise _BuiltinPandocBundle(get_builtin_pandoc_bundle_dir())
+            if name == BUILTIN_DEFAULT_MD:
+                return (
+                    get_builtin_template_bytes(BUILTIN_DEFAULT_MD),
+                    f"{BUILTIN_DEFAULT_MD}.md",
+                    _MIME_MD,
+                )
+            raise _TemplateNotFound(f"Unknown built-in template: {template_id_raw!r}")
+
+        # No template_id → auto-select a built-in
+        if not template_id_raw:
+            if use_pandoc and output_format == "pdf":
+                raise _BuiltinPandocBundle(get_builtin_pandoc_bundle_dir())
+            return (
+                get_builtin_template_bytes(BUILTIN_DEFAULT_MD),
+                f"{BUILTIN_DEFAULT_MD}.md",
+                _MIME_MD,
+            )
+
+        # User-uploaded template
+        load_result = await self._load_file(
+            file_id=template_id_raw,
+            org_id=str(agent_context.org_id),
+            user_id=str(agent_context.user_id),
+            dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
+            max_bytes=10 * 1024 * 1024,
+        )
+        if load_result is None:
+            raise _TemplateNotFound(
+                f"Template '{template_id_raw}' not found or access denied."
+            )
+        return (
+            load_result["data"],
+            load_result["filename"],
+            load_result["content_type"],
+        )
+
+    async def _store_and_return(
+        self,
+        *,
+        output_bytes: bytes,
+        out_content_type: str,
+        out_ext: str,
+        base_name: str,
+        template_label: str,
+        template_id_label: str,
+        output_format: str,
+        agent_context: AgentContext,
+        t0: float,
+        session_maker_factory,
+    ) -> ToolResult:
+        """Store the generated bytes as a GSageFile and return a ToolResult."""
         file_info: Optional[dict] = None
         try:
-            async with _get_session_maker()() as db_session:
+            async with session_maker_factory()() as db_session:
                 output_name = await _resolve_unique_filename(
                     db_session,
                     agent_context.org_id,
@@ -331,7 +638,7 @@ class GenerateDocumentTool(BaseTool):
                     agent_context=agent_context,
                     session=db_session,
                     description=(
-                        f"Generated from template '{template_filename}' "
+                        f"Generated from template '{template_label}' "
                         f"as {output_format.upper()}"
                     ),
                 )
@@ -351,7 +658,7 @@ class GenerateDocumentTool(BaseTool):
         return self._success(
             data={
                 "file": file_info,
-                "template_id": template_id,
+                "template_id": template_id_label,
                 "output_format": output_format,
             },
             execution_time_ms=elapsed,
@@ -367,12 +674,67 @@ class _UnsupportedOutputFormat(Exception):
     """Raised when the requested output format is incompatible with the template type."""
 
 
+class _TemplateNotFound(Exception):
+    """Raised when an uploaded template UUID can't be loaded."""
+
+
+class _BuiltinPandocBundle(Exception):
+    """Sentinel exception carrying the built-in Pandoc bundle directory.
+
+    Raised by :meth:`GenerateDocumentTool._resolve_template` when the
+    request maps to the built-in pandoc bundle. The caller catches it,
+    runs pandoc directly against the on-disk bundle, and returns.
+    """
+
+    def __init__(self, bundle_dir):
+        self.bundle_dir = bundle_dir
+        super().__init__(f"Use built-in pandoc bundle at {bundle_dir!r}")
+
+
+def _build_csv_bytes(
+    *,
+    rows_param,
+    headers_param,
+    content: str,
+    rows_to_csv,
+    markdown_table_to_csv,
+) -> bytes:
+    """Resolve CSV rows from explicit param / JSON content / Markdown table."""
+    import json  # noqa: PLC0415
+
+    headers: Optional[list[str]] = None
+    if isinstance(headers_param, list):
+        headers = [str(h) for h in headers_param]
+
+    # 1. Explicit rows parameter
+    if isinstance(rows_param, list) and rows_param:
+        rows = [r for r in rows_param if isinstance(r, dict)]
+        if not rows:
+            raise ValueError("'rows' must contain at least one JSON object.")
+        return rows_to_csv(rows, headers=headers)
+
+    # 2. JSON list embedded in content
+    stripped = content.strip()
+    if stripped.startswith("["):
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list) and parsed and all(isinstance(x, dict) for x in parsed):
+            return rows_to_csv(parsed, headers=headers)
+
+    # 3. Markdown pipe-table fallback
+    return markdown_table_to_csv(content)
+
+
 async def _convert(
     *,
     template_bytes: bytes,
+    template_filename: str,
     template_content_type: str,
     output_format: str,
     variables: dict,
+    content: str,
     render_jinja2_template,
     parse_md_front_matter,
     md_to_html,
@@ -380,6 +742,9 @@ async def _convert(
     html_to_pdf,
     fill_docx_template,
     docx_to_pdf,
+    extract_template_zip,
+    find_bundle_defaults_file,
+    pandoc_run_with_defaults,
 ) -> tuple[bytes, str, str]:
     """Dispatch to the correct conversion pipeline.
 
@@ -390,10 +755,26 @@ async def _convert(
     _UnsupportedOutputFormat
     FileNotFoundError
     RuntimeError
+    ValueError
     """
-    is_docx_template = template_content_type in (
-        _MIME_DOCX,
-        "application/zip",
+    is_zip_bundle = (
+        template_content_type == "application/zip"
+        and template_filename.lower().endswith(".zip")
+    )
+
+    if is_zip_bundle:
+        return await _pipeline_pandoc_bundle(
+            zip_bytes=template_bytes,
+            content=content,
+            output_format=output_format,
+            extract_template_zip=extract_template_zip,
+            find_bundle_defaults_file=find_bundle_defaults_file,
+            pandoc_run_with_defaults=pandoc_run_with_defaults,
+        )
+
+    is_docx_template = template_content_type == _MIME_DOCX or (
+        template_content_type == "application/zip"
+        and template_filename.lower().endswith(".docx")
     )
 
     if is_docx_template:
@@ -416,6 +797,46 @@ async def _convert(
         html_to_docx=html_to_docx,
         html_to_pdf=html_to_pdf,
     )
+
+
+async def _pipeline_pandoc_bundle(
+    *,
+    zip_bytes: bytes,
+    content: str,
+    output_format: str,
+    extract_template_zip,
+    find_bundle_defaults_file,
+    pandoc_run_with_defaults,
+) -> tuple[bytes, str, str]:
+    """Pandoc bundle (.zip) → PDF.
+
+    Extracts the ZIP into a temporary directory (zip-slip safe), locates
+    ``defaults.yaml``, then runs pandoc with ``cwd`` set to that directory
+    so all relative paths inside the bundle resolve correctly.
+    """
+    import os  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    if output_format != "pdf":
+        raise _UnsupportedOutputFormat(
+            "Pandoc bundles (.zip) only support 'pdf' output. "
+            f"Requested: '{output_format}'."
+        )
+
+    with tempfile.TemporaryDirectory(prefix="gsage_pandoc_") as tmp:
+        bundle_root = extract_template_zip(zip_bytes, tmp)
+        defaults_path = find_bundle_defaults_file(bundle_root)
+        if defaults_path is None:
+            raise ValueError(
+                "Pandoc bundle is missing 'defaults.yaml' (or 'defaults.yml')."
+            )
+        defaults_filename = os.path.basename(defaults_path)
+        pdf_bytes = await pandoc_run_with_defaults(
+            input_md=content,
+            bundle_dir=bundle_root,
+            defaults_filename=defaults_filename,
+        )
+    return pdf_bytes, _MIME_PDF, "pdf"
 
 
 async def _pipeline_md(

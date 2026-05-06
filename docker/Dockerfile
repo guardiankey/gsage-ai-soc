@@ -109,7 +109,7 @@ RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
     && apt-get install -y --no-install-recommends \
         gnupg nmap tshark whatweb pandoc \
         texlive-latex-base texlive-latex-recommended texlive-latex-extra \
-        texlive-base texlive-fonts-recommended lmodern fonts-dejavu \
+        texlive-base texlive-fonts-recommended texlive-fonts-extra lmodern fonts-dejavu \
     && rm -rf /var/lib/apt/lists/*
 
 # Application source — copied LAST (see runtime-minimal note).
@@ -175,7 +175,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc python3-dev libffi-dev libssl-dev libpq-dev \
         unixodbc-dev git gnupg nmap pandoc \
         texlive-latex-base texlive-latex-recommended texlive-latex-extra \
-        texlive-base texlive-fonts-recommended lmodern fonts-dejavu \
+        texlive-base texlive-fonts-recommended texlive-fonts-extra lmodern fonts-dejavu \
     && echo "wireshark-common wireshark-common/install-setuid boolean false" \
         | debconf-set-selections \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

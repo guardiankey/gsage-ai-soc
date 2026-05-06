@@ -1258,6 +1258,16 @@ class BaseTool(ABC):
         """
         try:
             from src.shared.services.file_store import get_file_store
+            from src.mcp_server.tenant_context import get_tenant_headers_or_none
+
+            # Attach the file to the current chat session when available so it
+            # can be later discovered via list_recent_artifacts / read_file.
+            tenant = get_tenant_headers_or_none()
+            session_id = (
+                str(tenant.gsage_session_id)
+                if tenant and tenant.gsage_session_id
+                else None
+            )
 
             store = get_file_store()
             gfile = await store.upload(
@@ -1271,6 +1281,7 @@ class BaseTool(ABC):
                 description=description,
                 trace_id=trace_id,
                 ttl_hours=ttl_hours,
+                session_id=session_id,
             )
             await session.commit()
             return {

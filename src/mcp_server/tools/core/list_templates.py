@@ -40,6 +40,20 @@ class ListTemplatesTool(BaseTool):
     Use the returned ``template_id`` with ``generate_document`` to produce
     a document from a template.
 
+    **Built-in templates**
+
+    In addition to user-uploaded templates, ``generate_document`` also
+    accepts the following packaged built-ins (not listed by this tool):
+
+    - ``builtin:default`` — minimal Markdown template with gSage CSS
+      (works for ``md``/``html``/``docx``/``pdf`` output).
+    - ``builtin:pandoc_gsage`` — Pandoc/LaTeX bundle with cover page, TOC
+      and gSage colors (``pdf`` output only).
+
+    When ``template_id`` is omitted in ``generate_document``, a built-in
+    is auto-selected based on ``output_format`` and ``pandoc``. For CSV
+    output no template is needed at all.
+
     Optional parameters
     -------------------
     scope (str):
@@ -47,7 +61,8 @@ class ListTemplatesTool(BaseTool):
         ``"all"`` (default), ``"organization"``, ``"department"``, or ``"user"``.
     content_type (str):
         Filter by MIME type (e.g. ``"application/vnd.openxmlformats-officedocument.wordprocessingml.document"``
-        for DOCX, or ``"text/markdown"`` for Markdown templates).
+        for DOCX, ``"text/markdown"`` for Markdown templates, or
+        ``"application/zip"`` for Pandoc bundles).
 
     Permission: ``files:read``
     """

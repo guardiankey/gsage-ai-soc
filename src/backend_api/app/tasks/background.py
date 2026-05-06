@@ -131,7 +131,24 @@ async def _async_execute_background_tool(task_id: str) -> None:
             # instead of falling back to the global session maker (which may
             # hold connections from a different event loop in fork workers).
             from src.mcp_server.tools.base import _tool_session_ctx  # noqa: PLC0415
+            from src.mcp_server.tenant_context import (  # noqa: PLC0415
+                TenantHeaders,
+                _tenant_var,
+            )
             _ctx_token = _tool_session_ctx.set(session)
+            # Re-establish the tenant context for the worker run so any helper
+            # that reads ``get_tenant_headers_or_none()`` (e.g. ``_store_file``
+            # to attach files to the originating chat session) sees the same
+            # identity as the original request.
+            tenant_snapshot = TenantHeaders(
+                org_id=agent_context.org_id,
+                user_id=agent_context.user_id,
+                org_role=getattr(agent_context, "org_role", "member") or "member",
+                interface=getattr(agent_context, "interface", "web") or "web",
+                gsage_session_id=task.gsage_session_id,
+                dept_id=getattr(agent_context, "dept_id", None),
+            )
+            _tenant_token = _tenant_var.set(tenant_snapshot)
             try:
                 tool_result = await asyncio.wait_for(
                     tool.execute(agent_context, dict(task.tool_params), effective_config, state),
@@ -139,6 +156,7 @@ async def _async_execute_background_tool(task_id: str) -> None:
                 )
             finally:
                 _tool_session_ctx.reset(_ctx_token)
+                _tenant_var.reset(_tenant_token)
 
             # Persist state changes
             if state != tool.state_defaults:

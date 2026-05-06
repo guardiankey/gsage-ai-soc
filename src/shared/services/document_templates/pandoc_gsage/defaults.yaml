@@ -1,0 +1,15 @@
+from: markdown
+to: pdf
+template: gsage.latex
+listings: true
+metadata:
+  numbersections: true
+  lang: "en-US"
+  toc: true
+  toc-own-page: true
+  titlepage: true
+  titlepage-text-color: "691b1b"
+  titlepage-rule-color: "691b1b"
+  titlepage-rule-height: 2
+resource-path:
+  - .
