@@ -44,8 +44,11 @@ class ListRecentArtifactsTool(BaseTool):
     Scoping
     -------
     Files are scoped to the current chat session when one is bound. When
-    no session is available, the user's own recent generated files are
-    returned. Other users' files are never visible.
+    no session is available, the user sees their own generated files
+    plus any files explicitly shared with their department
+    (``scope="department"``). Files of other users / other departments
+    are never visible. Admin permissions (``files:read:all``) do **not**
+    bypass this restriction for generated files.
 
     Use the returned ``file_id`` with ``read_file`` (text content) or
     with the ``download_path`` to retrieve the bytes via the API.
@@ -128,7 +131,17 @@ class ListRecentArtifactsTool(BaseTool):
             if session_id:
                 stmt = stmt.where(GSageFile.session_id == session_id)
             else:
-                stmt = stmt.where(GSageFile.user_id == agent_context.user_id)
+                # Visibility: own files OR department-shared files of the
+                # caller's department (mirrors /api/v1/orgs/{id}/files).
+                from sqlalchemy import or_  # noqa: PLC0415
+
+                scope_clauses = [GSageFile.user_id == agent_context.user_id]
+                if agent_context.dept_id is not None:
+                    scope_clauses.append(
+                        (GSageFile.scope == "department")
+                        & (GSageFile.dept_id == agent_context.dept_id)
+                    )
+                stmt = stmt.where(or_(*scope_clauses))
 
             if tool_filter:
                 stmt = stmt.where(GSageFile.tool_name == tool_filter)

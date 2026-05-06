@@ -1214,6 +1214,7 @@ class BaseTool(ABC):
         description: Optional[str] = None,
         trace_id: Optional[str] = None,
         ttl_hours: Optional[int] = None,
+        scope: str = "user",
     ) -> Optional[dict]:
         """Upload *data* to MinIO and record it in the DB.
 
@@ -1230,7 +1231,8 @@ class BaseTool(ABC):
         content_type:
             MIME type (e.g. "text/csv", "application/pdf").
         agent_context:
-            Current request context (used for ``org_id`` / ``user_id``).
+            Current request context (used for ``org_id`` / ``user_id`` /
+            ``dept_id``).
         session:
             Open ``AsyncSession``.  The new file row is added to the
             session but **not committed** — the caller (or BaseTool.run) handles
@@ -1241,6 +1243,14 @@ class BaseTool(ABC):
             Optional Agno run/trace ID for correlation.
         ttl_hours:
             Override the global TTL.  Pass ``0`` for no expiry.
+        scope:
+            Visibility scope. Must be ``"user"`` (private — default) or
+            ``"department"`` (visible to all members of the agent's dept).
+            ``"organization"`` is **not allowed** for tool-generated files
+            to prevent accidental cross-department disclosure.
+            When ``"department"`` is requested but the agent has no
+            ``dept_id``, the call falls back to ``"user"`` with a warning
+            (no error).
 
         Returns
         -------
@@ -1259,6 +1269,29 @@ class BaseTool(ABC):
         try:
             from src.shared.services.file_store import get_file_store
             from src.mcp_server.tenant_context import get_tenant_headers_or_none
+
+            # ── Resolve scope / dept_id ─────────────────────────────────
+            # Reject "organization" — tool-generated files must never be
+            # broadcast org-wide. Default to "user" if anything unexpected.
+            normalized_scope = (scope or "user").strip().lower()
+            if normalized_scope not in ("user", "department"):
+                logger.warning(
+                    "Tool %s: ignoring unsupported scope %r for generated file; using 'user'.",
+                    self.name, scope,
+                )
+                normalized_scope = "user"
+
+            effective_dept_id: Optional[str] = None
+            if normalized_scope == "department":
+                if agent_context.dept_id is not None:
+                    effective_dept_id = str(agent_context.dept_id)
+                else:
+                    logger.warning(
+                        "Tool %s: scope='department' requested but agent has no dept_id; "
+                        "falling back to scope='user'.",
+                        self.name,
+                    )
+                    normalized_scope = "user"
 
             # Attach the file to the current chat session when available so it
             # can be later discovered via list_recent_artifacts / read_file.
@@ -1282,6 +1315,8 @@ class BaseTool(ABC):
                 trace_id=trace_id,
                 ttl_hours=ttl_hours,
                 session_id=session_id,
+                scope=normalized_scope,
+                dept_id=effective_dept_id,
             )
             await session.commit()
             return {

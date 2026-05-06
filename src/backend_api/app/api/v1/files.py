@@ -125,22 +125,37 @@ async def list_files(
 ) -> FileListResponse:
     """List files owned by the current user in this org.
 
-    - Generated files: user sees own files; ``files:read:all`` sees all.
-    - Template files: user sees own files + org-scoped templates;
-      ``files:read:all`` sees all templates.
+    Visibility rules
+    ----------------
+    - **Generated files** (``category="generated"``): a user sees only their
+      own files plus department-scoped files of the same department they
+      belong to. The ``files:read:all`` permission is intentionally **not
+      honored for generated files** — admins do not see other users'
+      generated artifacts to prevent cross-department leakage.
+    - **Template files** (``category="template"``): user sees own templates,
+      org-scoped templates, and dept-scoped templates of their dept. The
+      ``files:read:all`` permission grants access to every template.
+    - When ``category`` is omitted, both rule sets are combined: own files,
+      org-scoped templates, dept-scoped (templates or generated) of the
+      caller's dept.
     """
     see_all = ctx.has_permission("files:read:all") or ctx.has_permission("*")
 
     stmt = select(GSageFile).where(GSageFile.org_id == org_id)
 
-    if not see_all:
-        if category == "template":
-            # User sees: own templates + org-scoped + dept-scoped (if in dept)
-            from sqlalchemy import and_, or_
-            dept_clause = (
-                (GSageFile.scope == "department")
-                & (GSageFile.dept_id == ctx.dept_id)
-            ) if ctx.dept_id else None
+    from sqlalchemy import and_, or_
+
+    # Build the dept-scope clause once (re-used for templates and for
+    # generated files where the see_all bypass does not apply).
+    dept_clause = (
+        (GSageFile.scope == "department") & (GSageFile.dept_id == ctx.dept_id)
+        if ctx.dept_id
+        else None
+    )
+
+    if category == "template":
+        # Templates honor the see_all bypass.
+        if not see_all:
             scope_clauses = [
                 GSageFile.user_id == ctx.user_id,
                 GSageFile.scope == "organization",
@@ -148,8 +163,45 @@ async def list_files(
             if dept_clause is not None:
                 scope_clauses.append(dept_clause)
             stmt = stmt.where(or_(*scope_clauses))
+    elif category == "generated":
+        # Generated files: bypass is NOT honored. Always restrict to
+        # owner OR same-dept (when scope=department).
+        scope_clauses = [GSageFile.user_id == ctx.user_id]
+        if dept_clause is not None:
+            scope_clauses.append(dept_clause)
+        stmt = stmt.where(or_(*scope_clauses))
+    else:
+        # No category filter: combine both rule sets.
+        if not see_all:
+            scope_clauses = [
+                GSageFile.user_id == ctx.user_id,
+                # org-scoped is only meaningful for templates, but allow it
+                # for completeness — generated files never use this scope.
+                and_(
+                    GSageFile.category == "template",
+                    GSageFile.scope == "organization",
+                ),
+            ]
+            if dept_clause is not None:
+                scope_clauses.append(dept_clause)
+            stmt = stmt.where(or_(*scope_clauses))
         else:
-            stmt = stmt.where(GSageFile.user_id == ctx.user_id)
+            # Even with see_all, generated files of other users must stay
+            # private; admins still see all templates and own generated.
+            scope_clauses = [
+                GSageFile.category == "template",
+                GSageFile.user_id == ctx.user_id,
+            ]
+            if dept_clause is not None:
+                # see_all admin still benefits from dept sharing on
+                # generated files of their own dept.
+                scope_clauses.append(
+                    and_(
+                        GSageFile.category == "generated",
+                        dept_clause,
+                    )
+                )
+            stmt = stmt.where(or_(*scope_clauses))
 
     if tool_name:
         stmt = stmt.where(GSageFile.tool_name == tool_name)
@@ -219,15 +271,25 @@ async def download_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
 
     see_all = ctx.has_permission("files:read:all") or ctx.has_permission("*")
-    if not see_all:
-        own_file = str(row.user_id) == str(ctx.user_id)
+    own_file = str(row.user_id) == str(ctx.user_id)
+    same_dept = (
+        ctx.dept_id is not None
+        and row.dept_id is not None
+        and str(row.dept_id) == str(ctx.dept_id)
+        and row.scope == "department"
+    )
+
+    if row.category == "generated":
+        # Generated files NEVER honor see_all; admins see only their own
+        # generated artifacts plus department-shared ones from their dept.
+        if not (own_file or same_dept):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied — generated file is not shared with you.",
+            )
+    elif not see_all:
         org_template = row.category == "template" and row.scope == "organization"
-        dept_template = (
-            row.category == "template"
-            and row.scope == "department"
-            and ctx.dept_id is not None
-            and str(row.dept_id) == str(ctx.dept_id)
-        )
+        dept_template = row.category == "template" and same_dept
         if not own_file and not org_template and not dept_template:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

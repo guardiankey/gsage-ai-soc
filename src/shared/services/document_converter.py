@@ -41,9 +41,29 @@ _PANDOC_TIMEOUT = 30
 #   - BMP Miscellaneous Symbols (U+2600–U+26FF): ☀ ☁ ✓ ✗ …
 #   - BMP Dingbats (U+2700–U+27BF): ✅ (U+2705), ❌ (U+274C), ➤ …
 #   - BMP Misc Symbols and Arrows (U+2B00–U+2BFF): ⭐ (U+2B50) …
+#   - BMP Emoticons (U+1F600–U+1F64F): 😀 😁 😂 …
+#   - BMP Symbols and Pictographs (U+1F300–U+1F5FF): 🌀 🌍 …
+#   - BMP Transport and Map Symbols (U+1F680–U+1F6FF): 🚀 🚁 …
+#   - BMP Enclosed Characters (U+2460–U+24FF): ① ② …
+#   - BMP Geometric Shapes (U+25A0–U+25FF): ■ □ ▲ …
+#   - BMP Arrows (U+2190–U+21FF): ← → ↑ ↓ …
 #   - Variation Selectors (U+FE00–U+FE0F): emoji presentation modifiers
+#   - Zero Width Joiner (U+200D): used in emoji sequences
+#   - Regional Indicator Symbols (U+1F1E6–U+1F1FF): flag emojis
 _LATEX_UNSAFE_RE = re.compile(
-    r"[\U00010000-\U0010FFFF\u2600-\u27BF\u2B00-\u2BFF\uFE00-\uFE0F]"
+    r"[\U00010000-\U0010FFFF"
+    r"\u2190-\u21FF"  # Arrows
+    r"\u2460-\u24FF"  # Enclosed alphanumerics
+    r"\u25A0-\u25FF"  # Geometric shapes
+    r"\u2600-\u27BF"  # Misc symbols & Dingbats
+    r"\u2B00-\u2BFF"  # Misc symbols and arrows
+    r"\U0001F300-\U0001F5FF"  # Misc Symbols and Pictographs
+    r"\U0001F600-\U0001F64F"  # Emoticons
+    r"\U0001F680-\U0001F6FF"  # Transport and Map
+    r"\U0001F1E6-\U0001F1FF"  # Regional indicators (flags)
+    r"\uFE00-\uFE0F"  # Variation selectors
+    r"\u200D"  # Zero Width Joiner
+    r"]"
 )
 
 
@@ -104,7 +124,25 @@ def strip_non_bmp(text: str) -> str:
     Strips non-BMP supplementary-plane characters (U+10000+, e.g. 📊) *and*
     BMP symbol/emoji blocks (e.g. ✅ U+2705, ⭐ U+2B50) that the default
     pdflatex engine cannot typeset without special font packages.
+
+    Also normalizes UTF-8 encoding to remove invalid byte sequences and
+    control characters that may cause pandoc/LaTeX errors.
     """
+    # First, ensure valid UTF-8 by encoding/decoding with error handling
+    # This replaces invalid UTF-8 sequences with the replacement character
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    else:
+        # Re-encode to catch any invalid sequences
+        text = text.encode("utf-8", errors="replace").decode("utf-8")
+
+    # Remove problematic control characters (keep \n, \r, \t)
+    text = "".join(
+        char for char in text
+        if char in "\n\r\t" or not (0 <= ord(char) < 32 or ord(char) == 127)
+    )
+
+    # Remove emoji and other LaTeX-unsafe characters
     return _LATEX_UNSAFE_RE.sub("", text)
 
 
@@ -206,6 +244,9 @@ async def html_to_pdf(html: str) -> bytes:
 async def html_to_docx(html: str) -> bytes:
     """Convert an HTML string to DOCX bytes using pandoc.
 
+    Non-BMP characters (emoji, supplementary symbols) are stripped before
+    conversion for consistency and to avoid potential encoding issues.
+
     Parameters
     ----------
     html:
@@ -224,7 +265,7 @@ async def html_to_docx(html: str) -> bytes:
         If pandoc exits with a non-zero status.
     """
     cmd = [_PANDOC_BIN, "--from=html", "--to=docx", "--output=-"]
-    return await _run_pandoc(cmd, input_data=html.encode("utf-8"))
+    return await _run_pandoc(cmd, input_data=strip_non_bmp(html).encode("utf-8"))
 
 
 def fill_docx_template(docx_bytes: bytes, variables: dict) -> bytes:
