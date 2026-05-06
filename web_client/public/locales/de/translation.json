@@ -68,6 +68,8 @@
     "welcomeSubtitle": "Frag mich alles über deine Sicherheitsumgebung",
     "approvalRequired": "Diese Ausführung wartet auf Genehmigung, bevor sie fortfährt.",
     "viewApprovals": "Genehmigungen anzeigen",
+    "errorBadge": "Fehlgeschlagen",
+    "taskEndedUnexpectedly": "Die Aufgabe des Agenten wurde unerwartet beendet. Bitte versuchen Sie es erneut.",
     "createConvError": "Fehler beim Erstellen der Unterhaltung",
     "newConvDesc": "Gib einen optionalen Titel für die neue Unterhaltung ein.",
     "renameConvDesc": "Gib einen neuen Titel für diese Unterhaltung ein.",

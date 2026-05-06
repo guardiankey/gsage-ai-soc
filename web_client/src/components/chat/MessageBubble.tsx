@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Copy, Check, User, Bot, FileText } from 'lucide-react'
+import { Copy, Check, User, Bot, FileText, AlertTriangle } from 'lucide-react'
 import { type Message } from '@/api/chat'
 import { cn, formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,7 @@ export function MessageBubble({ message }: Props) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const isUser = message.role === 'user'
+  const isError = !isUser && message.status === 'error'
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(message.content)
@@ -62,9 +63,17 @@ export function MessageBubble({ message }: Props) {
             'relative rounded-2xl px-4 py-3 text-sm shadow-sm',
             isUser
               ? 'bg-[hsl(var(--primary))] text-white rounded-tr-sm'
-              : 'bg-card border rounded-tl-sm'
+              : isError
+                ? 'bg-destructive/5 border border-destructive/40 rounded-tl-sm'
+                : 'bg-card border rounded-tl-sm'
           )}
         >
+          {isError && (
+            <div className="flex items-center gap-1.5 mb-2 text-xs font-medium text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span>{t('chat.errorBadge')}</span>
+            </div>
+          )}
           {isUser ? (
             <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
           ) : (

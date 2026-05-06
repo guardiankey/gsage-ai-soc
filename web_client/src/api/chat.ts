@@ -38,6 +38,11 @@ export interface Message {
     duration_ms?: number
   }
   attachments?: Attachment[]
+  // Optional run-level status surfaced from the backend.
+  // 'error' means the underlying agent run failed; the UI should render an
+  // error badge so users can see the turn ended in failure.
+  // 'paused' means the run is awaiting HITL approval.
+  status?: 'error' | 'paused' | null
 }
 
 export interface SendMessageResponse {
@@ -65,6 +70,8 @@ export interface SSEEvent {
   data?: string
   metadata?: SendMessageResponse['metadata']
   error?: string
+  // Optional run-level status emitted on message_end (e.g. 'error').
+  status?: 'error' | 'paused' | null
 }
 
 export async function listConversations(
@@ -151,7 +158,7 @@ export function streamMessage(
   message: string,
   callbacks: {
     onDelta: (text: string) => void
-    onDone: (metadata: SendMessageResponse['metadata'] | undefined) => void
+    onDone: (metadata: SendMessageResponse['metadata'] | undefined, status?: 'error' | 'paused' | null) => void
     onError: (err: string) => void
     onPaused?: (data: { pending_approvals: string[]; run_id?: string }) => void
   },
@@ -180,7 +187,7 @@ export function streamMessage(
         } else if (ev.event === 'run_paused') {
           callbacks.onPaused?.(parsed)
         } else if (ev.event === 'message_end') {
-          callbacks.onDone(parsed.metadata)
+          callbacks.onDone(parsed.metadata, parsed.status ?? null)
         } else if (ev.event === 'error') {
           callbacks.onError(parsed.detail ?? 'Streaming error')
         }

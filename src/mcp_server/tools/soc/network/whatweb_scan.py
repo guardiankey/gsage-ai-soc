@@ -311,7 +311,7 @@ class WhatwebScanTool(BaseTool):
 
     Execution:
         - Always runs in background (Celery). Requires human approval (HITL).
-        - timeout: 120 s · rate limit: 10/minute
+        - timeout: 600 s · rate limit: 10/minute
 
     Required parameter:
         targets (list[str]): One or more URLs (max 10).
@@ -325,7 +325,7 @@ class WhatwebScanTool(BaseTool):
     category: ClassVar[str] = "network"
     permissions: ClassVar[list[str]] = ["network:scan"]
     rate_limit_per_minute: ClassVar[int] = 10
-    timeout_seconds: ClassVar[int] = 120
+    timeout_seconds: ClassVar[int] = 600
     use_circuit_breaker: ClassVar[bool] = False
     always_background: ClassVar[bool] = True
     requires_approval: ClassVar[bool] = True

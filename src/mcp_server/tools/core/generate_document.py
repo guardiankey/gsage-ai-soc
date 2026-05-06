@@ -172,7 +172,11 @@ class GenerateDocumentTool(BaseTool):
 
     name: ClassVar[str] = "generate_document"
     version: ClassVar[str] = "1.0.0"
-    summary: ClassVar[str] = "Generate documents (PDF, DOCX, HTML) from Markdown content or DOCX templates"
+    summary: ClassVar[str] = (
+        "Generate documents (PDF, DOCX, HTML) from Markdown content or DOCX templates. "
+        "When rendering PDF via the built-in pandoc bundle, fenced 'mermaid' and 'dot' "
+        "code blocks are automatically converted to inline figures."
+    )
     category: ClassVar[str] = "document"
     core_tool: ClassVar[bool] = True
     permissions: ClassVar[list[str]] = ["files:read", "files:write"]
@@ -209,7 +213,14 @@ class GenerateDocumentTool(BaseTool):
                     "IMPORTANT: do NOT manually number headings (no '# 1. Scope', "
                     "no '## 1.1 Subsection') — the pandoc bundle auto-numbers "
                     "sections; manual numbering causes duplicated numbers like "
-                    "'1 1. Scope'."
+                    "'1 1. Scope'. "
+                    "DIAGRAMS: when targeting PDF via the pandoc bundle, fenced "
+                    "code blocks tagged with a diagram language are rendered as "
+                    "inline images. Supported in production: 'mermaid' (Mermaid "
+                    "diagrams) and 'dot' (Graphviz). Always validate Mermaid "
+                    "diagrams with the 'mermaid_validate' tool BEFORE embedding "
+                    "them here. Do NOT include surrounding emojis, HTML tags, or "
+                    "non-ASCII control characters inside diagram blocks."
                 ),
             },
             "output_format": {
@@ -227,7 +238,8 @@ class GenerateDocumentTool(BaseTool):
                 "description": (
                     "When true and no template_id is supplied, render PDF "
                     "via the built-in 'pandoc_gsage' Pandoc/LaTeX bundle "
-                    "(cover page, TOC, gSage colors). Ignored otherwise. "
+                    "(cover page, TOC, gSage colors, diagram.lua filter for "
+                    "mermaid/graphviz diagrams). Ignored otherwise. "
                     "Remember to include YAML front-matter (title, author, "
                     "date, subject, subtitle) at the top of 'content' so the "
                     "cover page is populated."

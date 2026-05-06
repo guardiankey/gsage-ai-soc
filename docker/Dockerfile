@@ -98,19 +98,35 @@ CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", \
 
 # =============================================================================
 # Stage 3b — runtime-tools: celery-worker-tools (network/security tools,
-#                           pandoc + texlive for report generation)
+#                           pandoc + texlive for report generation,
+#                           mermaid-cli + graphviz for diagram rendering
+#                           inside generate_document via the diagram.lua
+#                           Lua filter shipped in the pandoc_gsage bundle)
 # =============================================================================
 FROM base AS runtime-tools
 
 # tshark: non-interactive install (disable setuid prompt for wireshark-common).
+# chromium + nodejs + mermaid-cli: required by the diagram.lua filter (mermaid
+# engine) used by generate_document. Same flags as runtime-mermaid: skip the
+# bundled Puppeteer Chromium download and reuse the system one.
+# graphviz: required by the diagram.lua filter (dot engine).
 RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
         | debconf-set-selections \
     && DEBIAN_FRONTEND=noninteractive apt-get update \
     && apt-get install -y --no-install-recommends \
-        gnupg nmap tshark whatweb pandoc \
+        gnupg nmap tshark whatweb pandoc graphviz \
+        ca-certificates chromium fonts-liberation fonts-noto-color-emoji \
         texlive-latex-base texlive-latex-recommended texlive-latex-extra \
         texlive-base texlive-fonts-recommended texlive-fonts-extra lmodern fonts-dejavu \
-    && rm -rf /var/lib/apt/lists/*
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --omit=dev \
+        @mermaid-js/mermaid-cli@11.4.2 \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/* /root/.npm
+
+ENV PUPPETEER_SKIP_DOWNLOAD=1 \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Application source — copied LAST (see runtime-minimal note).
 COPY src/ /app/src/
@@ -173,7 +189,7 @@ FROM base AS dev
 # wheels if a new dependency is added without an image rebuild.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc python3-dev libffi-dev libssl-dev libpq-dev \
-        unixodbc-dev git gnupg nmap pandoc \
+        unixodbc-dev git gnupg nmap pandoc graphviz \
         texlive-latex-base texlive-latex-recommended texlive-latex-extra \
         texlive-base texlive-fonts-recommended texlive-fonts-extra lmodern fonts-dejavu \
     && echo "wireshark-common wireshark-common/install-setuid boolean false" \

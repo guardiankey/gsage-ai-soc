@@ -87,6 +87,12 @@ class MessageOut(BaseModel):
     created_at: Optional[datetime] = None
     metadata: Optional[MessageMetadata] = None
     attachments: Optional[list[dict]] = None
+    # Status of the underlying run when projecting from Agno history.
+    # ``None`` means "no special status" (default — completed or unknown).
+    # ``"error"`` indicates the run failed; the frontend should render this
+    # message with an error badge so users understand what happened.
+    # ``"paused"`` indicates the run is awaiting HITL approval.
+    status: Optional[str] = None
 
 
 class SendMessageResponse(BaseModel):

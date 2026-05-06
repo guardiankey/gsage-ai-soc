@@ -68,6 +68,8 @@
     "welcomeSubtitle": "Pergunte qualquer coisa sobre seu ambiente de segurança",
     "approvalRequired": "Esta execução está aguardando aprovação antes de continuar.",
     "viewApprovals": "Ver aprovações",
+    "errorBadge": "Falhou",
+    "taskEndedUnexpectedly": "A tarefa do agente terminou inesperadamente. Tente novamente.",
     "createConvError": "Falha ao criar conversa",
     "newConvDesc": "Informe um título opcional para a nova conversa.",
     "renameConvDesc": "Informe um novo título para esta conversa.",

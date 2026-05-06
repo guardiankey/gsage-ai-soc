@@ -68,6 +68,8 @@
     "welcomeSubtitle": "Ask me anything about your security environment",
     "approvalRequired": "This run is waiting for approval before continuing.",
     "viewApprovals": "View approvals",
+    "errorBadge": "Failed",
+    "taskEndedUnexpectedly": "The agent task ended unexpectedly. Please try again.",
     "createConvError": "Failed to create conversation",
     "newConvDesc": "Enter an optional title for the new conversation.",
     "renameConvDesc": "Enter a new title for this conversation.",

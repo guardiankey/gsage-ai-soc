@@ -64,6 +64,31 @@ class ContinuationSkipped(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Helper: classify continuation errors as transient vs. permanent
+# ---------------------------------------------------------------------------
+
+def _is_transient_continuation_error(text: str) -> bool:
+    """Return True for transient provider errors that are safe to retry.
+
+    Mirrors :func:`src.backend_api.app.api.v1.chat._is_transient_llm_error`
+    so the SSE handler and the Celery continuation tasks share the same
+    retry policy.
+    """
+    t = (text or "").lower()
+    return (
+        "503" in t
+        or "502" in t
+        or "504" in t
+        or "service unavailable" in t
+        or "unavailable" in t
+        or "timeout" in t
+        or "timed out" in t
+        or "connection reset" in t
+        or "connection refused" in t
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helper: extract text from RunOutput
 # ---------------------------------------------------------------------------
 
@@ -268,15 +293,39 @@ async def continue_after_bg_task(
         await _safe_mcp_cleanup(agent)
 
     # Agno swallows provider errors and returns RunOutput with status=RunStatus.error.
+    # The error run is already persisted in the Agno session, so the chat history
+    # will surface it via list_messages() (see chat.py). We only re-raise on
+    # transient errors so the Celery task can retry; for non-transient errors
+    # we return a friendly message so the user sees clear feedback.
     from agno.run import RunStatus
     if getattr(run_output, "status", None) == RunStatus.error:
+        err_content = str(getattr(run_output, "content", "") or "")
         log.error(
             "continue_after_bg_task: agent run failed — task=%s error=%s",
-            task_id, getattr(run_output, "content", ""),
+            task_id, err_content,
         )
-        raise RuntimeError(
-            f"Agent run failed: {getattr(run_output, 'content', 'LLM provider error')}"
+        # Mark notified so we don't loop forever on the same bg result
+        try:
+            await mark_bg_tasks_notified([t.id for t in pending_bg_tasks], db)
+            await db.commit()
+        except Exception as exc:
+            log.warning(
+                "continue_after_bg_task: commit of notified flag (after error) failed: %s",
+                exc,
+            )
+
+        if _is_transient_continuation_error(err_content):
+            # Surface as exception so Celery retries.
+            raise RuntimeError(f"Agent run failed (transient): {err_content}")
+
+        # Non-transient: return synthesized response so caller delivers it.
+        friendly = (
+            "I could not finish processing the background task results due to "
+            "a problem with the LLM provider. Please try again."
         )
+        if err_content:
+            friendly = f"{friendly}\n\n_Details: {err_content}_"
+        return tenant_session, friendly
 
     # Mark notified — commit immediately (no enclosing session.begin() here)
     await mark_bg_tasks_notified([t.id for t in pending_bg_tasks], db)
@@ -446,6 +495,8 @@ async def continue_after_approval(
             log.warning("continue_after_approval: flush of continued_at failed: %s", exc)
 
     # Continue the paused run (MCP cleanup in finally to avoid cancel busy-loop).
+    run_output = None
+    raised_exc: Optional[Exception] = None
     try:
         try:
             run_output = await agent.acontinue_run(run_id=run_id)
@@ -454,14 +505,45 @@ async def continue_after_approval(
                 "continue_after_approval: acontinue_run failed approval=%s run_id=%s: %s",
                 approval_id, run_id, exc, exc_info=True,
             )
-            raise
+            raised_exc = exc
     finally:
         await _safe_mcp_cleanup(agent)
+
+    # Handle exception path: re-raise on transient, surface friendly message
+    # on non-transient so the user gets feedback in chat.
+    if raised_exc is not None:
+        err_text = str(raised_exc)
+        if _is_transient_continuation_error(err_text):
+            raise raised_exc
+        friendly = (
+            "I could not complete the approved action due to a problem with "
+            "the LLM provider. Please try again."
+        )
+        if err_text:
+            friendly = f"{friendly}\n\n_Details: {err_text}_"
+        return tenant_session, friendly
+
+    # Handle Agno's swallowed-error path (RunStatus.error returned).
+    from agno.run import RunStatus
+    if getattr(run_output, "status", None) == RunStatus.error:
+        err_content = str(getattr(run_output, "content", "") or "")
+        log.error(
+            "continue_after_approval: agent run failed approval=%s error=%s",
+            approval_id, err_content,
+        )
+        if _is_transient_continuation_error(err_content):
+            raise RuntimeError(f"Agent run failed (transient): {err_content}")
+        friendly = (
+            "I could not complete the approved action due to a problem with "
+            "the LLM provider. Please try again."
+        )
+        if err_content:
+            friendly = f"{friendly}\n\n_Details: {err_content}_"
+        return tenant_session, friendly
 
     response_text = _extract_text(getattr(run_output, "content", None))
 
     # Check if still paused (multi-step HITL)
-    from agno.run import RunStatus
     if getattr(run_output, "status", None) == RunStatus.paused:
         new_approval_ids = extract_approval_ids_from_run_output(run_output)
         if new_approval_ids:

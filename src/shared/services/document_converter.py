@@ -682,6 +682,16 @@ async def pandoc_run_with_defaults(
         "--output=-",
     ]
 
+    # Build environment for the pandoc subprocess. When the bundle includes
+    # a ``puppeteer-config.json`` (used by the diagram.lua filter to launch
+    # mmdc/headless Chromium with ``--no-sandbox`` etc.), expose its absolute
+    # path via ``PANDOC_DIAGRAM_PUPPETEER_CONFIG`` so the Lua engine can pick
+    # it up regardless of the temp working directory it switches into.
+    env = os.environ.copy()
+    puppeteer_config = os.path.join(bundle_dir, "puppeteer-config.json")
+    if os.path.isfile(puppeteer_config):
+        env["PANDOC_DIAGRAM_PUPPETEER_CONFIG"] = os.path.abspath(puppeteer_config)
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -689,6 +699,7 @@ async def pandoc_run_with_defaults(
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
     except FileNotFoundError:
         raise FileNotFoundError(

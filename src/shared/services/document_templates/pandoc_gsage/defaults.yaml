@@ -2,6 +2,9 @@ from: markdown
 to: pdf
 template: gsage.latex
 listings: true
+filters:
+  - type: lua
+    path: diagram.lua
 metadata:
   numbersections: true
   lang: "en-US"

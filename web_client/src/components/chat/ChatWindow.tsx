@@ -156,6 +156,24 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
           </div>
         )}
 
+        {/* Unexpected end of background-task continuation: last visible
+            message is from the user but no active bg tasks remain and the
+            agent never produced a follow-up. This signals the continuation
+            task crashed silently (e.g. retries exhausted) so the user is
+            informed instead of left waiting. */}
+        {!isStreaming &&
+          !pendingApprovals &&
+          !hasActiveBgTasks &&
+          !pendingUserMessage &&
+          !streamingContent &&
+          (messages?.length ?? 0) > 0 &&
+          messages![messages!.length - 1].role === 'user' && (
+            <div className="flex items-start gap-2 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-800 dark:text-orange-200">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{t('chat.taskEndedUnexpectedly')}</span>
+            </div>
+          )}
+
         <div ref={bottomRef} className="h-1" />
       </div>
     </div>

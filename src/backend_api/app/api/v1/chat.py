@@ -626,68 +626,129 @@ async def list_messages(
     if agno_session is None:
         return []
 
-    # Use get_messages() directly so we can override skip_statuses — the default
-    # excludes RunStatus.paused, which causes the history to be empty while a run
-    # is waiting for HITL approval.
-    msgs = agno_session.get_messages(  # type: ignore[union-attr]
-        skip_roles=["system", "tool"],
-        skip_statuses=[RunStatus.cancelled, RunStatus.error],
-        last_n_runs=last_n,
-    )
+    # Iterate runs directly so we can attach the run-level status to each
+    # projected MessageOut. This is essential for surfacing failed runs to
+    # the frontend (which renders an error badge): if we use the default
+    # ``get_messages`` it silently filters runs whose status is ``error``
+    # or ``cancelled``, causing the user-visible chat to "lose" turns.
     out: list[MessageOut] = []
-    for msg in msgs:
-        content_str = _extract_text(getattr(msg, "content", None))
-        role = getattr(msg, "role", "assistant")
-        created_at: Optional[datetime] = getattr(msg, "created_at", None)
+    runs = list(getattr(agno_session, "runs", None) or [])
+    # Skip runs that are part of team members and apply ``last_n`` here.
+    runs = [r for r in runs if getattr(r, "parent_run_id", None) is None]
+    if last_n is not None and last_n > 0:
+        runs = runs[-last_n:]
 
-        # Strip internal injection blocks from user messages.  These blocks
-        # are prepended by the backend before sending to the LLM and should
-        # never be shown to the end-user.
-        if role == "user" and (
-            "[BACKGROUND_TASKS_COMPLETED]" in content_str
-            or "[ATTACHED_FILES]" in content_str
-            or "[DEPARTMENT_CONTEXT]" in content_str
-        ):
-            import re as _re
-            content_str = _re.sub(
-                r"\[BACKGROUND_TASKS_COMPLETED\].*?\[/BACKGROUND_TASKS_COMPLETED\]\s*---\s*",
-                "",
-                content_str,
-                flags=_re.DOTALL,
-            )
-            content_str = _re.sub(
-                r"\[ATTACHED_FILES\].*?\[/ATTACHED_FILES\]\s*---\s*",
-                "",
-                content_str,
-                flags=_re.DOTALL,
-            )
-            content_str = _re.sub(
-                r"\[DEPARTMENT_CONTEXT\].*?\[/DEPARTMENT_CONTEXT\]\s*---\s*",
-                "",
-                content_str,
-                flags=_re.DOTALL,
-            ).strip()
-            if not content_str:
-                continue
+    for run in runs:
+        run_status = getattr(run, "status", None)
+        # Skip cancelled runs entirely (user-initiated cancellation has no
+        # value in the chat history).
+        if run_status == RunStatus.cancelled:
+            continue
 
-        # Assistant messages with no textual content are tool-call-only messages.
-        # Enrich them with a summary of the tool(s) being invoked.
-        if role == "assistant" and not content_str.strip():
-            tool_calls = getattr(msg, "tool_calls", None)
-            if tool_calls:
-                content_str = _build_tool_call_summary(tool_calls)
-            else:
-                # Completely empty message — skip it
-                continue
+        # Map the run status to a user-visible message status badge.
+        # ``error`` and ``paused`` are surfaced; everything else is None.
+        status_str: Optional[str] = None
+        if run_status == RunStatus.error:
+            status_str = "error"
+        elif run_status == RunStatus.paused:
+            status_str = "paused"
 
-        out.append(
-            MessageOut(
-                id=getattr(msg, "id", None),
-                role=role,
-                content=content_str,
-                created_at=created_at,
+        run_messages = list(getattr(run, "messages", None) or [])
+
+        # When the run failed and produced no assistant message (or only an
+        # empty one), synthesize a friendly assistant message so the user
+        # understands the turn ended in error rather than seeing nothing.
+        has_visible_assistant = any(
+            getattr(m, "role", None) == "assistant"
+            and (
+                _extract_text(getattr(m, "content", None)).strip()
+                or getattr(m, "tool_calls", None)
             )
+            for m in run_messages
         )
+
+        for msg in run_messages:
+            role = getattr(msg, "role", "assistant")
+            if role in ("system", "tool"):
+                continue
+            # Skip history messages tagged from previous runs.
+            if getattr(msg, "from_history", False):
+                continue
+
+            content_str = _extract_text(getattr(msg, "content", None))
+            created_at: Optional[datetime] = getattr(msg, "created_at", None)
+
+            # Strip internal injection blocks from user messages.  These blocks
+            # are prepended by the backend before sending to the LLM and should
+            # never be shown to the end-user.
+            if role == "user" and (
+                "[BACKGROUND_TASKS_COMPLETED]" in content_str
+                or "[ATTACHED_FILES]" in content_str
+                or "[DEPARTMENT_CONTEXT]" in content_str
+            ):
+                import re as _re
+                content_str = _re.sub(
+                    r"\[BACKGROUND_TASKS_COMPLETED\].*?\[/BACKGROUND_TASKS_COMPLETED\]\s*---\s*",
+                    "",
+                    content_str,
+                    flags=_re.DOTALL,
+                )
+                content_str = _re.sub(
+                    r"\[ATTACHED_FILES\].*?\[/ATTACHED_FILES\]\s*---\s*",
+                    "",
+                    content_str,
+                    flags=_re.DOTALL,
+                )
+                content_str = _re.sub(
+                    r"\[DEPARTMENT_CONTEXT\].*?\[/DEPARTMENT_CONTEXT\]\s*---\s*",
+                    "",
+                    content_str,
+                    flags=_re.DOTALL,
+                ).strip()
+                if not content_str:
+                    continue
+
+            # Assistant messages with no textual content are tool-call-only messages.
+            # Enrich them with a summary of the tool(s) being invoked.
+            if role == "assistant" and not content_str.strip():
+                tool_calls = getattr(msg, "tool_calls", None)
+                if tool_calls:
+                    content_str = _build_tool_call_summary(tool_calls)
+                else:
+                    # Completely empty message — skip it
+                    continue
+
+            out.append(
+                MessageOut(
+                    id=getattr(msg, "id", None),
+                    role=role,
+                    content=content_str,
+                    created_at=created_at,
+                    status=status_str if role == "assistant" else None,
+                )
+            )
+
+        # Synthesize a placeholder assistant message for failed runs that
+        # produced no visible assistant output, so the user sees a clear
+        # failure indicator instead of an empty turn.
+        if status_str == "error" and not has_visible_assistant:
+            err_text = _extract_text(getattr(run, "content", None)).strip()
+            if not err_text:
+                err_text = (
+                    "(The agent could not complete this response. "
+                    "Please try again.)"
+                )
+            else:
+                err_text = f"(The agent could not complete this response: {err_text})"
+            out.append(
+                MessageOut(
+                    id=getattr(run, "run_id", None),
+                    role="assistant",
+                    content=err_text,
+                    created_at=getattr(run, "created_at", None),
+                    status="error",
+                )
+            )
 
     # -- Polling hints --------------------------------------------------------
     # Tell the frontend whether it should keep polling for new messages.
@@ -1100,7 +1161,10 @@ async def _sse_stream(
                         # Non-transient or content already started or retries exhausted
                         log.error("SSE run_error: %s", err_str)
                         yield _fmt_sse("content_delta", {"delta": _LLM_UNAVAILABLE_MSG})
-                        yield _fmt_sse("message_end", {"id": msg_id, "metadata": {}})
+                        yield _fmt_sse(
+                            "message_end",
+                            {"id": msg_id, "metadata": {}, "status": "error"},
+                        )
                         return
 
                     elif event_type == RunEvent.run_completed:
@@ -1140,7 +1204,10 @@ async def _sse_stream(
 
                 log.error("SSE agent stream error: %s", exc, exc_info=True)
                 yield _fmt_sse("content_delta", {"delta": _LLM_UNAVAILABLE_MSG})
-                yield _fmt_sse("message_end", {"id": msg_id, "metadata": {}})
+                yield _fmt_sse(
+                    "message_end",
+                    {"id": msg_id, "metadata": {}, "status": "error"},
+                )
                 return
 
         # Safety net: stream finished but no content was ever delivered.
@@ -1148,7 +1215,10 @@ async def _sse_stream(
         if not content_started and not pending_approval_ids:
             log.warning("SSE stream completed with no content — emitting error")
             yield _fmt_sse("content_delta", {"delta": _LLM_UNAVAILABLE_MSG})
-            yield _fmt_sse("message_end", {"id": msg_id, "metadata": {}})
+            yield _fmt_sse(
+                "message_end",
+                {"id": msg_id, "metadata": {}, "status": "error"},
+            )
             return
 
         end_metadata: dict = {"tokens": final_metrics}

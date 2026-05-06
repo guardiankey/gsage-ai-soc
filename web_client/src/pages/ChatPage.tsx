@@ -94,7 +94,7 @@ export default function ChatPage() {
           setPendingApprovals(true)
           setPendingUserMessage(message)
         },
-        onDone: (metadata: SendMessageResponse['metadata']) => {
+        onDone: (metadata: SendMessageResponse['metadata'], status?: 'error' | 'paused' | null) => {
           setIsStreaming(false)
           setHasActiveBgTasks(!!metadata?.has_active_bg_tasks)
           const wasPaused = pausedRef.current
@@ -107,6 +107,21 @@ export default function ChatPage() {
             // without it and the message would disappear from the UI.
             // The state resets when conversationId changes (navigation).
             queryClient.invalidateQueries({ queryKey: ['messages', orgId, targetConvId] })
+            queryClient.invalidateQueries({ queryKey: ['conversations', orgId] })
+            chatWindowRef.current?.scrollToBottom()
+          } else if (status === 'error') {
+            // Run errored. The backend has already persisted an error-status
+            // run; the next refetch will surface it as an error-badged message.
+            // Wait for that refetch to complete before clearing the streaming
+            // buffer, otherwise the message visibly "disappears" between the
+            // SSE end and the DB read.
+            queryClient
+              .invalidateQueries({ queryKey: ['messages', orgId, targetConvId] })
+              .then(() => {
+                setStreamingContent('')
+                accumulated = ''
+                setPendingUserMessage(null)
+              })
             queryClient.invalidateQueries({ queryKey: ['conversations', orgId] })
             chatWindowRef.current?.scrollToBottom()
           } else {
@@ -122,11 +137,18 @@ export default function ChatPage() {
           }
         },
         onError: (err: string) => {
+          // Do NOT clear streamingContent here — keep what was streamed so
+          // the user sees the partial response. The next refetch (triggered
+          // below) will surface the persisted error-status message.
           setIsStreaming(false)
-          setStreamingContent('')
-          accumulated = ''
-          setPendingUserMessage(null)
           setStreamError(err)
+          queryClient
+            .invalidateQueries({ queryKey: ['messages', orgId, targetConvId] })
+            .then(() => {
+              setStreamingContent('')
+              accumulated = ''
+              setPendingUserMessage(null)
+            })
         },
       }
 
