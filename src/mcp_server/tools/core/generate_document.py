@@ -173,9 +173,8 @@ class GenerateDocumentTool(BaseTool):
     name: ClassVar[str] = "generate_document"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
-        "Generate documents (PDF, DOCX, HTML) from Markdown content or DOCX templates. "
-        "When rendering PDF via the built-in pandoc bundle, fenced 'mermaid' and 'dot' "
-        "code blocks are automatically converted to inline figures."
+        "Generate PDF, DOCX, HTML or CSV documents from Markdown content or templates. "
+        "Fenced 'mermaid' and 'dot' blocks become inline diagrams in PDF output (pandoc bundle)."
     )
     category: ClassVar[str] = "document"
     core_tool: ClassVar[bool] = True

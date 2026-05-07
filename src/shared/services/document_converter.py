@@ -647,6 +647,14 @@ async def pandoc_run_with_defaults(
     (template, resource-path, includes, …) inside the defaults file resolve
     against the bundle.
 
+    When the bundle contains a ``puppeteer-config.json`` (used by the
+    ``diagram.lua`` Lua filter to call ``mmdc``), a *per-invocation* augmented
+    Puppeteer config is written to a temporary directory that also contains a
+    fresh Chromium user-data-dir.  This satisfies the chromium crashpad daemon
+    requirement for a writable ``--database`` path and avoids the error
+    ``chrome_crashpad_handler: --database is required`` that appears when the
+    process runs with HOME unset or inside a read-only filesystem.
+
     Parameters
     ----------
     input_md:
@@ -668,7 +676,10 @@ async def pandoc_run_with_defaults(
     RuntimeError
         If pandoc exits with a non-zero status.
     """
+    import json  # noqa: PLC0415
     import os  # noqa: PLC0415
+    import shutil  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
 
     defaults_path = os.path.join(bundle_dir, defaults_filename)
     if not os.path.isfile(defaults_path):
@@ -684,13 +695,45 @@ async def pandoc_run_with_defaults(
 
     # Build environment for the pandoc subprocess. When the bundle includes
     # a ``puppeteer-config.json`` (used by the diagram.lua filter to launch
-    # mmdc/headless Chromium with ``--no-sandbox`` etc.), expose its absolute
-    # path via ``PANDOC_DIAGRAM_PUPPETEER_CONFIG`` so the Lua engine can pick
-    # it up regardless of the temp working directory it switches into.
+    # mmdc/headless Chromium with ``--no-sandbox`` etc.), create a per-call
+    # augmented config that adds a writable ``--user-data-dir`` so
+    # chromium's crashpad daemon finds a valid database path.
     env = os.environ.copy()
-    puppeteer_config = os.path.join(bundle_dir, "puppeteer-config.json")
-    if os.path.isfile(puppeteer_config):
-        env["PANDOC_DIAGRAM_PUPPETEER_CONFIG"] = os.path.abspath(puppeteer_config)
+    static_config = os.path.join(bundle_dir, "puppeteer-config.json")
+
+    chrome_home: str | None = None
+    if os.path.isfile(static_config):
+        chrome_home = tempfile.mkdtemp(prefix="gsage-pandoc-chrome-")
+        user_data_dir = os.path.join(chrome_home, "profile")
+        os.makedirs(user_data_dir, exist_ok=True)
+
+        # Load the static args from the bundle config and append the
+        # per-call user-data-dir so concurrent pandoc runs don't share a
+        # Chromium profile (which would cause lock contention).
+        try:
+            with open(static_config, encoding="utf-8") as fh:
+                static_args: list[str] = json.load(fh).get("args", [])
+        except Exception:  # noqa: BLE001
+            static_args = []
+
+        dynamic_config_path = os.path.join(chrome_home, "puppeteer.json")
+        with open(dynamic_config_path, "w", encoding="utf-8") as fh:
+            json.dump(
+                {
+                    "args": [
+                        *static_args,
+                        f"--user-data-dir={user_data_dir}",
+                    ]
+                },
+                fh,
+            )
+
+        env["PANDOC_DIAGRAM_PUPPETEER_CONFIG"] = dynamic_config_path
+        # Chromium requires a writable HOME to place its crashpad socket.
+        env["HOME"] = chrome_home
+        env["XDG_CONFIG_HOME"] = chrome_home
+        env["XDG_CACHE_HOME"] = chrome_home
+        env["TMPDIR"] = chrome_home
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -702,14 +745,20 @@ async def pandoc_run_with_defaults(
             env=env,
         )
     except FileNotFoundError:
+        if chrome_home:
+            shutil.rmtree(chrome_home, ignore_errors=True)
         raise FileNotFoundError(
             f"pandoc binary not found. Ensure pandoc is installed (cmd: {cmd[0]!r})."
         )
 
-    stdout, stderr = await asyncio.wait_for(
-        proc.communicate(input=strip_non_bmp(input_md).encode("utf-8")),
-        timeout=_PANDOC_TIMEOUT * 2,  # bundle/LaTeX runs are slower
-    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(input=strip_non_bmp(input_md).encode("utf-8")),
+            timeout=_PANDOC_TIMEOUT * 2,  # bundle/LaTeX runs are slower
+        )
+    finally:
+        if chrome_home:
+            shutil.rmtree(chrome_home, ignore_errors=True)
 
     if proc.returncode != 0:
         err_msg = stderr.decode("utf-8", errors="replace").strip()

@@ -64,7 +64,7 @@ ALL_TARGETS=(backend_api worker_tools mcp_server frontend curator dev-full)
 # Returns "-" for images that have their own Dockerfile (no --target).
 image_target() {
     case "$1" in
-        backend_api)  echo "runtime-minimal" ;;
+        backend_api)  echo "runtime-api" ;;
         worker_tools) echo "runtime-tools" ;;
         mcp_server)   echo "runtime-mermaid" ;;
         dev-full)     echo "dev" ;;

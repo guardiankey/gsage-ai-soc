@@ -45,9 +45,9 @@ class GSageTool(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="Description for LLM and UI",
     )
     summary: Mapped[Optional[str]] = mapped_column(
-        String(200),
+        String(500),
         nullable=True,
-        comment="One-line summary (<120 chars) used in tool search results",
+        comment="One-line tool summary used in tool search results and LLM context",
     )
     category: Mapped[str] = mapped_column(
         String(50),

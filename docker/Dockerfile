@@ -7,7 +7,10 @@
 # Build targets:
 #   base              — python + build deps + pip install requirements.txt
 #                       (internal; not meant to be used directly)
-#   runtime-minimal   — backend_api, email_worker: lean runtime (default target)
+#   runtime-minimal   — email_worker: lean runtime
+#   runtime-api       — backend_api: runtime-minimal + chromium + node20 +
+#                       mermaid-cli (used by the Teams handler to render
+#                       Mermaid diagrams as PNG attachments inline)
 #   runtime-tools     — celery-worker-tools: tshark, nmap, whatweb, pandoc,
 #                       texlive (for report generation)
 #   runtime-mermaid   — mcp_server: chromium + node20 + mermaid-cli
@@ -18,7 +21,8 @@
 #                       container startup.
 #
 # Build examples (run from project root):
-#   docker build -f docker/Dockerfile --target runtime-minimal -t gsage-backend_api .
+#   docker build -f docker/Dockerfile --target runtime-minimal -t gsage-email_worker .
+#   docker build -f docker/Dockerfile --target runtime-api     -t gsage-backend_api .
 #   docker build -f docker/Dockerfile --target runtime-tools   -t gsage-celery-tools .
 #   docker build -f docker/Dockerfile --target runtime-mermaid -t gsage-mcp-server   .
 #   docker build -f docker/Dockerfile --target dev             -t gsage-python-dev-image .
@@ -93,6 +97,45 @@ COPY scripts/ /app/scripts/
 USER appuser
 EXPOSE 8000
 # Default command; override per service in docker-compose.
+CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", \
+     "src.backend_api.app.main:app", "--bind", "0.0.0.0:8000"]
+
+# =============================================================================
+# Stage 3a-bis — runtime-api: backend_api with mermaid-cli for Teams handler
+#
+# The Teams channel cannot render Mermaid blocks natively, so the backend
+# pre-processes agent responses, renders ```mermaid blocks via mmdc and
+# attaches the PNG inline as a Bot Framework attachment. This stage adds
+# chromium + node20 + @mermaid-js/mermaid-cli on top of runtime-minimal's
+# layout. The Mermaid renderer module is shared with the mcp_server
+# (src/shared/services/mermaid_renderer.py).
+# =============================================================================
+FROM base AS runtime-api
+
+# chromium + nodejs 20 + mermaid-cli (same setup as runtime-mermaid).
+# PUPPETEER_SKIP_DOWNLOAD=1 reuses the system chromium instead of letting
+# Puppeteer download its own bundled copy.
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gnupg ca-certificates chromium fonts-liberation fonts-noto-color-emoji \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --omit=dev \
+        @mermaid-js/mermaid-cli@11.4.2 \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/* /root/.npm
+
+ENV PUPPETEER_SKIP_DOWNLOAD=1 \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Application source — copied LAST (see runtime-minimal note).
+COPY src/ /app/src/
+COPY requirements.txt /app/requirements.txt
+COPY alembic.ini /app/alembic.ini
+COPY scripts/ /app/scripts/
+
+USER appuser
+EXPOSE 8000
 CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", \
      "src.backend_api.app.main:app", "--bind", "0.0.0.0:8000"]
 

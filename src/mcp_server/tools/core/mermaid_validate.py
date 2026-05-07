@@ -20,12 +20,8 @@ Design
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
-import tempfile
 import time
-from pathlib import Path
 from typing import ClassVar, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,35 +30,9 @@ from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.shared.config.settings import get_settings
 from src.shared.database import _get_session_maker
 from src.shared.security.context import AgentContext
+from src.shared.services.mermaid_renderer import run_mmdc as _run_mmdc
 
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Puppeteer / Chromium launch flags. Written to a fresh config file per
-# invocation so we can also inject a per-call `--user-data-dir` (chromium
-# refuses to share a profile across concurrent processes).
-#
-# --no-sandbox / --disable-setuid-sandbox: required because the MCP server runs
-#   as a non-root user inside a container without user namespace support.
-# --disable-dev-shm-usage: containers ship a tiny /dev/shm (default 64MB) that
-#   Chromium can exhaust, causing renderer crashes.
-# --disable-gpu / --disable-crash-reporter / --disable-breakpad: silence the
-#   crashpad/breakpad subsystem which would otherwise abort with
-#   "chrome_crashpad_handler: --database is required" when HOME is unset.
-#
-# Why no `--no-zygote`: it forces chromium to bootstrap crashpad eagerly in
-# the parent process, which is exactly the path that fails inside the
-# container; the default zygote model + writable user-data-dir works.
-# ---------------------------------------------------------------------------
-_PUPPETEER_CHROME_ARGS_BASE = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-gpu",
-    "--disable-crash-reporter",
-    "--disable-breakpad",
-]
 
 
 class MermaidValidateTool(BaseTool):
@@ -251,104 +221,6 @@ class MermaidValidateTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# Subprocess helper
+# Subprocess helper — moved to ``src.shared.services.mermaid_renderer``.
+# ``_run_mmdc`` above is the import alias for backwards compatibility.
 # ---------------------------------------------------------------------------
-
-async def _run_mmdc(
-    *,
-    diagram_text: str,
-    mmdc_bin: str,
-    want_png: bool,
-    timeout: int,
-) -> tuple[str, str, int, Optional[bytes]]:
-    """Run ``mmdc`` on ``diagram_text`` and return (stdout, stderr, rc, png).
-
-    Writes the input to a temporary ``.mmd`` file and (optionally) reads the
-    produced PNG. A throw-away Chromium profile + Puppeteer config is built
-    per invocation so concurrent calls don't collide on the user-data-dir
-    lock and chromium's crashpad has a writable database path.
-    Temporary files / dirs are always cleaned up.
-    """
-    tmp_in = tempfile.NamedTemporaryFile(
-        suffix=".mmd", mode="w", delete=False, encoding="utf-8"
-    )
-    tmp_out = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-    chrome_home = tempfile.mkdtemp(prefix="gsage-chrome-")
-    user_data_dir = os.path.join(chrome_home, "profile")
-    os.makedirs(user_data_dir, exist_ok=True)
-    puppeteer_config_path = os.path.join(chrome_home, "puppeteer.json")
-    Path(puppeteer_config_path).write_text(
-        json.dumps(
-            {
-                "args": [
-                    *_PUPPETEER_CHROME_ARGS_BASE,
-                    f"--user-data-dir={user_data_dir}",
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    # Force HOME / XDG_* into a writable location: the `appuser` system user
-    # has no home directory, which is what triggers the crashpad failure.
-    sub_env = {
-        **os.environ,
-        "HOME": chrome_home,
-        "XDG_CONFIG_HOME": chrome_home,
-        "XDG_CACHE_HOME": chrome_home,
-        "TMPDIR": chrome_home,
-    }
-    try:
-        tmp_in.write(diagram_text)
-        tmp_in.close()
-        tmp_out.close()
-
-        proc = await asyncio.create_subprocess_exec(
-            mmdc_bin,
-            "-i", tmp_in.name,
-            "-o", tmp_out.name,
-            "--scale", "3",
-            "--puppeteerConfigFile", puppeteer_config_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=sub_env,
-        )
-
-        try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            try:
-                await proc.wait()
-            except Exception:
-                pass
-            raise
-
-        stdout = stdout_b.decode("utf-8", errors="replace")
-        stderr = stderr_b.decode("utf-8", errors="replace")
-        rc = proc.returncode or 0
-
-        png_bytes: Optional[bytes] = None
-        if want_png and rc == 0:
-            try:
-                with open(tmp_out.name, "rb") as f:
-                    png_bytes = f.read()
-            except OSError:
-                png_bytes = None
-
-        return stdout, stderr, rc, png_bytes
-    finally:
-        for path in (tmp_in.name, tmp_out.name):
-            try:
-                if os.path.exists(path):
-                    os.unlink(path)
-            except OSError:
-                pass
-        # Best-effort cleanup of the per-invocation chromium profile.
-        try:
-            import shutil
-
-            shutil.rmtree(chrome_home, ignore_errors=True)
-        except Exception:
-            pass

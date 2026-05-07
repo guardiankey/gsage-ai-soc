@@ -21,11 +21,12 @@ notifications) is handled by ``channel_sender._deliver_teams``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import Any, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Path, Request, WebSocket, status
+from fastapi import APIRouter, Header, HTTPException, Path, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -135,97 +136,91 @@ async def teams_messages(
             graph_client=graph,
         )
 
-    try:
-        await adapter.process_activity(activity, auth_header, _on_turn)
-    except PermissionError as exc:
-        # botbuilder raises PermissionError on JWT validation failure.
-        logger.warning(
-            "teams_messages: auth rejected — profile_id=%s err=%s",
-            profile_id,
-            exc,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Bot Framework token",
-        ) from exc
-    except Exception:
-        logger.exception(
-            "teams_messages: adapter.process_activity raised — profile_id=%s",
-            profile_id,
-        )
-        raise
+    # Ack-imediato pattern: the Bot Framework Service abandons the HTTP POST
+    # (yielding a 499 in NGINX) if the response takes longer than ~15 s.  We
+    # therefore dispatch ``process_activity`` to a background task and return
+    # 200 immediately.  Outbound replies are produced by ``handle_teams_turn``
+    # via ``turn_context.send_activity`` against the ConnectorClient that the
+    # adapter creates from the trusted service URL — no inbound HTTP response
+    # body is needed for them.
+    async def _process_in_background() -> None:
+        try:
+            await adapter.process_activity(activity, auth_header, _on_turn)
+        except PermissionError as bg_exc:
+            logger.warning(
+                "teams_messages[bg]: auth rejected — profile_id=%s err=%s",
+                profile_id,
+                bg_exc,
+            )
+        except Exception:
+            logger.exception(
+                "teams_messages[bg]: process_activity raised — profile_id=%s",
+                profile_id,
+            )
 
+    asyncio.create_task(_process_in_background())
     return {"status": "ok"}
 
 
 # ── Bot Framework Streaming Extension (WebSocket) ──────────────────────────
+# REMOVED: The WebSocket-based Streaming Extensions path was replaced by the
+# REST-based outbound streaming protocol (see ``/{profile_id}/messages/stream``
+# below).  Microsoft's "Stream bot messages" feature uses regular HTTP POSTs
+# to the ConnectorClient with ``streamType`` entities, NOT WebSockets.
 
 
-@router.websocket("/{profile_id}/messages")
+@router.post(
+    "/{profile_id}/messages/stream",
+    summary="Microsoft Teams inbound webhook (REST streaming variant)",
+    status_code=status.HTTP_200_OK,
+)
 async def teams_messages_stream(
-    websocket: WebSocket,
-    profile_id: uuid.UUID,
-) -> None:
-    """WebSocket endpoint for the Bot Framework Streaming Extensions.
+    request: Request,
+    profile_id: uuid.UUID = Path(..., description="InterfaceProfile UUID"),
+    authorization: Optional[str] = Header(default=None),
+) -> dict:
+    """Streaming-enabled variant of :func:`teams_messages`.
 
-    When *Streaming* is enabled in the Azure Bot resource the Bot Framework
-    Service connects here via ``wss://…/v1/channels/teams/{profile_id}/messages``
-    instead of calling the POST endpoint.  This allows the bot to send
-    incremental (streaming) replies to Teams users without buffering the full
-    response first.
+    Configure this route as the Azure Bot **messaging endpoint** when you
+    want incremental token streaming (Microsoft "Stream bot messages"
+    REST protocol).  The route otherwise behaves identically to
+    ``POST /{profile_id}/messages``: ack-imediato (returns 200 right after
+    parsing the activity) and dispatches the turn to a background task.
 
-    Flow
-    ----
-    1. FastAPI accepts the WebSocket upgrade.
-    2. A thin adapter bridges Starlette's WebSocket to the
-       ``botframework.streaming.WebSocket`` ABC expected by
-       ``WebSocketServer``.
-    3. Incoming Bot Framework activity frames are handled by
-       ``_StreamingActivityHandler``, which delegates to the shared
-       ``handle_teams_turn`` callback — exactly as the HTTP POST path does.
-    4. The connection stays open until the Bot Framework Service closes it.
-
-    Azure Bot config
-    ----------------
-    Check **Streaming** (preview) in *Azure Bot → Settings → Messaging endpoint*
-    and set the endpoint to ``wss://your-domain/api/v1/channels/teams/{profile_id}/messages``.
+    The only behavioural difference is that the turn handler is invoked
+    with ``stream=True``, which makes it emit
+    ``informative → streaming → final`` frames against the same
+    ConnectorClient via ``turn_context.send_activity``.
     """
-    # Lazy imports — same pattern as teams_messages to keep startup fast.
     from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings
-    from botframework.streaming.request_handler import RequestHandler as BFRequestHandler
-    from botframework.streaming.streaming_response import (
-        StreamingResponse as BFStreamingResponse,
-    )
-    from botframework.streaming.transport.web_socket.web_socket import (
-        WebSocket as BFWebSocketABC,
-        WebSocketMessage as BFWSMessage,
-    )
-    from botframework.streaming.transport.web_socket.web_socket_close_status import (
-        WebSocketCloseStatus,
-    )
-    from botframework.streaming.transport.web_socket.web_socket_message_type import (
-        WebSocketMessageType,
-    )
-    from botframework.streaming.transport.web_socket.web_socket_server import (
-        WebSocketServer,
-    )
-    from botframework.streaming.transport.web_socket.web_socket_state import (
-        WebSocketState,
-    )
+    from botbuilder.schema import Activity
 
     profile = await _load_active_profile(profile_id)
     cfg = profile.interface_config or {}
-    app_id = cfg.get("app_id") or ""
-    app_password = cfg.get("app_password") or ""
+    app_id = cfg.get("app_id")
+    app_password = cfg.get("app_password")
     tenant_id = cfg.get("tenant_id")
 
     if not (app_id and app_password):
         logger.error(
-            "teams_messages_stream: profile %s missing app_id/app_password",
+            "teams_messages_stream: profile %s missing credentials",
             profile_id,
         )
-        await websocket.close(code=1008)  # Policy Violation
-        return
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Teams profile is misconfigured (credentials missing).",
+        )
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON body: {exc}",
+        ) from exc
+
+    activity = Activity().deserialize(body)
+    auth_header = authorization or ""
 
     adapter = _get_adapter(
         profile_id=profile_id,
@@ -236,108 +231,38 @@ async def teams_messages_stream(
         settings_cls=BotFrameworkAdapterSettings,
     )
     graph = (
-        _get_graph_client(profile_id, str(app_id), str(app_password), str(tenant_id))
+        _get_graph_client(
+            profile_id, str(app_id), str(app_password), str(tenant_id)
+        )
         if tenant_id
         else None
     )
 
-    # ── Bridge Starlette WebSocket → botframework.streaming.WebSocket ABC ──
-    class _StarletteWSAdapter(BFWebSocketABC):
-        """Adapts a Starlette WebSocket to the botframework.streaming WebSocket ABC."""
-
-        def __init__(self, ws: WebSocket) -> None:
-            self._ws = ws
-            self._state = WebSocketState.OPEN
-
-        @property
-        def status(self) -> WebSocketState:
-            return self._state
-
-        def dispose(self) -> None:
-            self._state = WebSocketState.CLOSED
-
-        async def close(
-            self, close_status: WebSocketCloseStatus, status_description: str
-        ) -> None:
-            self._state = WebSocketState.CLOSED
-            try:
-                await self._ws.close()
-            except Exception:
-                pass
-
-        async def receive(self) -> BFWSMessage:
-            try:
-                raw = await self._ws.receive()
-                if raw.get("type") == "websocket.receive":
-                    data = raw.get("bytes") or (raw.get("text") or "").encode()
-                    return BFWSMessage(
-                        data=list(data),
-                        message_type=WebSocketMessageType.BINARY,
-                    )
-                # websocket.disconnect or unknown
-                self._state = WebSocketState.CLOSED
-                return BFWSMessage(data=[], message_type=WebSocketMessageType.CLOSE)
-            except Exception:
-                self._state = WebSocketState.CLOSED
-                raise
-
-        async def send(
-            self, buffer: Any, message_type: WebSocketMessageType, end_of_message: bool
-        ) -> None:
-            raw: bytes = bytes(buffer) if buffer else b""
-            if message_type == WebSocketMessageType.TEXT:
-                await self._ws.send_text(raw.decode("utf-8"))
-            else:
-                await self._ws.send_bytes(raw)
-
-    # ── RequestHandler: processes each streaming activity frame ─────────────
-    class _StreamingActivityHandler(BFRequestHandler):
-        """Processes incoming Bot Framework activity requests from the stream."""
-
-        async def process_request(
-            self, request: Any, bflogger: Any, context: Any
-        ) -> BFStreamingResponse:
-            from botbuilder.schema import Activity
-
-            try:
-                body_str = await request.read_body_as_str()
-                activity = Activity().deserialize(__import__("json").loads(body_str))
-
-                async def _on_turn(turn_context: Any) -> None:
-                    await handle_teams_turn(
-                        profile=profile,
-                        turn_context=turn_context,
-                        graph_client=graph,
-                    )
-
-                await adapter.process_activity(activity, "", _on_turn)
-                return BFStreamingResponse.ok()
-            except Exception:
-                logger.exception(
-                    "teams_messages_stream: error processing activity — profile_id=%s",
-                    profile_id,
-                )
-                return BFStreamingResponse.internal_server_error(
-                    "Internal error processing activity"
-                )
-
-    await websocket.accept()
-
-    bf_socket = _StarletteWSAdapter(websocket)
-    server = WebSocketServer(socket=bf_socket, request_handler=_StreamingActivityHandler())
-
-    try:
-        closed_signal = await server.start()
-        await closed_signal
-    except Exception:
-        logger.exception(
-            "teams_messages_stream: WebSocket error — profile_id=%s", profile_id
+    async def _on_turn(turn_context):
+        await handle_teams_turn(
+            profile=profile,
+            turn_context=turn_context,
+            graph_client=graph,
+            stream=True,
         )
-    finally:
+
+    async def _process_in_background() -> None:
         try:
-            await websocket.close()
+            await adapter.process_activity(activity, auth_header, _on_turn)
+        except PermissionError as bg_exc:
+            logger.warning(
+                "teams_messages_stream[bg]: auth rejected — profile_id=%s err=%s",
+                profile_id,
+                bg_exc,
+            )
         except Exception:
-            pass
+            logger.exception(
+                "teams_messages_stream[bg]: process_activity raised — profile_id=%s",
+                profile_id,
+            )
+
+    asyncio.create_task(_process_in_background())
+    return {"status": "ok"}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────

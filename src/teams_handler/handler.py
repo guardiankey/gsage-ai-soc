@@ -42,6 +42,7 @@ async def handle_teams_turn(
     turn_context: Any,
     graph_client: Optional[Any] = None,
     redis_client: Optional[Any] = None,
+    stream: bool = False,
 ) -> None:
     """Process one Teams turn end-to-end.
 
@@ -53,11 +54,18 @@ async def handle_teams_turn(
                        resolution.
         redis_client:  Optional ``redis.asyncio`` client. When omitted, a
                        short-lived one is created from settings.
+        stream:        When ``True``, drive the Microsoft "Stream bot
+                       messages" REST protocol so that incremental tokens
+                       are delivered to Teams while the agent is still
+                       generating its reply.  See
+                       ``src/teams_handler/streaming.py``.
     """
     # Imports kept local to avoid pulling botbuilder + the worker stack
     # into modules that don't need them.
     from botbuilder.core import MessageFactory, TurnContext
     from botbuilder.schema import ConversationReference
+
+    from src.teams_handler.mermaid_attach import extract_and_render_mermaid
 
     from src.backend_api.app.core.tenant import TenantContext, permissions_for_role
     from src.backend_api.app.services.agent_factory import (
@@ -401,17 +409,135 @@ async def handle_teams_turn(
 
         _MAX_AGENT_RETRIES = 2
         run_output = None
-        for _attempt in range(_MAX_AGENT_RETRIES + 1):
-            run_output = await agent.arun(effective_text)
-            if getattr(run_output, "status", None) != RunStatus.error:
-                break
-            if _attempt < _MAX_AGENT_RETRIES:
-                await asyncio.sleep(2.0 * (2 ** _attempt))
+        # Set to True when we have already delivered the response via the
+        # streaming protocol (informative → streaming → final).  PHASE 3 then
+        # skips the synchronous ``turn_context.send_activity`` block to avoid
+        # double-posting.
+        _already_delivered = False
 
-        if getattr(run_output, "status", None) == RunStatus.error:
-            raise RuntimeError(
-                "LLM provider temporarily unavailable. Please try again."
-            )
+        if not stream:
+            for _attempt in range(_MAX_AGENT_RETRIES + 1):
+                run_output = await agent.arun(effective_text)
+                if getattr(run_output, "status", None) != RunStatus.error:
+                    break
+                if _attempt < _MAX_AGENT_RETRIES:
+                    await asyncio.sleep(2.0 * (2 ** _attempt))
+
+            if getattr(run_output, "status", None) == RunStatus.error:
+                raise RuntimeError(
+                    "LLM provider temporarily unavailable. Please try again."
+                )
+        else:
+            # ── Streaming variant ─────────────────────────────────────────
+            from agno.run.agent import RunEvent
+            from src.teams_handler.streaming import TeamsStreamSender
+
+            sender = TeamsStreamSender(turn_context)
+            accumulated = ""
+            stream_started = False
+            stream_aborted = False
+
+            try:
+                await sender.informative("Processando…")
+            except Exception:
+                logger.warning(
+                    "handle_teams_turn[stream]: informative frame failed; "
+                    "falling back to non-streaming path",
+                    exc_info=True,
+                )
+                stream_aborted = True
+
+            if not stream_aborted:
+                try:
+                    async for chunk in agent.arun(effective_text, stream=True):
+                        event_type = getattr(chunk, "event", None)
+
+                        if event_type == RunEvent.run_content:
+                            delta = getattr(chunk, "content", None)
+                            delta_text = (
+                                str(delta) if delta is not None else ""
+                            )
+                            if delta_text:
+                                accumulated += delta_text
+                                stream_started = True
+                                # Throttled: returns False if still inside the
+                                # 1.5 s buffer window — that's fine, the next
+                                # chunk will catch up.
+                                await sender.streaming(accumulated)
+
+                        elif event_type == RunEvent.run_paused:
+                            run_output = chunk
+                            stream_aborted = True
+                            break
+
+                        elif event_type == RunEvent.run_error:
+                            run_output = chunk
+                            stream_aborted = True
+                            break
+
+                        elif event_type == RunEvent.run_completed:
+                            run_output = chunk
+
+                        if sender.expired:
+                            # Approaching the 2-minute Bot Framework limit;
+                            # close the stream early.
+                            break
+                except Exception:
+                    logger.exception(
+                        "handle_teams_turn[stream]: agent stream error"
+                    )
+                    stream_aborted = True
+
+            # Decide how to close the stream.
+            if (
+                run_output is not None
+                and getattr(run_output, "status", None) == RunStatus.error
+            ):
+                # Surface as a generic transient error in PHASE 3.
+                raise RuntimeError(
+                    "LLM provider temporarily unavailable. Please try again."
+                )
+
+            if stream_started and not stream_aborted:
+                # Normal completion → emit the ``final`` frame.
+                final_text = accumulated
+                if run_output is not None:
+                    rc = getattr(run_output, "content", None)
+                    if rc:
+                        final_text = str(rc) or accumulated
+                try:
+                    delivery_text = final_text or accumulated
+                    # Render any ```mermaid blocks → inline PNG attachments.
+                    try:
+                        delivery_text, mermaid_attachments, _ = (
+                            await extract_and_render_mermaid(delivery_text)
+                        )
+                    except Exception:
+                        logger.warning(
+                            "handle_teams_turn[stream]: mermaid filter failed",
+                            exc_info=True,
+                        )
+                        mermaid_attachments = []
+                    await sender.finalize(
+                        delivery_text,
+                        attachments=mermaid_attachments or None,
+                    )
+                    _already_delivered = True
+                except Exception:
+                    logger.warning(
+                        "handle_teams_turn[stream]: finalize failed; "
+                        "PHASE 3 will resend",
+                        exc_info=True,
+                    )
+
+            if run_output is None:
+                # No completion event — synthesize a plain run_output-like
+                # value so PHASE 3 can persist whatever we accumulated.
+                class _PseudoRun:
+                    status = None
+                    content = accumulated
+                    run_id = None
+                run_output = _PseudoRun()
 
         # ═════════ PHASE 3 — persist results + reply ═══════════════════
         async with AsyncSession_() as fin_session:
@@ -462,11 +588,29 @@ async def handle_teams_turn(
                         raise ValueError("Agent returned an empty response")
 
                 max_len = settings.teams_max_message_length or _DEFAULT_MAX_LEN
-                for chunk in _split_text(response_text, max_len):
-                    msg = MessageFactory.text(chunk)
-                    # Teams renders Markdown natively when textFormat is set.
-                    msg.text_format = "markdown"
-                    await turn_context.send_activity(msg)
+                if not _already_delivered:
+                    delivery_text = response_text
+                    mermaid_attachments: list = []
+                    try:
+                        delivery_text, mermaid_attachments, _ = (
+                            await extract_and_render_mermaid(response_text)
+                        )
+                    except Exception:
+                        logger.warning(
+                            "handle_teams_turn: mermaid filter failed",
+                            exc_info=True,
+                        )
+                        delivery_text = response_text
+                        mermaid_attachments = []
+                    first = True
+                    for chunk in _split_text(delivery_text, max_len):
+                        msg = MessageFactory.text(chunk)
+                        # Teams renders Markdown natively when textFormat is set.
+                        msg.text_format = "markdown"
+                        if first and mermaid_attachments:
+                            msg.attachments = mermaid_attachments
+                        first = False
+                        await turn_context.send_activity(msg)
 
                 outbound_msg = GSageChannelMessage(
                     org_id=org_id,

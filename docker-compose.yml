@@ -208,7 +208,7 @@ services:
     # build:
     #   context: .
     #   dockerfile: docker/Dockerfile
-    #   target: runtime-minimal
+    #   target: runtime-api
     image: gsage-python-dev-image
     container_name: gsage-backend_api
     restart: unless-stopped
