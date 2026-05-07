@@ -151,7 +151,8 @@ def _markdown_to_html(text: str) -> str:
         # Fallback: wrap in <pre> — markdown-it-py should always be present
         return _plaintext_to_html(text)
 
-    _md = MarkdownIt("commonmark")
+    # "commonmark" preset + table rule (GFM extension not in CommonMark spec)
+    _md = MarkdownIt("commonmark").enable("table")
     body_html = _md.render(text)
     return _EMAIL_HTML_WRAPPER.format(body=body_html)
 

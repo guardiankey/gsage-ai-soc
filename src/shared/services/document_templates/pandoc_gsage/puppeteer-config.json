@@ -4,6 +4,7 @@
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu",
+    "--no-zygote",
     "--disable-crash-reporter",
     "--disable-breakpad"
   ]

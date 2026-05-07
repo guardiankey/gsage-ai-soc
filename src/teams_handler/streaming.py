@@ -27,6 +27,7 @@ Constraints
 
 from __future__ import annotations
 
+import functools
 import logging
 import time
 from typing import Any, Optional
@@ -38,6 +39,67 @@ MIN_BUFFER_SECONDS: float = 1.5
 
 # Hard cap enforced by the Bot Framework Service.
 MAX_STREAM_LIFETIME_SECONDS: float = 110.0  # leave headroom under the 120 s limit
+
+
+# ──────────────────────────────────────────────────────────────────────
+# ``streaminfo`` entity model
+# ----------------------------------------------------------------------
+# ``botbuilder.schema.Entity`` declares only the ``type`` field in its
+# ``_attribute_map``.  Any custom attribute we set (e.g. ``streamType``)
+# is therefore dropped by msrest's serialiser, and the Bot Framework
+# Service receives an empty ``{"type":"streaminfo"}`` entity — which it
+# rejects with::
+#
+#   (BadSyntax) Only start streaming and continue streaming types are
+#   allowed as a typing activity
+#
+# We extend the attribute map so the additional fields actually round-trip
+# to the wire.
+# ──────────────────────────────────────────────────────────────────────
+def _stream_info_entity_class() -> type:
+    from botbuilder.schema import Entity
+
+    class _StreamInfoEntity(Entity):  # type: ignore[misc]
+        _attribute_map = {
+            "type": {"key": "type", "type": "str"},
+            "stream_type": {"key": "streamType", "type": "str"},
+            "stream_id": {"key": "streamId", "type": "str"},
+            "stream_sequence": {"key": "streamSequence", "type": "int"},
+        }
+
+        def __init__(
+            self,
+            *,
+            stream_type: Optional[str] = None,
+            stream_id: Optional[str] = None,
+            stream_sequence: Optional[int] = None,
+            **kwargs: Any,
+        ) -> None:
+            super().__init__(type="streaminfo", **kwargs)
+            self.stream_type = stream_type
+            self.stream_id = stream_id
+            self.stream_sequence = stream_sequence
+
+    return _StreamInfoEntity
+
+
+@functools.lru_cache(maxsize=1)
+def _get_stream_info_entity_cls() -> type:
+    return _stream_info_entity_class()
+
+
+def _make_stream_info_entity(
+    *,
+    stream_type: str,
+    stream_id: Optional[str],
+    stream_sequence: Optional[int],
+) -> Any:
+    cls = _get_stream_info_entity_cls()
+    return cls(
+        stream_type=stream_type,
+        stream_id=stream_id,
+        stream_sequence=stream_sequence,
+    )
 
 
 class TeamsStreamSender:
@@ -73,27 +135,20 @@ class TeamsStreamSender:
     def _build_streaminfo_entity(
         self, *, stream_type: str, sequence: Optional[int]
     ) -> Any:
-        from botbuilder.schema import Entity
-
-        data: dict = {"type": "streaminfo", "streamType": stream_type}
-        if self.stream_id is not None:
-            data["streamId"] = self.stream_id
-        if sequence is not None:
-            data["streamSequence"] = sequence
-        ent = Entity()
-        ent.type = "streaminfo"
-        # Bot Framework expects the additional fields to be flattened on the
-        # entity, not nested. Use the deserialise helper to attach them.
-        try:
-            return Entity().deserialize(data)
-        except Exception:
-            # Older botbuilder builds: fall back to setting attributes.
-            for k, v in data.items():
-                try:
-                    setattr(ent, k, v)
-                except Exception:
-                    pass
-            return ent
+        # NOTE: ``botbuilder.schema.Entity`` only declares ``type`` in its
+        # ``_attribute_map``; any additional field set on the instance is
+        # silently dropped during ``serialize()``.  We therefore use a tiny
+        # subclass that extends ``_attribute_map`` so ``streamType``,
+        # ``streamId`` and ``streamSequence`` are emitted on the wire.
+        # Without this fix, the Bot Framework Service receives only
+        # ``{"type":"streaminfo"}`` and rejects the request with
+        # "Only start streaming and continue streaming types are allowed
+        #  as a typing activity".
+        return _make_stream_info_entity(
+            stream_type=stream_type,
+            stream_id=self.stream_id,
+            stream_sequence=sequence,
+        )
 
     # ----------------------------------------------------------- informative
     async def informative(self, text: str) -> None:
@@ -200,6 +255,19 @@ class TeamsStreamSender:
             activity.attachments = attachments
         try:
             await self.turn_context.send_activity(activity)
-        except Exception:
-            logger.exception("TeamsStreamSender.finalize: send_activity failed")
+        except Exception as exc:
+            # ``ContentStreamNotAllowed`` is benign: the typing bubble is
+            # gone (2-min timeout, user pressed *Stop*, or the client
+            # removed it).  PHASE 3 in the handler will resend the message
+            # via a regular ``message`` activity, so we don't need a stack
+            # trace here.
+            msg = str(exc)
+            if "ContentStreamNotAllowed" in msg or "stream message has been deleted" in msg.lower():
+                logger.info(
+                    "TeamsStreamSender.finalize: stream no longer available "
+                    "(%s) — PHASE 3 will deliver the message",
+                    msg.split("\n", 1)[0],
+                )
+            else:
+                logger.exception("TeamsStreamSender.finalize: send_activity failed")
             raise

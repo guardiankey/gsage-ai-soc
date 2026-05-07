@@ -280,15 +280,17 @@ class GenerateDocumentTool(BaseTool):
             "scope": {
                 "type": "string",
                 "enum": ["user", "department"],
+                "default": "user",
                 "description": (
-                    "Visibility scope of the generated file. 'user' (default) "
-                    "keeps the document private to the requesting user. "
-                    "'department' shares it with all members of the user's "
-                    "department. Organization-wide scope is not available "
-                    "for tool-generated files. If 'department' is requested "
-                    "but the user has no department, the file is stored as "
-                    "'user' instead. Only set 'department' when the user "
-                    "explicitly asks to share the document with their team."
+                    "Visibility scope of the generated file. ALWAYS use 'user' "
+                    "(default) UNLESS the user EXPLICITLY asks to share the "
+                    "document with their team/department. 'user' keeps the "
+                    "document private to the requesting user. 'department' "
+                    "makes it visible to ALL members of the user's department — "
+                    "only set this when the user explicitly requests sharing. "
+                    "Organization-wide scope is not available for generated files. "
+                    "If 'department' is set but the user has no department, "
+                    "the file falls back to 'user'."
                 ),
             },
         },

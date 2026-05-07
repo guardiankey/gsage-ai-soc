@@ -103,6 +103,7 @@ async def process_approval_delegations(
             delegation = GSageApprovalDelegation(
                 approval_id=ap_id,
                 org_id=ctx.org_id,
+                dept_id=getattr(ctx, "dept_id", None),
                 requester_user_id=ctx.user_id,
                 approver_user_id=approver_id,
                 tool_name=tool_name,

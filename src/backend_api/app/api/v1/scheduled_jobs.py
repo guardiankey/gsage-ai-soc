@@ -46,12 +46,14 @@ logger = logging.getLogger(__name__)
 async def _get_job_or_404(
     job_id: uuid.UUID,
     org_id: uuid.UUID,
+    user_id: uuid.UUID,
     db: AsyncSession,
 ) -> GSageScheduledJob:
     result = await db.execute(
         select(GSageScheduledJob).where(
             GSageScheduledJob.id == job_id,
             GSageScheduledJob.org_id == org_id,
+            GSageScheduledJob.user_id == user_id,
         )
     )
     job = result.scalar_one_or_none()
@@ -82,6 +84,7 @@ async def list_scheduled_jobs(
 
     stmt = select(GSageScheduledJob).where(
         GSageScheduledJob.org_id == ctx.org_id,
+        GSageScheduledJob.user_id == ctx.user_id,
     )
     if job_type is not None:
         stmt = stmt.where(GSageScheduledJob.job_type == job_type)
@@ -109,7 +112,7 @@ async def get_scheduled_job(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScheduledJobOut:
     ctx.require_permission("scheduled_jobs:read")
-    job = await _get_job_or_404(job_id, ctx.org_id, db)
+    job = await _get_job_or_404(job_id, ctx.org_id, ctx.user_id, db)
     return ScheduledJobOut.model_validate(job)
 
 
@@ -176,7 +179,7 @@ async def update_scheduled_job(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScheduledJobOut:
     ctx.require_permission("scheduled_jobs:write")
-    job = await _get_job_or_404(job_id, ctx.org_id, db)
+    job = await _get_job_or_404(job_id, ctx.org_id, ctx.user_id, db)
 
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -221,7 +224,7 @@ async def delete_scheduled_job(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     ctx.require_permission("scheduled_jobs:write")
-    job = await _get_job_or_404(job_id, ctx.org_id, db)
+    job = await _get_job_or_404(job_id, ctx.org_id, ctx.user_id, db)
 
     try:
         await asyncio.to_thread(remove_from_redbeat, job)
@@ -244,7 +247,7 @@ async def activate_scheduled_job(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScheduledJobOut:
     ctx.require_permission("scheduled_jobs:write")
-    job = await _get_job_or_404(job_id, ctx.org_id, db)
+    job = await _get_job_or_404(job_id, ctx.org_id, ctx.user_id, db)
 
     job.is_active = True
     try:
@@ -273,7 +276,7 @@ async def deactivate_scheduled_job(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScheduledJobOut:
     ctx.require_permission("scheduled_jobs:write")
-    job = await _get_job_or_404(job_id, ctx.org_id, db)
+    job = await _get_job_or_404(job_id, ctx.org_id, ctx.user_id, db)
 
     job.is_active = False
     try:

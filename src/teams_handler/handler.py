@@ -436,6 +436,17 @@ async def handle_teams_turn(
             accumulated = ""
             stream_started = False
             stream_aborted = False
+            # Set to True the first time a ```mermaid``` fence appears in the
+            # accumulated buffer.  When that happens we stop emitting
+            # streaming frames (the typing bubble would either show the raw
+            # mermaid source or a placeholder) and we will not call
+            # ``sender.finalize`` either, because Microsoft Teams does not
+            # fold the ``final`` frame back into the typing bubble when it
+            # carries an attachment — the result would be two messages
+            # (typing bubble + final w/ image).  Instead we attempt to
+            # delete the typing bubble after the agent completes and let
+            # PHASE 3 deliver one clean message with text + PNG attachment.
+            mermaid_detected = False
 
             try:
                 await sender.informative("Processando…")
@@ -459,11 +470,23 @@ async def handle_teams_turn(
                             )
                             if delta_text:
                                 accumulated += delta_text
-                                stream_started = True
-                                # Throttled: returns False if still inside the
-                                # 1.5 s buffer window — that's fine, the next
-                                # chunk will catch up.
-                                await sender.streaming(accumulated)
+                                if (
+                                    not mermaid_detected
+                                    and "```mermaid" in accumulated.lower()
+                                ):
+                                    mermaid_detected = True
+                                    logger.info(
+                                        "handle_teams_turn[stream]: "
+                                        "mermaid block detected — "
+                                        "disabling streaming frames; "
+                                        "PHASE 3 will deliver the final "
+                                        "message with PNG attachment"
+                                    )
+                                if not mermaid_detected:
+                                    stream_started = True
+                                    # Throttled: returns False if still
+                                    # inside the 1.5 s buffer window.
+                                    await sender.streaming(accumulated)
 
                         elif event_type == RunEvent.run_paused:
                             run_output = chunk
@@ -497,6 +520,49 @@ async def handle_teams_turn(
                 raise RuntimeError(
                     "LLM provider temporarily unavailable. Please try again."
                 )
+
+            # Mermaid path: skip finalize, delete the typing bubble, and let
+            # PHASE 3 deliver a single clean message with text + attachment.
+            if mermaid_detected and sender.has_started:
+                try:
+                    await turn_context.delete_activity(sender.stream_id)
+                except Exception:
+                    logger.warning(
+                        "handle_teams_turn[stream]: delete_activity for "
+                        "typing bubble failed (mermaid path); the typing "
+                        "frame may remain visible",
+                        exc_info=True,
+                    )
+                # Falling through with stream_started=False ensures the
+                # ``finalize`` block below is skipped and PHASE 3 takes over.
+
+            # Fallback: streaming produced no usable content (e.g. agent
+            # called a tool and the model didn't emit ``run_content`` deltas,
+            # or the async iterator raised before any chunk arrived).  Re-run
+            # the agent in non-streaming mode so PHASE 3 has something to
+            # deliver — otherwise the user sees only the "..." informative
+            # frame followed by the generic error message.
+            _stream_has_content = bool(accumulated.strip()) or bool(
+                run_output is not None
+                and getattr(run_output, "content", None)
+            )
+            if not _stream_has_content and getattr(
+                run_output, "status", None
+            ) != RunStatus.paused:
+                logger.warning(
+                    "handle_teams_turn[stream]: empty stream output — "
+                    "falling back to non-streaming agent.arun()"
+                )
+                for _attempt in range(_MAX_AGENT_RETRIES + 1):
+                    run_output = await agent.arun(effective_text)
+                    if getattr(run_output, "status", None) != RunStatus.error:
+                        break
+                    if _attempt < _MAX_AGENT_RETRIES:
+                        await asyncio.sleep(2.0 * (2 ** _attempt))
+                if getattr(run_output, "status", None) == RunStatus.error:
+                    raise RuntimeError(
+                        "LLM provider temporarily unavailable. Please try again."
+                    )
 
             if stream_started and not stream_aborted:
                 # Normal completion → emit the ``final`` frame.
@@ -582,7 +648,7 @@ async def handle_teams_turn(
                 else:
                     content = getattr(run_output, "content", None) if run_output else None
                     response_text = (
-                        str(content) if content else (str(run_output) if run_output else "")
+                        str(content) if content is not None else (str(run_output) if run_output else "")
                     )
                     if not response_text.strip():
                         raise ValueError("Agent returned an empty response")

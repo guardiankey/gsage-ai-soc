@@ -338,7 +338,10 @@ class ScheduledJobCrudTool(CrudBaseTool):
 
         result = await session.execute(
             select(GSageScheduledJob)
-            .where(GSageScheduledJob.org_id == agent_context.org_id)
+            .where(
+                GSageScheduledJob.org_id == agent_context.org_id,
+                GSageScheduledJob.user_id == agent_context.user_id,
+            )
             .order_by(GSageScheduledJob.created_at.desc())
             .limit(limit)
             .offset(offset)
@@ -368,6 +371,7 @@ async def _load_job(session, params: dict, agent_context: AgentContext) -> Optio
         select(GSageScheduledJob).where(
             GSageScheduledJob.id == job_id,
             GSageScheduledJob.org_id == agent_context.org_id,
+            GSageScheduledJob.user_id == agent_context.user_id,
         )
     )
     return result.scalar_one_or_none()

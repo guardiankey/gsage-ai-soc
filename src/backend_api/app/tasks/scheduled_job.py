@@ -87,6 +87,7 @@ def run_prompt_job(self, *, job_id: str, org_id: str | None = None, user_id: str
             return {"status": "skipped"}
 
         prompt = job.prompt_content
+        job_name: str = job.name  # captured before the session closes
 
     trace_id = str(uuid.uuid4())
     set_trace_context(trace_id=trace_id, org_id=effective_org_id, user_id=effective_user_id)
@@ -210,6 +211,22 @@ def run_prompt_job(self, *, job_id: str, org_id: str | None = None, user_id: str
                     job_id, job.max_runs,
                 )
             session.commit()
+
+        # Set the conversation title to the job name so it doesn't show as
+        # "Untitled" in the UI.  Only update when title is still NULL so that
+        # a user-defined rename is not overwritten on subsequent runs.
+        from sqlalchemy import select as sa_select  # noqa: PLC0415
+        from src.shared.models.tenant_session import GSageTenantSession  # noqa: PLC0415
+
+        ts = session.execute(
+            sa_select(GSageTenantSession).where(
+                GSageTenantSession.agno_session_id == f"sched_{job_id}"
+            )
+        ).scalar_one_or_none()
+        if ts is not None and ts.title is None:
+            ts.title = job_name
+            session.commit()
+            log.debug("run_prompt_job: set session title=%r for job %s", job_name, job_id)
 
     # NOTE: success-path ES trace is handled by persist_agno_run_projection
     # (post_hook) which writes to both agno-traces-* and agent-runs-* indices.

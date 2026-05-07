@@ -1,17 +1,21 @@
 """gSage AI — Approval Rule CRUD tool.
 
-Allows the AI agent to manage GSageApprovalRule records for the current org.
+Allows a department admin to manage GSageApprovalRule records **scoped to the
+currently active department** (from ``X-Department-Id`` header).
 
-    list    — list all active approval rules for the org        (requires crud:approval_rule:read)
-    add     — add a new approval rule                           (requires crud:approval_rule:write)
-    delete  — remove an approval rule by id                     (requires crud:approval_rule:write)
+    list    — list active approval rules for the current department  (crud:approval_rule:read)
+    add     — create (or update) a rule for this department          (crud:approval_rule:write + dept admin)
+    delete  — remove a rule by id (must belong to this department)   (crud:approval_rule:write + dept admin)
 
 Notes:
-    - org_id_pattern is always set to the current org's UUID (never "*").
-    - user_id_pattern defaults to "*" (all users in org) but can be a specific user UUID.
+    - A department context MUST be active (X-Department-Id header sent).
+    - org_id_pattern is always set to the current org's UUID.
+    - dept_id_pattern is always set to the current department's UUID (never "*").
+    - user_id_pattern defaults to "*" (all users in dept) but can be a specific user UUID.
     - tool_pattern defaults to "*" (all tools) but can be an exact tool name.
     - Approver is resolved by name or email from active members of the current org.
-    - When a duplicate pattern (org+user+tool) already exists the rule is updated in-place.
+    - Write operations require the caller to be a dept admin in the active department.
+    - When a duplicate pattern (org+dept+user+tool) already exists the rule is updated in-place.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from src.mcp_server.tools.base import ToolResult
 from src.mcp_server.tools.crud_base import CrudBaseTool
 from src.shared.models.approval_rule import GSageApprovalRule
 from src.shared.models.user import GSageUser
+from src.shared.models.user_department import DepartmentRole, GSageUserDepartment
 from src.shared.models.user_organization import GSageUserOrganization
 from src.shared.security.context import AgentContext
 
@@ -38,6 +43,7 @@ def _serialize(rule: GSageApprovalRule, approver_name: str | None = None) -> dic
     return {
         "id": str(rule.id),
         "org_id_pattern": rule.org_id_pattern,
+        "dept_id_pattern": rule.dept_id_pattern,
         "user_id_pattern": rule.user_id_pattern,
         "tool_pattern": rule.tool_pattern,
         "approver_user_id": str(rule.approver_user_id),
@@ -47,6 +53,24 @@ def _serialize(rule: GSageApprovalRule, approver_name: str | None = None) -> dic
         "description": rule.description,
         "created_at": rule.created_at.isoformat(),
     }
+
+
+async def _check_dept_admin(
+    session: AsyncSession,
+    agent_context: AgentContext,
+) -> bool:
+    """Return True if the user has the 'admin' role in the active department."""
+    if agent_context.dept_id is None:
+        return False
+    result = await session.execute(
+        select(GSageUserDepartment).where(
+            GSageUserDepartment.user_id == agent_context.user_id,
+            GSageUserDepartment.dept_id == agent_context.dept_id,
+            GSageUserDepartment.role == DepartmentRole.ADMIN,
+            GSageUserDepartment.is_active.is_(True),
+        )
+    )
+    return result.scalar_one_or_none() is not None
 
 
 async def _resolve_approver(
@@ -90,7 +114,7 @@ class ApprovalRuleCrudTool(CrudBaseTool):
 
     name: ClassVar[str] = "approval_rule"
     version: ClassVar[str] = "1.0.0"
-    summary: ClassVar[str] = "Configure human-in-the-loop approval workflow rules for tool execution"
+    summary: ClassVar[str] = "Configure human-in-the-loop approval workflow rules for the active department (dept admin only)"
     category: ClassVar[str] = "crud"
     rate_limit_per_minute: ClassVar[int] = 20
     timeout_seconds: ClassVar[int] = 15
@@ -170,11 +194,19 @@ class ApprovalRuleCrudTool(CrudBaseTool):
         session: AsyncSession,
         start: float,
     ) -> ToolResult:
+        if agent_context.dept_id is None:
+            return self._failure(
+                code="DEPT_REQUIRED",
+                message="A department context is required. Please select an active department first.",
+            )
+
         org_str = str(agent_context.org_id)
+        dept_str = str(agent_context.dept_id)
         result = await session.execute(
             select(GSageApprovalRule)
             .where(
                 GSageApprovalRule.org_id_pattern == org_str,
+                GSageApprovalRule.dept_id_pattern == dept_str,
                 GSageApprovalRule.is_active.is_(True),
             )
             .order_by(GSageApprovalRule.priority.desc(), GSageApprovalRule.created_at)
@@ -208,6 +240,18 @@ class ApprovalRuleCrudTool(CrudBaseTool):
         session: AsyncSession,
         start: float,
     ) -> ToolResult:
+        if agent_context.dept_id is None:
+            return self._failure(
+                code="DEPT_REQUIRED",
+                message="A department context is required. Please select an active department first.",
+            )
+
+        if not await _check_dept_admin(session, agent_context):
+            return self._failure(
+                code="FORBIDDEN",
+                message="Only department admins can create or modify approval rules.",
+            )
+
         approver_str = (params.get("approver") or "").strip()
         if not approver_str:
             return self._failure(code="INVALID_PARAMS", message="'approver' is required for action 'add'.")
@@ -217,6 +261,7 @@ class ApprovalRuleCrudTool(CrudBaseTool):
         priority = int(params.get("priority") or 0)
         description = params.get("description")
         org_str = str(agent_context.org_id)
+        dept_str = str(agent_context.dept_id)
 
         # Resolve approver to an actual user
         approver_user = await _resolve_approver(session, approver_str, agent_context.org_id)
@@ -233,6 +278,7 @@ class ApprovalRuleCrudTool(CrudBaseTool):
         existing = await session.execute(
             select(GSageApprovalRule).where(
                 GSageApprovalRule.org_id_pattern == org_str,
+                GSageApprovalRule.dept_id_pattern == dept_str,
                 GSageApprovalRule.user_id_pattern == user_id_pattern,
                 GSageApprovalRule.tool_pattern == tool_pattern,
             )
@@ -248,6 +294,7 @@ class ApprovalRuleCrudTool(CrudBaseTool):
         else:
             rule = GSageApprovalRule(
                 org_id_pattern=org_str,
+                dept_id_pattern=dept_str,
                 user_id_pattern=user_id_pattern,
                 tool_pattern=tool_pattern,
                 approver_user_id=approver_user.id,
@@ -278,6 +325,18 @@ class ApprovalRuleCrudTool(CrudBaseTool):
         session: AsyncSession,
         start: float,
     ) -> ToolResult:
+        if agent_context.dept_id is None:
+            return self._failure(
+                code="DEPT_REQUIRED",
+                message="A department context is required. Please select an active department first.",
+            )
+
+        if not await _check_dept_admin(session, agent_context):
+            return self._failure(
+                code="FORBIDDEN",
+                message="Only department admins can delete approval rules.",
+            )
+
         rule_id_str = (params.get("rule_id") or "").strip()
         if not rule_id_str:
             return self._failure(code="INVALID_PARAMS", message="'rule_id' is required for action 'delete'.")
@@ -294,13 +353,14 @@ class ApprovalRuleCrudTool(CrudBaseTool):
             select(GSageApprovalRule).where(
                 GSageApprovalRule.id == rule_id,
                 GSageApprovalRule.org_id_pattern == str(agent_context.org_id),
+                GSageApprovalRule.dept_id_pattern == str(agent_context.dept_id),
             )
         )
         rule = result.scalar_one_or_none()
         if not rule:
             return self._failure(
                 code="NOT_FOUND",
-                message=f"Rule '{rule_id_str}' not found in this org.",
+                message=f"Rule '{rule_id_str}' not found in the active department.",
             )
 
         await session.delete(rule)

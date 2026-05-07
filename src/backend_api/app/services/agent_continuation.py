@@ -122,9 +122,15 @@ async def _rebuild_tenant_context(
     db: AsyncSession,
     *,
     override_user_id: Optional[uuid.UUID] = None,
+    override_dept_id: Optional[uuid.UUID] = None,
     interface: str = "web",
 ) -> TenantContext:
-    """Rebuild a TenantContext from a stored TenantSession row."""
+    """Rebuild a TenantContext from a stored TenantSession row.
+
+    ``override_dept_id`` takes precedence over ``session.dept_id`` — used by
+    the approval continuation to restore the exact department context that was
+    active when the tool call was originally requested.
+    """
     user_id = override_user_id or session.user_id
     if user_id is None:
         raise ValueError(f"Session {session.id} has no user_id and no override provided")
@@ -139,13 +145,15 @@ async def _rebuild_tenant_context(
     membership = membership_result.scalar_one_or_none()
     role = membership.role if membership else "member"
 
+    dept_id = override_dept_id if override_dept_id is not None else session.dept_id
+
     return TenantContext(
         user_id=user_id,
         org_id=session.org_id,
         org_role=role,
         permissions=permissions_for_role(role),
         interface=interface,
-        dept_id=session.dept_id,
+        dept_id=dept_id,
     )
 
 
@@ -470,9 +478,16 @@ async def continue_after_approval(
 
     interface = _source_to_interface(tenant_session.source)
 
-    # Rebuild context under the ORIGINAL requester's identity
+    # Rebuild context under the ORIGINAL requester's identity.
+    # Use the dept_id stored on the delegation (populated at approval-request time)
+    # so that department-scoped file access works correctly during continuation,
+    # even when session.dept_id is NULL (sessions created before dept_id was persisted).
+    override_dept_id = delegation.dept_id if delegation is not None else None
     ctx = await _rebuild_tenant_context(
-        tenant_session, db, override_user_id=requester_user_id, interface=interface
+        tenant_session, db,
+        override_user_id=requester_user_id,
+        override_dept_id=override_dept_id,
+        interface=interface,
     )
 
     # Load org + user
