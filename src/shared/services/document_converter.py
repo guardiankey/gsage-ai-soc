@@ -19,6 +19,7 @@ import asyncio
 import io
 import logging
 import re
+import unicodedata
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -35,36 +36,52 @@ _PANDOC_BIN = "pandoc"
 # Subprocess timeout (seconds) for pandoc calls
 _PANDOC_TIMEOUT = 30
 
-# Regex matching characters that cause "Unicode character not set up for use with LaTeX"
-# errors when pandoc uses the default pdflatex engine.  Covers:
-#   - Non-BMP supplementary planes (U+10000–U+10FFFF): most emoji
-#   - BMP Miscellaneous Symbols (U+2600–U+26FF): ☀ ☁ ✓ ✗ …
-#   - BMP Dingbats (U+2700–U+27BF): ✅ (U+2705), ❌ (U+274C), ➤ …
-#   - BMP Misc Symbols and Arrows (U+2B00–U+2BFF): ⭐ (U+2B50) …
-#   - BMP Emoticons (U+1F600–U+1F64F): 😀 😁 😂 …
-#   - BMP Symbols and Pictographs (U+1F300–U+1F5FF): 🌀 🌍 …
-#   - BMP Transport and Map Symbols (U+1F680–U+1F6FF): 🚀 🚁 …
-#   - BMP Enclosed Characters (U+2460–U+24FF): ① ② …
-#   - BMP Geometric Shapes (U+25A0–U+25FF): ■ □ ▲ …
-#   - BMP Arrows (U+2190–U+21FF): ← → ↑ ↓ …
-#   - Variation Selectors (U+FE00–U+FE0F): emoji presentation modifiers
-#   - Zero Width Joiner (U+200D): used in emoji sequences
-#   - Regional Indicator Symbols (U+1F1E6–U+1F1FF): flag emojis
-_LATEX_UNSAFE_RE = re.compile(
-    r"[\U00010000-\U0010FFFF"
-    r"\u2190-\u21FF"  # Arrows
-    r"\u2460-\u24FF"  # Enclosed alphanumerics
-    r"\u25A0-\u25FF"  # Geometric shapes
-    r"\u2600-\u27BF"  # Misc symbols & Dingbats
-    r"\u2B00-\u2BFF"  # Misc symbols and arrows
-    r"\U0001F300-\U0001F5FF"  # Misc Symbols and Pictographs
-    r"\U0001F600-\U0001F64F"  # Emoticons
-    r"\U0001F680-\U0001F6FF"  # Transport and Map
-    r"\U0001F1E6-\U0001F1FF"  # Regional indicators (flags)
-    r"\uFE00-\uFE0F"  # Variation selectors
-    r"\u200D"  # Zero Width Joiner
-    r"]"
-)
+# Unicode code points in the "Symbol, Other" (So) category that pdflatex
+# can typeset via the standard T1 + inputenc utf8 setup without extra packages.
+_LATEX_SAFE_SO: frozenset[int] = frozenset([
+    0x00A9,  # © COPYRIGHT SIGN
+    0x00AE,  # ® REGISTERED SIGN
+    0x00B0,  # ° DEGREE SIGN
+    0x2122,  # ™ TRADE MARK SIGN  (\texttrademark via textcomp)
+])
+
+
+def _is_latex_safe(ch: str) -> bool:
+    """Return True if *ch* can be typeset by pdflatex with inputenc utf8 + fontenc T1.
+
+    Strips:
+    - Control characters (except \\t \\n \\r)
+    - Non-BMP code points (U+10000+)
+    - Unicode category "So" (Symbol, Other): emoji, pictographs, ⏳ ✅ ❌ ☀ ⭐ …
+      Exceptions: © ® ° ™ which pdflatex handles via T1/textcomp.
+    - Unicode category "Sm" above Latin-1 (U+00FF): → ← ∑ ∫ ∞ …
+      (require amssymb/unicode-math not loaded by default)
+    - Unicode categories "Cs" / "Co" / "Cn": surrogates, private use, unassigned
+    """
+    cp = ord(ch)
+    # Whitespace explicitly kept
+    if cp in (0x09, 0x0A, 0x0D):
+        return True
+    # Other control chars and DEL
+    if cp < 0x20 or cp == 0x7F:
+        return False
+    # ASCII printable — always safe
+    if cp <= 0x7E:
+        return True
+    # Non-BMP supplementary planes
+    if cp > 0xFFFF:
+        return False
+    cat = unicodedata.category(ch)
+    # Surrogates, private use, unassigned
+    if cat in ("Cs", "Co", "Cn"):
+        return False
+    # Symbol, Other: strip unless known to work in pdflatex
+    if cat == "So" and cp not in _LATEX_SAFE_SO:
+        return False
+    # Symbol, Math above Latin-1 Supplement: arrows, ∑, ∫ …
+    if cat == "Sm" and cp > 0x00FF:
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -118,32 +135,41 @@ def extract_template_variables(template_text: str) -> list[str]:
     return sorted(found)
 
 
+def find_latex_unsafe_chars(text: str) -> list[str]:
+    """Return sorted list of unique characters in *text* that pdflatex cannot typeset.
+
+    Useful for generating user-facing warnings before PDF generation.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for ch in text:
+        if ch not in seen and not _is_latex_safe(ch) and ch not in ("\t", "\n", "\r"):
+            seen.add(ch)
+            result.append(ch)
+    return result
+
+
 def strip_non_bmp(text: str) -> str:
     """Remove characters that cause LaTeX errors when pandoc generates PDF.
 
-    Strips non-BMP supplementary-plane characters (U+10000+, e.g. 📊) *and*
-    BMP symbol/emoji blocks (e.g. ✅ U+2705, ⭐ U+2B50) that the default
-    pdflatex engine cannot typeset without special font packages.
+    Uses :func:`_is_latex_safe` (Unicode-category based) instead of a fixed
+    regex, so newly-assigned emoji / symbol code-points are handled
+    automatically without updating a block-list.
 
-    Also normalizes UTF-8 encoding to remove invalid byte sequences and
-    control characters that may cause pandoc/LaTeX errors.
+    Strips:
+    - Non-BMP supplementary-plane characters (U+10000+, e.g. 📊 ⏳)
+    - BMP Symbol, Other ("So"): emoji, pictographs, ⏳ ✅ ❌ ☀ ⭐ …
+    - BMP Symbol, Math ("Sm") above Latin-1: → ← ∑ ∫ …
+    - Surrogates, private use, unassigned characters
+    - Control characters (except \\t \\n \\r)
+    - Invalid UTF-8 byte sequences
     """
-    # First, ensure valid UTF-8 by encoding/decoding with error handling
-    # This replaces invalid UTF-8 sequences with the replacement character
     if isinstance(text, bytes):
         text = text.decode("utf-8", errors="replace")
     else:
-        # Re-encode to catch any invalid sequences
         text = text.encode("utf-8", errors="replace").decode("utf-8")
 
-    # Remove problematic control characters (keep \n, \r, \t)
-    text = "".join(
-        char for char in text
-        if char in "\n\r\t" or not (0 <= ord(char) < 32 or ord(char) == 127)
-    )
-
-    # Remove emoji and other LaTeX-unsafe characters
-    return _LATEX_UNSAFE_RE.sub("", text)
+    return "".join(ch for ch in text if _is_latex_safe(ch))
 
 
 def render_jinja2_template(template_text: str, variables: dict) -> str:

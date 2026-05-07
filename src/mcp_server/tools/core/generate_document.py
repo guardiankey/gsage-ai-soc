@@ -312,6 +312,7 @@ class GenerateDocumentTool(BaseTool):
             html_to_docx,
             html_to_pdf,
             markdown_table_to_csv,
+            find_latex_unsafe_chars,
             md_to_html,
             pandoc_run_with_defaults,
             parse_md_front_matter,
@@ -346,9 +347,17 @@ class GenerateDocumentTool(BaseTool):
             )
 
         # ── Sanitize content for PDF/LaTeX generation ─────────────────────
-        # Remove emojis, invalid UTF-8 sequences, and control characters
-        # that cause pandoc/LaTeX errors. This is applied early to ensure
-        # all pipelines benefit from sanitization.
+        # Detect unsafe chars BEFORE stripping so we can warn the agent.
+        unsafe_chars = find_latex_unsafe_chars(content) if content else []
+        if unsafe_chars:
+            samples = ", ".join(
+                f"{c} (U+{ord(c):04X})" for c in unsafe_chars[:10]
+            )
+            log.warning(
+                "generate_document: stripping %d LaTeX-unsafe char(s) from content: %s",
+                len(unsafe_chars),
+                samples,
+            )
         content = strip_non_bmp(content)
 
         if output_format not in _OUTPUT_FORMATS:
