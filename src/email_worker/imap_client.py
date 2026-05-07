@@ -186,6 +186,29 @@ class IMAPClientWrapper:
             self._connected = False
             self._client = None
 
+    def _is_transport_alive(self) -> bool:
+        """Return True if the underlying asyncio transport is still open.
+
+        When the remote server closes an SSL connection the asyncio
+        ``SSLTransport`` transitions to a closing/closed state but Python
+        does **not** raise an exception — it only emits a WARNING
+        ("SSL connection is closed") on any subsequent write attempt.  This
+        check lets callers detect the silent drop *before* issuing commands
+        that would spin indefinitely without triggering the reconnect logic.
+        """
+        if not self._connected or self._client is None:
+            return False
+        try:
+            protocol = getattr(self._client, "protocol", None)
+            if protocol is None:
+                return False
+            transport = getattr(protocol, "transport", None)
+            if transport is None:
+                return False
+            return not transport.is_closing()
+        except Exception:
+            return False
+
     # ── IDLE loop ──────────────────────────────────────────────────────────
 
     async def idle_loop(
@@ -197,6 +220,11 @@ class IMAPClientWrapper:
         The loop refreshes the IDLE command every 28 minutes.
         Reconnects automatically using exponential back-off on errors.
 
+        Silently-dropped SSL connections (the server closes the TCP
+        session without an exception in Python) are detected via
+        ``_is_transport_alive()`` at the start of every iteration so the
+        reconnect path is triggered even when aioimaplib does not raise.
+
         Args:
             callback: ``async (raw_bytes, account_id) -> None``
                       Called once per new message with its raw RFC 5322 bytes.
@@ -204,6 +232,16 @@ class IMAPClientWrapper:
         back_off = 2
         while True:
             try:
+                # --- Detect silently-dropped SSL connections. -------------
+                # When the server closes the TCP session asyncio only emits
+                # a WARNING ("SSL connection is closed") on writes; it never
+                # raises, so the generic except-Exception block below would
+                # never be reached without this explicit check.
+                if not self._is_transport_alive():
+                    raise ConnectionError(
+                        "IMAP transport is closed (SSL dropped by server)"
+                    )
+
                 await self._process_new_messages(callback)
                 logger.debug(
                     "IMAPClientWrapper.idle_loop: entering IDLE — account=%s",
@@ -212,26 +250,47 @@ class IMAPClientWrapper:
                 idle_task = await self._client.idle_start(
                     timeout=_IDLE_REFRESH_SECONDS
                 )
-                await asyncio.wait_for(
-                    self._client.wait_server_push(),
-                    timeout=_IDLE_REFRESH_SECONDS,
-                )
-                self._client.idle_done()  # synchronous in aioimaplib
-                await idle_task
-                back_off = 2  # reset on success
+                # Wait for a server push (new mail / EXISTS / BYE) or the
+                # 28-minute timeout, then always terminate the IDLE command.
+                try:
+                    await asyncio.wait_for(
+                        self._client.wait_server_push(),
+                        timeout=_IDLE_REFRESH_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    # Normal 28-minute refresh — not an error.
+                    logger.debug(
+                        "IMAPClientWrapper.idle_loop: IDLE timeout, refreshing — account=%s",
+                        self._account.email,
+                    )
+                finally:
+                    try:
+                        self._client.idle_done()  # synchronous in aioimaplib
+                    except Exception:
+                        pass
 
+                # Wait for the server's tagged response to the DONE command.
+                # A 30-second timeout here catches a dead connection that
+                # would otherwise hang forever.
+                try:
+                    await asyncio.wait_for(idle_task, timeout=30)
+                except asyncio.TimeoutError:
+                    raise ConnectionError(
+                        "IMAP IDLE tagged response timed out — connection dead"
+                    )
+
+                # Check transport once more: idle_done() writes to the socket
+                # and a closed transport may not raise (just logs a warning).
+                if not self._is_transport_alive():
+                    raise ConnectionError(
+                        "IMAP transport closed after idle_done"
+                    )
+
+                back_off = 2  # reset only after a confirmed live iteration
                 await self._process_new_messages(callback)
 
-            except asyncio.TimeoutError:
-                # Normal: IDLE timeout reached, restart.
-                try:
-                    self._client.idle_done()  # synchronous in aioimaplib
-                except Exception:
-                    pass
-                logger.debug(
-                    "IMAPClientWrapper.idle_loop: IDLE timeout, refreshing — account=%s",
-                    self._account.email,
-                )
+            except asyncio.CancelledError:
+                raise
 
             except Exception as exc:
                 logger.error(
@@ -268,6 +327,29 @@ class IMAPClientWrapper:
         """
         back_off = 2
         while True:
+            # Same silent-drop detection as idle_loop (see docstring there).
+            if not self._is_transport_alive():
+                try:
+                    await self.disconnect()
+                except Exception:
+                    pass
+                logger.error(
+                    "IMAPClientWrapper.poll_loop: transport closed — account=%s; "
+                    "reconnecting in %ds",
+                    self._account.email,
+                    back_off,
+                )
+                await asyncio.sleep(back_off)
+                back_off = min(back_off * 2, _BACKOFF_MAX_SECONDS)
+                try:
+                    await self.connect()
+                except Exception as conn_exc:
+                    logger.error(
+                        "IMAPClientWrapper.poll_loop: reconnect failed — %s",
+                        conn_exc,
+                    )
+                continue
+
             try:
                 await self._process_new_messages(callback)
                 await asyncio.sleep(interval)
