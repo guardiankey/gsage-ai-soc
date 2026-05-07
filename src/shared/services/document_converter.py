@@ -71,9 +71,16 @@ def _is_latex_safe(ch: str) -> bool:
     # Non-BMP supplementary planes
     if cp > 0xFFFF:
         return False
+    # Variation selectors (U+FE00–FE0F) — emoji presentation modifiers
+    # commonly emitted alongside emoji; strip even when emoji itself is gone.
+    if 0xFE00 <= cp <= 0xFE0F:
+        return False
     cat = unicodedata.category(ch)
     # Surrogates, private use, unassigned
     if cat in ("Cs", "Co", "Cn"):
+        return False
+    # Format characters: ZWJ (U+200D), ZWNJ (U+200C), BOM (U+FEFF), bidi marks …
+    if cat == "Cf":
         return False
     # Symbol, Other: strip unless known to work in pdflatex
     if cat == "So" and cp not in _LATEX_SAFE_SO:
