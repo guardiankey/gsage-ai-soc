@@ -51,6 +51,13 @@ framework (audience: developers).
 | `csv_query` | 1 | `core:csv_query` | — | — | — | [core/csv/csv_query.md](core/csv/csv_query.md) |
 | `csv_soc` | 1 | `core:csv_soc` | — | — | — | [core/csv/csv_soc.md](core/csv/csv_soc.md) |
 
+## devops
+
+| Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
+| --- | ---: | --- | :---: | :---: | :---: | --- |
+| `gitlab_manage` | 1 | `gitlab:write` | ✓ | ✓ | — | [devops/gitlab/gitlab_manage.md](devops/gitlab/gitlab_manage.md) |
+| `gitlab_read` | 1 | `gitlab:read` | — | ✓ | — | [devops/gitlab/gitlab_read.md](devops/gitlab/gitlab_read.md) |
+
 ## dns
 
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
@@ -84,6 +91,8 @@ framework (audience: developers).
 
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
+| `change_file_scope` | 1 | `files:write` | — | — | — | [core/change_file_scope.md](core/change_file_scope.md) |
+| `list_recent_artifacts` | 1 | `agents:run` | — | — | — | [core/list_recent_artifacts.md](core/list_recent_artifacts.md) |
 | `pdf_analyzer` | 1 | `agents:run` | — | — | — | [core/pdf_analyzer.md](core/pdf_analyzer.md) |
 | `read_file` | 1 | `agents:run` | — | — | — | [core/read_file.md](core/read_file.md) |
 | `zip_tool` | 1 | `files:read`, `files:write` | — | — | — | [core/zip_tool.md](core/zip_tool.md) |

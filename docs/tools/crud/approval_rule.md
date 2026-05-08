@@ -11,7 +11,7 @@ gSage AI — Approval Rule CRUD tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `approval_rule` | Configure human-in-the-loop approval workflow rules for tool execution | `crud:approval_rule:read`, `crud:approval_rule:write` | — | — |
+| `approval_rule` | Configure human-in-the-loop approval workflow rules for the active department (dept admin only) | `crud:approval_rule:read`, `crud:approval_rule:write` | — | — |
 
 ## Environment variables
 

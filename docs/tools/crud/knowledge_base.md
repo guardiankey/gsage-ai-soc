@@ -30,6 +30,8 @@ _No configuration-derived environment variables._
   | `content` | `string` | — | [create] Text to remember (required for create). |
   | `tags` | `array` | — | [create] Optional tags for categorization. |
   | `user_scoped` | `boolean` | — | [create/search/list] true = user-level entry; false = org-wide entry visible to all users. |
+  | `kind` | `string` | — | [create] 'note' = explicit user request to remember; 'memory' = persistent personal preference/style captured automatically (forces user_scoped=true and applies a sensitive-content filter). |
+  | `previous_id` | `string` | — | [create] UUID of a prior entry that this one supersedes. When supplied, the previous entry is marked inactive and the new entry inherits its version+1. |
   | `expires_at` | `string` | — | [create] Optional ISO-8601 expiration date (UTC). |
 
 - **`search`** — _(no description)_

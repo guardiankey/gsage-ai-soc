@@ -65,6 +65,10 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `is_managed` | `boolean` | — | Filter by managed status (action=list only).  true=only managed, false=only unmanaged, omit=all. |
   | `page` | `integer` | — | First page to retrieve (action=list, default: 1). |
   | `max_pages` | `integer` | — | Maximum pages to fetch for action=list (default: 5). |
+  | `export_csv` | `boolean` | — | Persist all fetched endpoints as a CSV artifact (action=list only). PREFER CSV when the user asks to 'save', 'export' or 'download' the endpoint inventory — it is the natural format for tabular data and easier to open in spreadsheets. CSV is also generated automatically when the result exceeds 100 rows so the user always has a way to access the full data. |
+  | `export_json` | `boolean` | — | Persist all fetched endpoints as a JSON artifact (action=list only). Use only when the user explicitly asks for JSON or needs the file for programmatic post-processing — otherwise prefer 'export_csv'. |
+  | `resolve_group_names` | `boolean` | — | Resolve groupId → group name (best-effort) for action=list. Adds one extra RPC call per top-level group; falls back silently on permission errors. |
+  | `group_by` | `array` | — | Optional list of (normalised) column names to use for top-N analytics on action=list. When omitted, a sensible default set is chosen (machine_type, os_version, group_name, ...). |
 
 - **`details`** — full record for one endpoint_id
 
@@ -131,8 +135,13 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `recommendation_type` | `string` | — | Filter PHASR recommendations by type (action=phasr_recommendations only).  Values: allow_access, restrict_access, allow_access_request. |
   | `sort` | `string` | — | Sort PHASR recommendations by field (default: created_on). |
   | `dir` | `string` | — | Sort direction for PHASR recommendations (default: DESC). |
-  | `page` | `integer` | — | Page number (default: 1). |
+  | `page` | `integer` | — | First page to fetch (default: 1). With max_pages > 1, successive pages are walked starting from this offset. |
   | `per_page` | `integer` | — | Items per page (max 100, default: 30). |
+  | `max_pages` | `integer` | — | Maximum pages to fetch (default: 1 — single page). Increase to auto-paginate up to per_page × max_pages records. The shared overflow logic still caps the inline preview at 100 rows. |
+  | `export_csv` | `boolean` | — | Persist all fetched rows as a CSV artifact. PREFER CSV when the user asks to 'save', 'export' or 'download' the results — it is the natural format for tabular data. CSV is also generated automatically when more than 100 rows are returned. |
+  | `export_json` | `boolean` | — | Persist all fetched rows as a JSON artifact. Use only when the user explicitly asks for JSON — otherwise prefer 'export_csv'. |
+  | `group_by` | `array` | — | Optional list of column names for top-N analytics. When omitted, an action-specific default set is used. |
+  | `top_n` | `integer` | — | Top-N size for each grouped column (default: 10). |
 
 - **`phasr_recommendations`** — PHASR recommendations for a company
 

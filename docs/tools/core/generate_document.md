@@ -11,7 +11,7 @@ gSage AI — generate_document MCP tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `generate_document` | Generate documents (PDF, DOCX, HTML) from Markdown content or DOCX templates | `files:read`, `files:write` | — | ✓ |
+| `generate_document` | Generate PDF, DOCX, HTML or CSV documents from Markdown content or templates. Fenced 'mermaid' and 'dot' blocks become inline diagrams in PDF output (pandoc bundle). | `files:read`, `files:write` | — | ✓ |
 
 ## Environment variables
 
