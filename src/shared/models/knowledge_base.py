@@ -13,6 +13,7 @@ class GSageKnowledgeSource(str, enum.Enum):
     """Source of knowledge base entry."""
 
     USER_REQUEST = "user_request"      # User explicitly requested: "remember this"
+    USER_MEMORY = "user_memory"        # User-scoped persistent memory captured by agent
     AGENT_AUTO = "agent_auto"          # Agent automatically stored relevant finding
     ADMIN = "admin"                    # Admin manually added via REST API
     DOCUMENT_UPLOAD = "document_upload"  # Uploaded via /knowledge/ingest endpoint

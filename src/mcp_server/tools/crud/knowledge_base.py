@@ -26,7 +26,7 @@ from src.mcp_server.tools.base import ToolResult
 from src.mcp_server.tools.crud_base import CrudBaseTool
 from src.shared.models.knowledge_base import GSageKnowledgeSource
 from src.shared.security.context import AgentContext
-from src.shared.services.knowledge_service import KnowledgeService
+from src.shared.services.knowledge_service import KbUserSoftLimitError, KnowledgeService
 
 
 class KnowledgeBaseCrudTool(CrudBaseTool):
@@ -90,6 +90,25 @@ class KnowledgeBaseCrudTool(CrudBaseTool):
                     "false = org-wide entry visible to all users."
                 ),
             },
+            "kind": {
+                "type": "string",
+                "enum": ["note", "memory"],
+                "default": "note",
+                "description": (
+                    "[create] 'note' = explicit user request to remember; "
+                    "'memory' = persistent personal preference/style "
+                    "captured automatically (forces user_scoped=true and "
+                    "applies a sensitive-content filter)."
+                ),
+            },
+            "previous_id": {
+                "type": "string",
+                "description": (
+                    "[create] UUID of a prior entry that this one supersedes. "
+                    "When supplied, the previous entry is marked inactive and "
+                    "the new entry inherits its version+1."
+                ),
+            },
             "expires_at": {
                 "type": "string",
                 "description": "[create] Optional ISO-8601 expiration date (UTC).",
@@ -134,6 +153,21 @@ class KnowledgeBaseCrudTool(CrudBaseTool):
 
         tags: list[str] = params.get("tags", [])
         user_scoped: bool = params.get("user_scoped", True)
+        kind: str = (params.get("kind") or "note").strip().lower()
+        previous_id_raw = params.get("previous_id")
+        previous_id: Optional[str] = (
+            previous_id_raw.strip() if isinstance(previous_id_raw, str) and previous_id_raw.strip() else None
+        )
+
+        if kind == "memory":
+            # USER_MEMORY entries are personal by definition: force scope and
+            # mark the source so the auto-injection / sensitivity filter
+            # kick in regardless of how the LLM populates ``user_scoped``.
+            user_scoped = True
+            source_enum = GSageKnowledgeSource.USER_MEMORY
+        else:
+            source_enum = GSageKnowledgeSource.AGENT_AUTO
+
         expires_at: Optional[datetime] = None
 
         expires_at_raw = params.get("expires_at")
@@ -152,14 +186,21 @@ class KnowledgeBaseCrudTool(CrudBaseTool):
             entry = await svc.store_entry(
                 content=content,
                 agent_context=agent_context,
-                source=GSageKnowledgeSource.AGENT_AUTO,
+                source=source_enum,
                 is_validated=False,
                 user_scoped=user_scoped,
+                previous_id=previous_id,
                 tags=tags,
                 expires_at=expires_at,
             )
+        except KbUserSoftLimitError as exc:
+            return self._failure(code="USER_MEMORY_SOFT_LIMIT", message=str(exc))
         except ValueError as exc:
-            return self._failure(code="LIMIT_EXCEEDED", message=str(exc))
+            # KnowledgeService raises ValueError for sensitive-content rejection
+            # AND for hard limit overflow; both should surface to the LLM.
+            msg = str(exc)
+            code = "SENSITIVE_CONTENT" if "sensitive" in msg.lower() else "LIMIT_EXCEEDED"
+            return self._failure(code=code, message=msg)
 
         elapsed = int((time.monotonic() - start) * 1000)
         return self._success(
@@ -168,6 +209,9 @@ class KnowledgeBaseCrudTool(CrudBaseTool):
                 "content": entry.content,
                 "version": entry.version,
                 "user_scoped": user_scoped,
+                "kind": kind,
+                "source": entry.source,
+                "superseded_previous_id": previous_id,
                 "tags": entry.tags,
             },
             execution_time_ms=elapsed,
@@ -191,11 +235,23 @@ class KnowledgeBaseCrudTool(CrudBaseTool):
         user_scoped: bool = params.get("user_scoped", True)
 
         svc = KnowledgeService()
-        results = await svc.search_similar(query, agent_context, user_scoped=user_scoped)
+        entries = await svc.search_entries(query, agent_context, user_scoped=user_scoped)
 
         elapsed = int((time.monotonic() - start) * 1000)
         return self._success(
-            data={"query": query, "results": results, "count": len(results)},
+            data={
+                "query": query,
+                "results": [
+                    {
+                        "id": entry_id,
+                        "content": content,
+                        "score": score,
+                        "source": src,
+                    }
+                    for entry_id, content, score, src in entries
+                ],
+                "count": len(entries),
+            },
             execution_time_ms=elapsed,
         )
 

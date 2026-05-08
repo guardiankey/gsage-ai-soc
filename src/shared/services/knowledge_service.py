@@ -14,6 +14,7 @@ This service is consumed by:
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -31,10 +32,45 @@ logger = logging.getLogger(__name__)
 # ── Limits ─────────────────────────────────────────────────────────────────
 _MAX_ENTRIES_PER_ORG = 10_000
 _MAX_ENTRIES_PER_USER = 1_000
+# Soft warn threshold when storing USER_MEMORY entries.  When a user has
+# more than this many active memories, ``store_entry`` raises a special
+# ``KbUserSoftLimitError`` so the agent can prompt the user to review
+# and prune memories instead of silently growing the personal store.
+_USER_MEMORY_SOFT_LIMIT = 800
 _TOP_K_RESULTS = 5
 # nomic-embed-text default num_ctx is 2048 tokens (~6 chars/token conservatively → ~5000 chars).
 # Truncate to avoid "input length exceeds context length" from Ollama.
 _MAX_CONTENT_CHARS = 5_000
+
+
+# ── Sensitive-content filter (USER_MEMORY only) ────────────────────────────
+# Block obviously sensitive material from being stored as a user memory:
+#   - JWT-like tokens (three base64url-ish segments separated by dots)
+#   - Long isolated hashes (>=32 hex chars on a token boundary)
+#   - "password"/"senha"/"api_key" key=value pairs with non-trivial values
+# These are intentionally conservative; legitimate knowledge content
+# (procedures, addresses, names) should not match.
+_SENSITIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b"),
+    re.compile(r"\b[a-fA-F0-9]{32,}\b"),
+    re.compile(
+        r"(?ix)\b(?:password|senha|passwd|api[_\-\s]*key|secret|token)\s*[:=]\s*"
+        r"['\"]?[^\s'\"]{6,}",
+    ),
+)
+
+
+class KbUserSoftLimitError(RuntimeError):
+    """Raised when a user reaches the USER_MEMORY soft warning threshold.
+
+    The agent should surface this to the user and ask them to delete or
+    consolidate older memories before saving new ones.
+    """
+
+
+def _contains_sensitive(content: str) -> bool:
+    """Return True when *content* matches any sensitive-data heuristic."""
+    return any(p.search(content) for p in _SENSITIVE_PATTERNS)
 
 
 # ── Data transfer object ───────────────────────────────────────────────────
@@ -105,6 +141,96 @@ class KnowledgeService:
             logger.warning("Weaviate search failed: %s", exc)
             return []
 
+    async def search_similar_scored(
+        self,
+        query: str,
+        agent_context: AgentContext,
+        *,
+        user_scoped: bool = True,
+        limit: int = _TOP_K_RESULTS,
+    ) -> list[tuple[str, Optional[float], Optional[str]]]:
+        """Return top-K ``(content, score, user_id)`` tuples via nearText.
+
+        Used by the chat preamble builder to apply a relevance cutoff and
+        distinguish user-scoped notes from org-wide ones.
+
+        Score may be ``None`` when Weaviate omits it (rare); callers should
+        treat it as "unknown" and decide whether to keep the result.
+        Falls back silently to an empty list on errors — auto-injection
+        must never block the chat turn.
+        """
+        try:
+            client = await get_weaviate_client()
+            collection = client.collections.get(COLLECTION_NAME)
+            filters = self._build_filters(agent_context, user_scoped)
+
+            result = await collection.query.near_text(
+                query=query,
+                filters=filters,
+                limit=limit,
+                return_properties=["content", "user_id"],
+                return_metadata=MetadataQuery(score=True),
+                target_vector="default",
+            )
+            tuples: list[tuple[str, Optional[float], Optional[str]]] = []
+            for obj in result.objects:
+                content = str(obj.properties.get("content", ""))
+                uid_raw = obj.properties.get("user_id", "") or ""
+                uid = str(uid_raw) if uid_raw else None
+                score: Optional[float] = None
+                if obj.metadata is not None and obj.metadata.score is not None:
+                    try:
+                        score = float(obj.metadata.score)
+                    except (TypeError, ValueError):
+                        score = None
+                tuples.append((content, score, uid))
+            return tuples
+        except Exception as exc:
+            logger.warning("search_similar_scored failed: %s", exc)
+            return []
+
+    async def search_entries(
+        self,
+        query: str,
+        agent_context: AgentContext,
+        *,
+        user_scoped: bool = True,
+        limit: int = _TOP_K_RESULTS,
+    ) -> list[tuple[str, str, Optional[float], str]]:
+        """Return top-K ``(id, content, score, source)`` tuples via nearText.
+
+        Used by the MCP CRUD ``search`` action so the LLM gets entry IDs
+        back and can issue a follow-up ``create`` with ``previous_id`` to
+        supersede a duplicate, or ``delete`` by ID.
+        """
+        try:
+            client = await get_weaviate_client()
+            collection = client.collections.get(COLLECTION_NAME)
+            filters = self._build_filters(agent_context, user_scoped)
+
+            result = await collection.query.near_text(
+                query=query,
+                filters=filters,
+                limit=limit,
+                return_properties=["content", "source"],
+                return_metadata=MetadataQuery(score=True),
+                target_vector="default",
+            )
+            tuples: list[tuple[str, str, Optional[float], str]] = []
+            for obj in result.objects:
+                content = str(obj.properties.get("content", ""))
+                src = str(obj.properties.get("source", ""))
+                score: Optional[float] = None
+                if obj.metadata is not None and obj.metadata.score is not None:
+                    try:
+                        score = float(obj.metadata.score)
+                    except (TypeError, ValueError):
+                        score = None
+                tuples.append((str(obj.uuid), content, score, src))
+            return tuples
+        except Exception as exc:
+            logger.warning("search_entries failed: %s", exc)
+            return []
     async def store_entry(
         self,
         content: str,
@@ -120,7 +246,13 @@ class KnowledgeService:
         """Append-only insert with automatic vectorization.
 
         Raises:
-            ValueError: If org or user limits are exceeded.
+            ValueError: If the content is empty after trim, the org limit
+                is exceeded, or *source* is :class:`GSageKnowledgeSource.USER_MEMORY`
+                and the content matches a sensitive-data heuristic.
+            KbUserSoftLimitError: When *source* is ``USER_MEMORY`` and the
+                user already has more than the soft warning threshold of
+                active personal memories — the agent should ask the user
+                to review/delete before saving more.
         """
         # Truncate content to avoid Ollama "input length exceeds context length" errors.
         # nomic-embed-text typically runs with num_ctx=2048; large markdown easily overflows.
@@ -131,10 +263,37 @@ class KnowledgeService:
             )
             content = content[:_MAX_CONTENT_CHARS]
 
+        # USER_MEMORY entries are user-private and survive across sessions —
+        # apply a sensitive-data heuristic to keep secrets out of the store.
+        if source is GSageKnowledgeSource.USER_MEMORY and _contains_sensitive(content):
+            logger.info(
+                "KB USER_MEMORY rejected (sensitive content) org=%s user=%s",
+                agent_context.org_id, agent_context.user_id,
+            )
+            raise ValueError(
+                "Content looks sensitive (token/hash/credential) and was not "
+                "saved. Remove the secret and try again."
+            )
+
         client = await get_weaviate_client()
         collection = client.collections.get(COLLECTION_NAME)
 
         await self._enforce_limits(agent_context, user_scoped)
+
+        # Soft warning: too many user memories — ask the user to clean up.
+        # Applies only to USER_MEMORY (the source the agent uses for
+        # automatic capture); USER_REQUEST stays bounded by the hard
+        # ``_MAX_ENTRIES_PER_USER`` limit handled by ``_enforce_limits``.
+        if (
+            source is GSageKnowledgeSource.USER_MEMORY
+            and user_scoped
+            and await self._count_user_memories(agent_context) > _USER_MEMORY_SOFT_LIMIT
+        ):
+            raise KbUserSoftLimitError(
+                f"You already have more than {_USER_MEMORY_SOFT_LIMIT} saved "
+                "personal memories. Please review and delete older ones "
+                "before saving new memories."
+            )
 
         # Versioning
         version = 1
@@ -386,6 +545,25 @@ class KnowledgeService:
             await collection.data.update(
                 uuid=str(obj.uuid), properties={"is_active": False},
             )
+
+    async def _count_user_memories(self, agent_context: AgentContext) -> int:
+        """Count active USER_MEMORY entries for the current user."""
+        try:
+            client = await get_weaviate_client()
+            collection = client.collections.get(COLLECTION_NAME)
+            user_mem_filter = (
+                Filter.by_property("org_id").equal(str(agent_context.org_id))
+                & Filter.by_property("user_id").equal(str(agent_context.user_id))
+                & Filter.by_property("is_active").equal(True)
+                & Filter.by_property("source").equal(GSageKnowledgeSource.USER_MEMORY.value)
+            )
+            agg = await collection.aggregate.over_all(
+                filters=user_mem_filter, total_count=True,
+            )
+            return int(agg.total_count or 0)
+        except Exception as exc:
+            logger.warning("USER_MEMORY count failed: %s", exc)
+            return 0
 
     @staticmethod
     def _to_entry(obj) -> KnowledgeEntry:

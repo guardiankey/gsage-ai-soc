@@ -336,24 +336,15 @@ async def handle_teams_turn(
                     )
                     return
 
-                # Default department lookup (mirror of telegram_worker).
-                dept_row = (
-                    await session.execute(
-                        select(GSageDepartment)
-                        .join(
-                            GSageUserDepartment,
-                            GSageUserDepartment.dept_id == GSageDepartment.id,
-                        )
-                        .where(
-                            GSageUserDepartment.user_id == user.id,
-                            GSageUserDepartment.is_active.is_(True),
-                            GSageDepartment.org_id == org_id,
-                            GSageDepartment.is_active.is_(True),
-                        )
-                        .order_by(GSageDepartment.is_default.desc())
-                    )
-                ).scalars().first()
-                dept_id = dept_row.id if dept_row else None
+                # Resolve user's active department (default_dept_id from
+                # profile, fallback to first active membership preferring org default).
+                from src.backend_api.app.services.background_tasks import (
+                    resolve_user_active_dept_id,
+                )
+
+                dept_id = await resolve_user_active_dept_id(
+                    session, user.id, org_id
+                )
 
                 ctx = TenantContext(
                     user_id=user.id,

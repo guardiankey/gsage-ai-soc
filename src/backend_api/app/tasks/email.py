@@ -247,25 +247,13 @@ async def _process_async(
                 # -- 7b. Resolve department (account-scoped, user-default fallback) --
                 dept_id = account.dept_id
                 if dept_id is None:
-                    from src.shared.models.department import GSageDepartment
-                    from src.shared.models.user_department import GSageUserDepartment
-
-                    dept_result = await session.execute(
-                        select(GSageDepartment)
-                        .join(
-                            GSageUserDepartment,
-                            GSageUserDepartment.dept_id == GSageDepartment.id,
-                        )
-                        .where(
-                            GSageUserDepartment.user_id == user.id,
-                            GSageUserDepartment.is_active.is_(True),
-                            GSageDepartment.org_id == org_id,
-                            GSageDepartment.is_active.is_(True),
-                        )
-                        .order_by(GSageDepartment.is_default.desc())
+                    from src.backend_api.app.services.background_tasks import (
+                        resolve_user_active_dept_id,
                     )
-                    email_dept = dept_result.scalars().first()
-                    dept_id = email_dept.id if email_dept else None
+
+                    dept_id = await resolve_user_active_dept_id(
+                        session, user.id, org_id
+                    )
 
                 ctx = TenantContext(
                     user_id=user.id,
@@ -406,6 +394,15 @@ async def _process_async(
             if retry_attempt > 0:
                 retry_block = _build_retry_notice_block(retry_attempt)
                 effective_text = f"{retry_block}\n\n---\n{effective_text}"
+
+            from src.shared.services.kb_context import prepend_kb_hints
+
+            effective_text = await prepend_kb_hints(
+                effective_text,
+                org_id=ctx.org_id,
+                user_id=ctx.user_id,
+                dept_id=ctx.dept_id,
+            )
 
             run_output = await agent.arun(effective_text)
 

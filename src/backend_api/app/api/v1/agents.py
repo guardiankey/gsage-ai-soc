@@ -124,7 +124,15 @@ async def run_agent(
     )
 
     try:
-        run_output = await agent.arun(payload.message)
+        from src.shared.services.kb_context import prepend_kb_hints
+
+        effective_message = await prepend_kb_hints(
+            payload.message,
+            org_id=ctx.org_id,
+            user_id=ctx.user_id,
+            dept_id=ctx.dept_id,
+        )
+        run_output = await agent.arun(effective_message)
     except Exception as exc:
         log.error("Agent run failed agent=%s: %s", agent_id, exc, exc_info=True)
         raise HTTPException(

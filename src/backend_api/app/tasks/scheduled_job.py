@@ -109,7 +109,15 @@ def run_prompt_job(self, *, job_id: str, org_id: str | None = None, user_id: str
             session_id = f"sched_{job_id}"
             agent = build_agent(ctx=ctx, agent_id="cybersecurity", session_id=session_id, source="scheduled")
             try:
-                run_output = await agent.arun(prompt)
+                from src.shared.services.kb_context import prepend_kb_hints
+
+                effective_prompt = await prepend_kb_hints(
+                    prompt,
+                    org_id=ctx.org_id,
+                    user_id=ctx.user_id,
+                    dept_id=getattr(ctx, "dept_id", None),
+                )
+                run_output = await agent.arun(effective_prompt)
 
                 # Agno swallows provider errors and returns RunOutput with status=RunStatus.error.
                 if getattr(run_output, "status", None) == RunStatus.error:

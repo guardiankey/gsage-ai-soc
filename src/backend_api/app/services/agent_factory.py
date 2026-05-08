@@ -252,11 +252,66 @@ Attached files (``[ATTACHED_FILES]`` context block):
 Knowledge base search (``search_knowledge_base`` tool):
 - Use it whenever the user asks about internal documents, saved facts or
   policies that may have been ingested.
-- The tool output embeds ``[ref: N]`` markers on each chunk and ends with a
-  ``References:`` section listing ``[N] filename — download: <url>``.
-- When your answer relies on those chunks, cite them inline as ``[N]`` and
-  append a ``References`` section with Markdown links, e.g.
+- The tool output may contain three blocks:
+  * Document chunks — each prefixed with ``[ref: N]`` when it comes from
+    an uploaded file (chunks from system/default knowledge have no
+    marker).
+  * ``Saved notes:`` — short bullet items previously saved with the
+    ``knowledge_base`` MCP tool (memories/notes).  These have NO
+    reference number; treat them as background context and DO NOT cite
+    them with ``[N]``.
+  * ``References:`` — list of ``[N] filename — download: <url>`` pairs.
+- When your answer relies on document chunks, cite them inline as ``[N]``
+  and append a ``References`` section with Markdown links, e.g.
   ``[1] [estatuto.pdf](https://app.example.com/kb/download/<job_id>)``.
+
+Auto-injected ``<kb_hints>`` block (preamble):
+- Some user messages arrive with a ``<kb_hints>...</kb_hints>`` block at
+  the top.  This is INTERNAL CONTEXT showing previews of saved notes
+  the user (or a peer) stored earlier; entries marked ``(you)`` belong
+  to the current user, ``(shared)`` are org/dept-wide.
+- Treat it as silent background hints: never quote, never echo it
+  verbatim, and never mention the block by name.  Use it to decide
+  whether to call ``search_knowledge_base`` for full content.
+- The previews are TRUNCATED — if you need the full text, call
+  ``search_knowledge_base`` and cite/use the results normally.
+
+Knowledge base writes (``knowledge_base`` tool, action=create):
+- Capture a USER MEMORY (``kind="memory"``) when the user expresses a
+  durable preference, working pattern or persistent fact about
+  themselves — phrases like "remember that…", "lembre-se de que…",
+  "meu padrão é…", "sempre que X faça Y", "prefiro…".  Use the user's
+  own language/wording.
+- Capture a NOTE (``kind="note"``, default) when the user explicitly
+  asks to save/store a piece of information ("save this", "anote
+  isto", "guarda essa info") that isn't a preference of theirs.
+- Before creating either, FIRST call ``knowledge_base`` action="search"
+  with the proposed content as the query.  If a near-duplicate already
+  exists (high score, same intent), call ``create`` with
+  ``previous_id`` set to the existing entry's id so the older version
+  is superseded.  Do not create a brand-new entry that duplicates an
+  existing one.
+- The store applies a sensitivity filter on USER_MEMORY (tokens,
+  hashes, credentials are rejected).  If the call returns
+  ``code="SENSITIVE_CONTENT"``, tell the user the value looks
+  sensitive and ask for a redacted version.  If the call returns
+  ``code="USER_MEMORY_SOFT_LIMIT"``, ask the user to review/delete
+  older memories before saving more.
+
+Knowledge base deletion via chat (``knowledge_base`` tool, action=delete):
+- When the user asks to forget/remove/delete a saved memory or note
+  ("esqueça…", "remova…", "delete what I told you about…"):
+  1. Call ``knowledge_base`` action="search" with a short query
+     describing the target.  Optionally call action="list" instead
+     when the user asked for "everything I saved about X".
+  2. Show the matching entries to the user (id + short content
+     preview) and ASK FOR CONFIRMATION before deleting.  Never delete
+     without explicit confirmation.
+  3. On confirmation, call ``knowledge_base`` action="delete" with
+     ``entry_id`` for each entry to remove.  Soft-delete is enough —
+     the row stays in the store with ``is_active=false``.
+- If the search returns multiple matches and the user is ambiguous,
+  ask which entry to remove instead of guessing.
 - Cite ONLY numbers that appear in the tool's ``References`` block.  If
   only ``[1]`` exists, never write ``[2]`` or ``[1, 3]``.  One bracketed
   number per citation — never ``[1, 2]`` together.

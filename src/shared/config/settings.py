@@ -154,6 +154,26 @@ class Settings(BaseSettings):
     # 0 = no limit (not recommended for models with small context windows).
     agent_tool_output_max_chars: int = 40000
 
+    # ── Knowledge base auto-injection (per-turn preamble) ───────────────────
+    # When enabled, every chat turn prepends a short ``<kb_hints>`` block to
+    # the user message containing the most relevant saved notes for the
+    # current user/org.  This nudges the LLM towards using saved memories
+    # without forcing it to call ``search_knowledge_base`` first.
+    # Set to false to disable the per-turn lookup entirely (saves one
+    # Weaviate round-trip per turn at the cost of less consistent recall).
+    kb_auto_inject_enabled: bool = True
+    # Minimum Weaviate similarity score (cosine, 0..1) required for a note
+    # to be auto-injected.  Lower values surface more notes (noisier);
+    # higher values keep the preamble tight.  ``None`` (score unavailable)
+    # results are kept when set to 0.0.
+    kb_auto_inject_min_score: float = 0.65
+    # Top-N user-private notes to include in the preamble.
+    kb_auto_inject_user_top_n: int = 1
+    # Top-N org-wide / dept-wide notes to include in the preamble.
+    kb_auto_inject_shared_top_n: int = 2
+    # Maximum characters of each note preview shown in the preamble.
+    kb_auto_inject_preview_chars: int = 200
+
     # ── MCP Server ───────────────────────────────────────────
     mcp_server_url: str = "http://mcp-server:8001"
     # Read timeout in seconds for MCP tool calls (default: 120s for slow tools like wikijs_editor)

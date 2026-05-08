@@ -41,6 +41,8 @@ from src.shared.database import _get_session_maker
 from src.shared.config.settings import get_settings
 from src.shared.models.ingest_job import GSageIngestJob, IngestScope, IngestStatus
 from src.shared.models.knowledge_base import GSageKnowledgeSource
+from src.shared.security.context import AgentContext, RequestSource
+from src.shared.services.knowledge_service import KnowledgeService
 
 if TYPE_CHECKING:
     from agno.vectordb.weaviate.weaviate import Weaviate
@@ -64,6 +66,17 @@ def _build_download_url(job_id: str) -> str:
     return f"{base}{path}" if base else path
 
 
+# Maximum chars of a saved-note preview shown in the search result.  Notes
+# stored via the MCP knowledge_base tool are typically short (<2k chars),
+# but agent_auto entries can be larger; truncating keeps the LLM context
+# tight while still letting the model recognise the entry.
+_NOTE_PREVIEW_CHARS = 800
+# Top-K saved notes appended to the search result.  The agno-side asearch
+# already returns up to ``num_documents`` (default 5) chunks; we cap the
+# notes section at the same scale to keep the merged output predictable.
+_NOTES_TOP_K = 5
+
+
 class KnowledgeToolkit(Toolkit):
     """Expose knowledge-base read+write operations to the LLM agent."""
 
@@ -84,6 +97,62 @@ class KnowledgeToolkit(Toolkit):
         self.register(self.add_to_knowledge_base)
         self.register(self.delete_from_knowledge_base)
 
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _build_agent_context(self) -> Optional[AgentContext]:
+        """Build a minimal :class:`AgentContext` for ``KnowledgeService`` calls.
+
+        Returns ``None`` when the toolkit was created without tenant
+        identifiers (e.g. unit-test fixtures), in which case the hybrid
+        search degrades gracefully to agno's collection only.
+        """
+        if self._org_id is None or self._user_id is None:
+            return None
+        try:
+            return AgentContext(
+                org_id=self._org_id,
+                user_id=self._user_id,
+                group_ids=[],
+                # ``KnowledgeService`` only reads org_id/user_id/dept_id from
+                # the context; permissions and request_id are unused for
+                # search/list, so a minimal placeholder is sufficient.
+                permissions=["crud:knowledge_base:read"],
+                request_id=uuid.uuid4(),
+                source=RequestSource.WEB,
+                dept_id=self._dept_id,
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            log.warning("KnowledgeToolkit: could not build AgentContext: %s", exc)
+            return None
+
+    async def _search_saved_notes(self, query: str) -> list[str]:
+        """Query the shared ``KnowledgeBase`` collection (used by the MCP
+        ``knowledge_base`` CRUD tool) for user/dept/org-scoped saved notes.
+
+        agno's ``Knowledge`` object reads from a per-tenant collection
+        (``kb_{org_id}``) populated by document ingestion, while the MCP
+        CRUD tool writes notes to a single shared collection.  This method
+        bridges the gap so ``search_knowledge_base`` returns saved notes
+        alongside chunked documents.
+
+        Returns an empty list on any failure — the agno chunks must still
+        be returned even if this auxiliary lookup breaks.
+        """
+        ctx = self._build_agent_context()
+        if ctx is None:
+            return []
+        try:
+            svc = KnowledgeService()
+            # ``user_scoped=True`` returns user-private + org-shared entries
+            # the user is allowed to see; that's the right default for the
+            # chat agent which represents one user.
+            return await svc.search_similar(query, ctx, user_scoped=True)
+        except Exception as exc:
+            log.warning("KnowledgeToolkit: saved-notes search failed: %s", exc)
+            return []
+
     async def search_knowledge_base(self, query: str) -> str:
         """Search the organization's knowledge base for information relevant
         to the query and return matching chunks grouped by source document.
@@ -94,15 +163,22 @@ class KnowledgeToolkit(Toolkit):
 
         OUTPUT FORMAT
         -------------
-        The result is a plain text string with two sections:
+        The result is a plain text string with up to three sections:
 
-        1. Matching chunks, each prefixed with a single reference marker
-           ``[ref: N]`` when the chunk comes from an uploaded file.  Multiple
-           chunks from the SAME file share the SAME ``N``.  Chunks from the
-           system/default knowledge (no downloadable original) have NO
-           marker — do not cite them with a reference number.
+        1. Matching chunks from uploaded documents, each prefixed with a
+           single reference marker ``[ref: N]`` when the chunk comes from
+           an uploaded file.  Multiple chunks from the SAME file share the
+           SAME ``N``.  Chunks from the system/default knowledge (no
+           downloadable original) have NO marker — do not cite them with a
+           reference number.
 
-        2. A ``References:`` block mapping each ``N`` to the original
+        2. ``Saved notes:`` — bullet list of short notes/memories that
+           the user (or the agent on behalf of the user) saved earlier
+           via the knowledge_base tool.  These have NO reference number
+           and MUST NOT be cited with ``[N]``; treat them as background
+           context.
+
+        3. A ``References:`` block mapping each ``N`` to the original
            filename and an absolute download URL, e.g.:
 
                References:
@@ -128,15 +204,21 @@ class KnowledgeToolkit(Toolkit):
             query: Natural-language search query.
 
         Returns:
-            Formatted string with chunks and a references section.
+            Formatted string with chunks, optional saved-notes section
+            and a references section.
         """
         try:
             docs = await self._knowledge.asearch(query=query)
         except Exception as exc:
             log.error("search_knowledge_base failed: %s", exc, exc_info=True)
-            return f"Error searching knowledge base: {exc}"
+            docs = []
 
-        if not docs:
+        # Hybrid: also query the shared ``KnowledgeBase`` collection used
+        # by the MCP ``knowledge_base`` tool.  Failures are absorbed so a
+        # broken Weaviate query doesn't poison the chunk results.
+        saved_notes = await self._search_saved_notes(query)
+
+        if not docs and not saved_notes:
             return "No documents found."
 
         # Dedup key is the source filename (inner archive member when
@@ -183,7 +265,22 @@ class KnowledgeToolkit(Toolkit):
             prefix = f"[ref: {ref_num}] " if ref_num else ""
             chunks_out.append(f"{prefix}{content}")
 
-        body = "\n\n---\n\n".join(chunks_out)
+        sections: list[str] = []
+        if chunks_out:
+            sections.append("\n\n---\n\n".join(chunks_out))
+
+        if saved_notes:
+            note_lines: list[str] = []
+            for note in saved_notes[:_NOTES_TOP_K]:
+                preview = note.strip()
+                if len(preview) > _NOTE_PREVIEW_CHARS:
+                    preview = preview[:_NOTE_PREVIEW_CHARS].rstrip() + "…"
+                # Collapse internal blank lines to keep each bullet compact.
+                preview = " ".join(preview.split())
+                note_lines.append(f"- {preview}")
+            sections.append("Saved notes:\n" + "\n".join(note_lines))
+
+        body = "\n\n".join(sections) if sections else "No documents found."
 
         if refs:
             ref_lines = [

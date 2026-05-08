@@ -246,28 +246,16 @@ async def handle_message(update: Any, context: Any) -> None:
                     await tg_message.reply_text("Access error: user membership not found.")
                     return
 
-                # ── 9. Resolve user's default department ──────────────────
-                from src.shared.models.department import GSageDepartment
-                from src.shared.models.user_department import GSageUserDepartment
-
-                dept_result = await session.execute(
-                    select(GSageDepartment)
-                    .join(
-                        GSageUserDepartment,
-                        GSageUserDepartment.dept_id == GSageDepartment.id,
-                    )
-                    .where(
-                        GSageUserDepartment.user_id == user.id,
-                        GSageUserDepartment.is_active.is_(True),
-                        GSageDepartment.org_id == org_id,
-                        GSageDepartment.is_active.is_(True),
-                    )
-                    .order_by(
-                        GSageDepartment.is_default.desc(),
-                    )
+                # ── 9. Resolve user's active department ───────────────────
+                # Priority: user.default_dept_id (if active member) → first
+                # active membership in org (preferring is_default).
+                from src.backend_api.app.services.background_tasks import (
+                    resolve_user_active_dept_id,
                 )
-                tg_dept = dept_result.scalars().first()
-                tg_dept_id = tg_dept.id if tg_dept else None
+
+                tg_dept_id = await resolve_user_active_dept_id(
+                    session, user.id, org_id
+                )
 
                 # ── 10. Build TenantContext + agent ────────────────────────
                 ctx = TenantContext(

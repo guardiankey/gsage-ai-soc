@@ -152,3 +152,70 @@ def build_dept_context_block(dept_id: uuid.UUID, dept_name: Optional[str]) -> st
         "Do NOT ask the user to define a department.\n"
         "[/DEPARTMENT_CONTEXT]"
     )
+
+
+async def resolve_user_active_dept_id(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> Optional[uuid.UUID]:
+    """Resolve the active department for a user within an org.
+
+    Resolution order:
+        1. ``user.default_dept_id`` — when set AND the user still has an
+           active membership in that dept (and the dept belongs to ``org_id``
+           and is active).
+        2. The first active department membership the user has in the org,
+           preferring the org's "Default" dept (``is_default=True``).
+
+    Returns ``None`` only if the user has no active department membership
+    in the given org.
+    """
+    from src.shared.models.department import GSageDepartment  # noqa: PLC0415
+    from src.shared.models.user import GSageUser  # noqa: PLC0415
+    from src.shared.models.user_department import GSageUserDepartment  # noqa: PLC0415
+
+    # 1. User-profile preferred default
+    user_row = (
+        await db.execute(select(GSageUser).where(GSageUser.id == user_id))
+    ).scalar_one_or_none()
+    preferred_dept_id = getattr(user_row, "default_dept_id", None) if user_row else None
+
+    if preferred_dept_id is not None:
+        membership = (
+            await db.execute(
+                select(GSageDepartment)
+                .join(
+                    GSageUserDepartment,
+                    GSageUserDepartment.dept_id == GSageDepartment.id,
+                )
+                .where(
+                    GSageDepartment.id == preferred_dept_id,
+                    GSageDepartment.org_id == org_id,
+                    GSageDepartment.is_active.is_(True),
+                    GSageUserDepartment.user_id == user_id,
+                    GSageUserDepartment.is_active.is_(True),
+                )
+            )
+        ).scalars().first()
+        if membership is not None:
+            return membership.id
+
+    # 2. Fallback: first active membership, preferring org default
+    fallback = (
+        await db.execute(
+            select(GSageDepartment)
+            .join(
+                GSageUserDepartment,
+                GSageUserDepartment.dept_id == GSageDepartment.id,
+            )
+            .where(
+                GSageUserDepartment.user_id == user_id,
+                GSageUserDepartment.is_active.is_(True),
+                GSageDepartment.org_id == org_id,
+                GSageDepartment.is_active.is_(True),
+            )
+            .order_by(GSageDepartment.is_default.desc())
+        )
+    ).scalars().first()
+    return fallback.id if fallback else None

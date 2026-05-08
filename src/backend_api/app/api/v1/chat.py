@@ -872,6 +872,18 @@ async def send_message(
         dept_block = _build_dept_context_block(ctx.dept_id, dept_name)
         effective_message = f"{dept_block}\n\n---\n{effective_message}"
 
+    # Auto-inject KB hints (saved notes/memories) so the LLM is reminded
+    # of relevant memories without having to call ``search_knowledge_base``.
+    # Failure is absorbed inside the helper.
+    from src.shared.services.kb_context import prepend_kb_hints
+
+    effective_message = await prepend_kb_hints(
+        effective_message,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        dept_id=ctx.dept_id,
+    )
+
     try:
         run_output = await _run_with_retry(
             lambda: agent.arun(effective_message),
@@ -1309,6 +1321,16 @@ async def stream_message(
         dept_name = await _load_dept_name(ctx.dept_id, db)
         dept_block = _build_dept_context_block(ctx.dept_id, dept_name)
         effective_message = f"{dept_block}\n\n---\n{effective_message}"
+
+    # Auto-inject KB hints (saved notes/memories).  Failure is absorbed.
+    from src.shared.services.kb_context import prepend_kb_hints
+
+    effective_message = await prepend_kb_hints(
+        effective_message,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        dept_id=ctx.dept_id,
+    )
 
     return StreamingResponse(
         _sse_stream(
