@@ -124,7 +124,164 @@ def _patch_agno_unknown_tool_message() -> None:
     log.info("agno patch installed: helpful unknown-tool message")
 
 
+def _patch_agno_session_history_includes_paused() -> None:
+    """Include ``paused`` runs in the conversation history fed to the LLM.
+
+    Agno's ``AgentSession.get_messages`` defaults ``skip_statuses`` to
+    ``[paused, cancelled, error]``, so any run that paused waiting for
+    approval (HITL) or for a background task is silently dropped from the
+    history on the *next* user turn.  In our HITL flow that turn never
+    runs ``acontinue_run`` synchronously — the worker resumes the paused
+    run later — so the user can keep chatting in the meantime; without
+    this patch the LLM loses every message exchanged before the pause and
+    behaves as if the conversation just started.
+
+    We narrow the default to ``[cancelled, error]`` only.  ``paused`` runs
+    carry valid user/assistant/tool messages that the LLM SHOULD see.
+    """
+    from agno.run.base import RunStatus
+    from agno.session.agent import AgentSession
+
+    if getattr(AgentSession.get_messages, "_gsage_patched", False):
+        return
+
+    _orig_get_messages = AgentSession.get_messages
+
+    def _patched_get_messages(  # type: ignore[no-untyped-def]
+        self,
+        agent_id=None,
+        team_id=None,
+        last_n_runs=None,
+        limit=None,
+        skip_roles=None,
+        skip_statuses=None,
+        skip_history_messages=True,
+    ):
+        # Only override the default; explicit caller intent wins.
+        if skip_statuses is None:
+            skip_statuses = [RunStatus.cancelled, RunStatus.error]
+        return _orig_get_messages(
+            self,
+            agent_id=agent_id,
+            team_id=team_id,
+            last_n_runs=last_n_runs,
+            limit=limit,
+            skip_roles=skip_roles,
+            skip_statuses=skip_statuses,
+            skip_history_messages=skip_history_messages,
+        )
+
+    _patched_get_messages._gsage_patched = True  # type: ignore[attr-defined]
+    AgentSession.get_messages = _patched_get_messages  # type: ignore[assignment]
+    log.info("agno patch installed: paused runs included in chat history")
+
+
+def _patch_agno_continue_run_messages_dedup() -> None:
+    """Avoid duplicating the paused run's messages on ``acontinue_run``.
+
+    ``get_continue_run_messages`` re-appends the saved messages of the
+    paused run via ``input`` AFTER calling ``session.get_messages`` to
+    fetch history.  Our previous patch made ``get_messages`` include
+    paused runs by default, which is the right behaviour for fresh
+    ``arun`` calls but causes the run-being-continued to appear twice
+    here.
+
+    We patch ``get_continue_run_messages`` to call ``get_messages`` with
+    the *original* default ``skip_statuses`` (excluding paused), so the
+    paused run only enters the message list through ``input``.
+    """
+    from agno.agent import _messages as _agno_messages
+    from agno.run.base import RunStatus
+
+    if getattr(_agno_messages.get_continue_run_messages, "_gsage_patched", False):
+        return
+
+    _OriginalRunStatus = RunStatus  # capture for closure
+
+    def _patched(  # type: ignore[no-untyped-def]
+        agent,
+        input,
+        session=None,
+        add_history_to_context=None,
+        run_context=None,
+    ):
+        from copy import deepcopy
+
+        from agno.run.messages import RunMessages
+        from agno.utils.log import log_debug
+
+        run_messages = RunMessages()
+
+        if add_history_to_context is None:
+            add_history_to_context = agent.add_history_to_context
+
+        user_message = None
+        for msg in reversed(input):
+            if msg.role == agent.user_message_role:
+                user_message = msg
+                break
+        system_message = None
+        for msg in input:
+            if msg.role == agent.system_message_role:
+                system_message = msg
+                break
+        run_messages.system_message = system_message
+        run_messages.user_message = user_message
+
+        input_has_history = any(getattr(msg, "from_history", False) for msg in input)
+
+        if system_message is not None:
+            run_messages.messages.append(system_message)
+
+        if add_history_to_context and session is not None and not input_has_history:
+            skip_role = (
+                agent.system_message_role
+                if agent.system_message_role not in ["user", "assistant", "tool"]
+                else None
+            )
+            history = session.get_messages(
+                last_n_runs=agent.num_history_runs,
+                limit=agent.num_history_messages,
+                skip_roles=[skip_role] if skip_role else None,
+                # Exclude the paused run we are about to re-inject via ``input``
+                # to prevent duplication.  Cancelled/error runs stay excluded
+                # for the same reason as upstream (no useful signal).
+                skip_statuses=[
+                    _OriginalRunStatus.paused,
+                    _OriginalRunStatus.cancelled,
+                    _OriginalRunStatus.error,
+                ],
+                agent_id=agent.id if agent.team_id is not None else None,
+            )
+
+            if len(history) > 0:
+                history_copy = [deepcopy(msg) for msg in history]
+                for _msg in history_copy:
+                    _msg.from_history = True
+                if agent.max_tool_calls_from_history is not None:
+                    from agno.utils.message import filter_tool_calls
+
+                    filter_tool_calls(history_copy, agent.max_tool_calls_from_history)
+                log_debug(f"Adding {len(history_copy)} messages from history")
+                run_messages.messages += history_copy
+
+        for msg in input:
+            if msg is not system_message:
+                run_messages.messages.append(msg)
+
+        if run_context is not None:
+            run_context.messages = run_messages.messages
+
+        return run_messages
+
+    _patched._gsage_patched = True  # type: ignore[attr-defined]
+    _agno_messages.get_continue_run_messages = _patched  # type: ignore[assignment]
+    log.info("agno patch installed: continue_run history dedup")
+
+
 _patch_agno_unknown_tool_message()
+_patch_agno_session_history_includes_paused()
+_patch_agno_continue_run_messages_dedup()
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +388,21 @@ Tool execution & HITL (human-in-the-loop):
 - Any tool whose schema requires ``_approval_summary`` MUST receive it, in
   the user's language, stating: action + target + reason/ticket.
   Ex.: "Bloquear IP 1.1.1.1 por ataque de força-bruta no SSH, ticket #456".
+
+Reading the conversation history (paused / pending actions):
+- The conversation history MAY include past assistant turns that called a
+  sensitive tool and are still PAUSED waiting for approval (you will see
+  the tool call in the history but no matching tool result, no follow-up
+  assistant message confirming success/failure, and no later assistant
+  message superseding it).  When you spot such an orphan tool call:
+  * Do NOT assume the action was executed.
+  * Do NOT silently retry it (that would create a duplicate approval).
+  * If the user asks about progress, status or results of that action,
+    state plainly that the request is still awaiting approval and that
+    you will report back automatically once it is resolved.
+- The same applies to background tasks whose ``[BACKGROUND_TASKS_COMPLETED]``
+  block has not yet arrived in the conversation: treat them as still in
+  progress, not as failed or forgotten.
 
 Audit context (``_audit_context``, optional on every tool):
 - Include when context is known: ``reason``, ``ticket_id`` (JIRA-123,

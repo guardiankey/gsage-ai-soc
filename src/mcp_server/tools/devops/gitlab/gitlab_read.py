@@ -241,6 +241,7 @@ class GitLabReadTool(BaseTool):
         "and merge requests. No human approval required."
     )
     category: ClassVar[str] = "devops"
+    config_namespace: ClassVar[str] = "gitlab"
     permissions: ClassVar[list[str]] = ["gitlab:read"]
     rate_limit_per_minute: ClassVar[int] = 60
     timeout_seconds: ClassVar[int] = 30
