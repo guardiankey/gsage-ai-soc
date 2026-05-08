@@ -170,8 +170,7 @@ class TrellixEdrSearchFilesTool(BaseTool):
                 )
         except TrellixEDRError as exc:
             elapsed = int((time.monotonic() - t0) * 1000)
-            retryable = exc.status_code in (429, 500, 502, 503, 504)
-            return self._failure(exc.code, str(exc), retryable=retryable, execution_time_ms=elapsed)
+            return self._failure(exc.code, str(exc), retryable=Q.is_retryable_error(exc), execution_time_ms=elapsed)
         except Exception as exc:
             log.exception("trellix_edr_search_files: unexpected error")
             elapsed = int((time.monotonic() - t0) * 1000)

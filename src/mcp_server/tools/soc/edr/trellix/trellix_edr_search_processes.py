@@ -391,8 +391,7 @@ class TrellixEdrSearchProcessesTool(BaseTool):
                     truncated_any = truncated_any or truncated
         except TrellixEDRError as exc:
             elapsed = int((time.monotonic() - t0) * 1000)
-            retryable = exc.status_code in (429, 500, 502, 503, 504)
-            return self._failure(exc.code, str(exc), retryable=retryable, execution_time_ms=elapsed)
+            return self._failure(exc.code, str(exc), retryable=Q.is_retryable_error(exc), execution_time_ms=elapsed)
         except Exception as exc:
             log.exception("trellix_edr_search_processes: unexpected error")
             elapsed = int((time.monotonic() - t0) * 1000)
@@ -410,7 +409,10 @@ class TrellixEdrSearchProcessesTool(BaseTool):
             "Processes_md5",
             "Processes_user",
             "Processes_parentname",
+            # process_reputation is Processes-only; file_reputation is both.
+            # Include both so the summary works for scope='both'.
             "Processes_process_reputation",
+            "Processes_file_reputation",
             "Processes_execution_mode",
         ]
         if include_host_info:

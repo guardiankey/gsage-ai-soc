@@ -7,6 +7,7 @@ pipeline, and per-organization configuration system.
 The source of truth for this document is:
 
 - `src/mcp_server/tools/base.py`
+- `src/mcp_server/tools/result_export.py`
 - `src/mcp_server/registry/registry.py`
 - `src/mcp_server/main.py`
 - `src/shared/cache/decorator.py`
@@ -37,8 +38,9 @@ If you only need the shortest possible path, do this:
 4. If the tool needs per-org config, add `config_defaults`, `config_schema`, and optionally `requires_config = True`.
 5. If the tool needs persistent counters/cursors, declare `state_defaults` and mutate the `state` dict in place inside `execute()`.
 6. If the tool needs reusable result caching, use `src.shared.cache.cached` on a helper function. Do not try to bolt cache logic into `BaseTool.run()`.
-7. Restart the MCP server.
-8. Grant the tool permission tags to a group and configure the organization's tool profile if needed.
+7. If the tool returns list-style rows, use `src.mcp_server.tools.result_export` for preview capping and CSV/JSON artifact export instead of hand-rolling that logic.
+8. Restart the MCP server.
+9. Grant the tool permission tags to a group and configure the organization's tool profile if needed.
 
 There is no manual registration step.
 
@@ -55,7 +57,7 @@ Think about the framework in three layers:
    This is where parameter validation and the actual domain operation belong. In most tools, this is the only method you need to implement.
 
 3. Optional shared infrastructure.
-   Use adjacent facilities only when needed: `@cached` for execution-result caching, `_store_file()` / `_load_file()` for artifacts, `should_run_background()` for pre-flight offload, and `enrich_for_listing()` for config-derived hints shown to the LLM.
+   Use adjacent facilities only when needed: `@cached` for execution-result caching, `src.mcp_server.tools.result_export` for list-style CSV/JSON exports and agent-safe previews, `_store_file()` / `_load_file()` for artifacts, `should_run_background()` for pre-flight offload, and `enrich_for_listing()` for config-derived hints shown to the LLM.
 
 If you find yourself reimplementing permission checks, retries, audit writes, config decryption, or state persistence inside `execute()`, you are usually working against the framework instead of with it.
 
@@ -151,6 +153,7 @@ For new tools, start with the smallest hook that solves the problem:
 | Normal request handling | Implement `execute()` only |
 | Background offload decision based on params/config | Override `should_run_background()` |
 | Show profiles/hosts/presets in `list_tools` | Override `enrich_for_listing()` |
+| Return large tabular/list results to the agent | Use `src.mcp_server.tools.result_export` |
 | Read or emit platform-managed files | Use `_load_file()` / `_store_file()` |
 | Cache idempotent helper results | Use `src.shared.cache.cached` on a helper function |
 | Share DB session with advanced helpers | Override `run()` only to inject a `ContextVar`, then delegate to `super().run()` |
@@ -608,6 +611,73 @@ Uploads bytes to MinIO and records the file in the database. On success it retur
 
 This is the correct path for generated artifacts such as reports, rendered images, archives, or exported documents.
 
+### Tabular exports via `result_export.py`
+
+If a tool returns a potentially large `list[dict]` result set, prefer the shared helper in `src/mcp_server/tools/result_export.py` instead of manually building CSV files and ad hoc preview truncation.
+
+This helper standardizes four concerns:
+
+- `export_to_csv()` and `export_to_json()` serialize flat rows into artifact-ready bytes
+- `summarize()` builds a deterministic `{ row_count, distinct, top, sample }` block for the agent
+- `maybe_export_artifacts()` persists CSV/JSON files via `_store_file()`
+- `build_agent_payload()` returns an agent-safe shape with capped inline rows and artifact metadata
+
+Important behavior:
+
+- the inline preview is capped by `AGENT_PREVIEW_ROWS` (currently 100)
+- when the full row set exceeds that cap, CSV export is forced on even if `export_csv=False`
+- the returned payload includes `rows_preview`, `rows_total`, `rows_overflow`, `artifacts`, and `agent_hint`
+- artifacts are still stored through the normal platform path, so org/user/dept access rules continue to apply
+
+Typical usage inside a tool:
+
+```python
+from src.mcp_server.tools.result_export import (
+   AGENT_PREVIEW_ROWS,
+   build_agent_payload,
+   summarize,
+)
+
+rows = normalize_and_enrich(raw_items)
+
+summary = summarize(
+   rows,
+   group_by=params.get("group_by") or None,
+   top_n=int(params.get("top_n", 10) or 10),
+   default_keys=("severity", "status", "type"),
+)
+
+agent_payload = await build_agent_payload(
+   tool=self,
+   rows=rows,
+   export_csv=bool(params.get("export_csv", False)),
+   export_json=bool(params.get("export_json", False)),
+   filename_prefix=f"{self.name}_results",
+   agent_context=agent_context,
+)
+
+return self._success(
+   {
+      "rows_total": agent_payload["rows_total"],
+      "rows_overflow": agent_payload["rows_overflow"],
+      "rows_preview_limit": AGENT_PREVIEW_ROWS,
+      "agent_hint": agent_payload["agent_hint"],
+      "artifacts": agent_payload["artifacts"],
+      "summary": summary,
+      "rows": agent_payload["rows_preview"],
+   }
+)
+```
+
+Recommended `params_schema` entries for list-style tools:
+
+- `export_csv` as a boolean, default `False`
+- `export_json` as a boolean, default `False`
+- `group_by` as an array of strings
+- `top_n` as an integer summary limit
+
+Keep normalization and enrichment in the tool layer before calling `build_agent_payload()`. For example, reverse-code integer enums, resolve related names, flatten nested objects, or join repeated values so that both the inline preview and the exported CSV reflect the same enriched view.
+
 ### `_load_file()`
 
 Loads a previously stored file by `file_id`, validates org/user ownership rules, and returns metadata plus bytes.
@@ -666,6 +736,9 @@ If you are building a normal integration against an external system, subclass `B
 
 9. Do not override `run()` unless you need orchestration that truly cannot live in `execute()`.
    If you do override it, keep it thin and delegate to `super().run()`.
+
+10. Do not hand-roll CSV export for large list-style tool results.
+   Use `src.mcp_server.tools.result_export` so preview limits, overflow behavior, and artifact metadata stay consistent across tools.
 
 ---
 

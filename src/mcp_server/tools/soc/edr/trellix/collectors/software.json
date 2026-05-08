@@ -36,7 +36,7 @@
     },
     {
       "title": "What software is installed",
-      "v2_query": "Software installdate, publisher, version, displayname, displayname"
+      "v2_query": "Software installdate, publisher, version, displayname"
     },
     {
       "title": "Which software version am i running - by program single",
@@ -75,6 +75,36 @@
             "or": [
               {
                 "and": []
+              }
+            ]
+          }
+        }
+      },
+      {
+        "title": "Filter by software displayname (contains — use as a template for any WHERE filter)",
+        "payload": {
+          "projections": [
+            {
+              "name": "Software",
+              "outputs": [
+                "displayname",
+                "installdate",
+                "publisher",
+                "version"
+              ]
+            }
+          ],
+          "condition": {
+            "or": [
+              {
+                "and": [
+                  {
+                    "name": "Software",
+                    "output": "displayname",
+                    "op": "CONTAINS",
+                    "value": "AnyDesk"
+                  }
+                ]
               }
             ]
           }

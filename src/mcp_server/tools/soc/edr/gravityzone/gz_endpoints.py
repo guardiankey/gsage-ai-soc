@@ -18,7 +18,17 @@ import time
 from typing import ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
+from src.mcp_server.tools.result_export import (
+    AGENT_PREVIEW_ROWS,
+    build_agent_payload,
+    summarize,
+)
 from src.mcp_server.tools.soc.edr.gravityzone._client import GravityZoneClient, GravityZoneError
+from src.mcp_server.tools.soc.edr.gravityzone._export import (
+    ENDPOINT_DEFAULT_GROUP_KEYS,
+    build_group_name_cache,
+    normalize_endpoint,
+)
 from src.shared.security.context import AgentContext
 
 log = logging.getLogger(__name__)
@@ -47,8 +57,8 @@ _GZ_CONFIG_DEFAULTS: dict = {
     "base_url": "https://cloud.gravityzone.bitdefender.com/api",
 }
 
-# Machine type codes
-_MACHINE_TYPES = {0: "other", 1: "computer", 2: "virtual_machine", 3: "ec2_instance"}
+# Machine type codes (kept for backwards compatibility — the canonical map
+# now lives in :mod:`._export`).
 
 
 class GzEndpointsTool(BaseTool):
@@ -178,6 +188,53 @@ class GzEndpointsTool(BaseTool):
                 "default": 5,
                 "description": "Maximum pages to fetch for action=list (default: 5).",
             },
+            "export_csv": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Persist all fetched endpoints as a CSV artifact (action=list only). "
+                    "PREFER CSV when the user asks to 'save', 'export' or 'download' "
+                    "the endpoint inventory \u2014 it is the natural format for tabular "
+                    "data and easier to open in spreadsheets. CSV is also generated "
+                    "automatically when the result exceeds "
+                    f"{AGENT_PREVIEW_ROWS} rows so the user always has a way to access "
+                    "the full data."
+                ),
+            },
+            "export_json": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Persist all fetched endpoints as a JSON artifact (action=list only). "
+                    "Use only when the user explicitly asks for JSON or needs the file "
+                    "for programmatic post-processing \u2014 otherwise prefer 'export_csv'."
+                ),
+            },
+            "resolve_group_names": {
+                "type": "boolean",
+                "default": True,
+                "description": (
+                    "Resolve groupId \u2192 group name (best-effort) for action=list. "
+                    "Adds one extra RPC call per top-level group; falls back silently "
+                    "on permission errors."
+                ),
+            },
+            "group_by": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional list of (normalised) column names to use for top-N "
+                    "analytics on action=list. When omitted, a sensible default "
+                    "set is chosen (machine_type, os_version, group_name, ...)."
+                ),
+            },
+            "top_n": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50,
+                "default": 10,
+                "description": "Top-N size for each grouped column (default: 10).",
+            },
         },
         "additionalProperties": False,
     }
@@ -198,7 +255,7 @@ class GzEndpointsTool(BaseTool):
                 base_url=config.get("base_url") or None,
             ) as client:
                 if action == "list":
-                    result = await self._list_endpoints(client, params)
+                    result = await self._list_endpoints(client, params, agent_context)
                 elif action == "details":
                     result = await self._endpoint_details(client, params)
                 else:
@@ -222,7 +279,12 @@ class GzEndpointsTool(BaseTool):
 
     # ── Action handlers ────────────────────────────────────────────────────
 
-    async def _list_endpoints(self, client: GravityZoneClient, params: dict) -> dict:
+    async def _list_endpoints(
+        self,
+        client: GravityZoneClient,
+        params: dict,
+        agent_context: AgentContext,
+    ) -> dict:
         rpc_params: dict = {}
         if "parent_id" in params:
             rpc_params["parentId"] = params["parent_id"]
@@ -284,12 +346,50 @@ class GzEndpointsTool(BaseTool):
         if cidr_filter:
             all_items = _filter_by_cidr(all_items, cidr_filter)
 
+        # Best-effort enrichment: groupId → name (skip when explicitly off).
+        group_cache: dict[str, str] = {}
+        if params.get("resolve_group_names", True) and all_items:
+            try:
+                group_cache = await build_group_name_cache(
+                    client, parent_id=params.get("parent_id")
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.debug("gz_endpoints: group resolution skipped: %s", exc)
+
+        endpoints = [
+            normalize_endpoint(e, group_name_by_id=group_cache) for e in all_items
+        ]
+
+        # Top-N analytical summary.
+        summary = summarize(
+            endpoints,
+            group_by=params.get("group_by") or None,
+            top_n=int(params.get("top_n", 10) or 10),
+            default_keys=ENDPOINT_DEFAULT_GROUP_KEYS,
+        )
+
+        # Agent payload + (optional) CSV/JSON artifacts.
+        agent_payload = await build_agent_payload(
+            self,
+            rows=endpoints,
+            export_csv=bool(params.get("export_csv", False)),
+            export_json=bool(params.get("export_json", False)),
+            filename_prefix="gz_endpoints_list",
+            agent_context=agent_context,
+        )
+
         out: dict = {
             "action": "list",
             "total": total,
             "pages_count": pages_count,
-            "fetched": len(all_items),
-            "endpoints": [_normalize_endpoint(e) for e in all_items],
+            "fetched": len(endpoints),
+            "rows_total": agent_payload["rows_total"],
+            "rows_overflow": agent_payload["rows_overflow"],
+            "rows_preview_limit": AGENT_PREVIEW_ROWS,
+            "agent_hint": agent_payload["agent_hint"],
+            "artifacts": agent_payload["artifacts"],
+            "summary": summary,
+            "endpoints": agent_payload["rows_preview"],
         }
         if truncated:
             out["coverage_warning"] = (
@@ -341,27 +441,11 @@ def _filter_by_cidr(items: list[dict], cidr: str) -> list[dict]:
     return result
 
 
-# ── Normalizer ─────────────────────────────────────────────────────────────
+# ── Normalizer (legacy import path) ───────────────────────────────────────
+#
+# The canonical implementation lives in :mod:`._export.normalize_endpoint`.
+# Kept here as a shim for any external caller that may have imported the
+# private symbol directly.
 
-def _normalize_endpoint(raw: dict) -> dict:
-    machine_type_int = raw.get("machineType", 0)
-    return {
-        "id": raw.get("id"),
-        "name": raw.get("name"),
-        "label": raw.get("label"),
-        "fqdn": raw.get("fqdn"),
-        "ip": raw.get("ip"),
-        "macs": raw.get("macs", []),
-        "group_id": raw.get("groupId"),
-        "is_managed": raw.get("isManaged"),
-        "machine_type": _MACHINE_TYPES.get(machine_type_int, "other"),
-        "os_version": raw.get("operatingSystemVersion"),
-        "managed_with_best": raw.get("managedWithBest"),
-        "is_container_host": raw.get("isContainerHost"),
-        "managed_relay": raw.get("managedRelay"),
-        "security_server": raw.get("securityServer"),
-        "product_outdated": raw.get("productOutdated"),
-        "policy": raw.get("policy"),
-        "last_successful_scan": raw.get("lastSuccessfulScan"),
-        "ssid": raw.get("ssid"),
-    }
+def _normalize_endpoint(raw: dict) -> dict:  # pragma: no cover - shim
+    return normalize_endpoint(raw)
