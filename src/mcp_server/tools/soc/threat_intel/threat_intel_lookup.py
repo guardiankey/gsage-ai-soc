@@ -164,6 +164,9 @@ def _vt_normalize(raw: dict, ioc_type: str) -> dict:
         normalized["meaningful_name"] = attrs.get("meaningful_name")
         normalized["type_description"] = attrs.get("type_description")
         normalized["size"] = attrs.get("size")
+        normalized["md5"] = attrs.get("md5")
+        normalized["sha1"] = attrs.get("sha1")
+        normalized["sha256"] = attrs.get("sha256")
 
     elif ioc_type == "url":
         normalized["final_url"] = attrs.get("last_final_url")
