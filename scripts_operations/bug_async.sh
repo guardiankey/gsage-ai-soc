@@ -20,3 +20,5 @@ sudo ./.venv/bin/py-spy top --pid $PID --rate 200
 PID=$(pgrep -f 'src.backend_api.*|gunicorn.*backend')
 sudo ./.venv/bin/py-spy dump --pid $PID --locals > /tmp/dump.txt 2>&1
 docker exec gsage-backend_api ss -tnp | grep -E 'CLOSE-WAIT|172.27.0' > /tmp/sockets.txt
+strace -fp $PID
+

@@ -195,7 +195,7 @@ services:
       - ingest_tmp:/data/ingest
     command: >
       bash -c "alembic upgrade head
-      && python -W ignore::DeprecationWarning -m gunicorn -k uvicorn.workers.UvicornWorker src.backend_api.app.main:app --bind 0.0.0.0:8000"
+      && python -W ignore::DeprecationWarning -m gunicorn -k src.backend_api.app.gunicorn_worker.AsyncioUvicornWorker src.backend_api.app.main:app --bind 0.0.0.0:8000"
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

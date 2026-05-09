@@ -97,7 +97,10 @@ COPY scripts/ /app/scripts/
 USER appuser
 EXPOSE 8000
 # Default command; override per service in docker-compose.
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", \
+# Worker class is pinned to the asyncio (not uvloop) event loop to avoid a
+# SIGSEGV in uvloop's SSL teardown path triggered by SSE streams that are
+# interrupted by client disconnect. See src/backend_api/app/gunicorn_worker.py.
+CMD ["gunicorn", "-k", "src.backend_api.app.gunicorn_worker.AsyncioUvicornWorker", \
      "src.backend_api.app.main:app", "--bind", "0.0.0.0:8000"]
 
 # =============================================================================
@@ -136,7 +139,10 @@ COPY scripts/ /app/scripts/
 
 USER appuser
 EXPOSE 8000
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", \
+# Worker class is pinned to the asyncio (not uvloop) event loop to avoid a
+# SIGSEGV in uvloop's SSL teardown path triggered by SSE streams that are
+# interrupted by client disconnect. See src/backend_api/app/gunicorn_worker.py.
+CMD ["gunicorn", "-k", "src.backend_api.app.gunicorn_worker.AsyncioUvicornWorker", \
      "src.backend_api.app.main:app", "--bind", "0.0.0.0:8000"]
 
 # =============================================================================

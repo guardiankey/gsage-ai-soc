@@ -94,13 +94,25 @@ class ElasticsearchTracer:
         enqueue_for_es("agno-traces", doc)
 
     async def setup_index_template(self) -> None:
-        """Idempotently create the Elasticsearch index template and ILM policy.
+        """Idempotently create the ES index template and ILM policy.
 
-        Call once at application startup if ES is available.  Failures are
-        logged and swallowed — the app starts regardless.
+        Async wrapper that runs the blocking sync client in a worker thread
+        via :func:`asyncio.to_thread`.  This prevents the synchronous
+        Elasticsearch HTTP I/O from blocking the event loop and — more
+        importantly — prevents the anyio ``_deliver_cancellation`` busy-loop
+        that occurs when an ``asyncio.wait_for`` timeout cancels a task
+        whose work is buried inside synchronous C extensions.
+        """
+        import asyncio
 
-        Uses a short-lived synchronous client to avoid leaving an AsyncElasticsearch
-        instance idle (which triggers a pycares CPU busy-loop).
+        await asyncio.to_thread(self._setup_index_template_sync)
+
+    def _setup_index_template_sync(self) -> None:
+        """Blocking implementation — must NOT be called from the event loop.
+
+        Uses a short-lived synchronous client to avoid leaving an
+        AsyncElasticsearch instance idle (which triggers a pycares CPU
+        busy-loop).
         """
         try:
             from elasticsearch import Elasticsearch

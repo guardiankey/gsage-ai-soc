@@ -2,6 +2,22 @@
 
 from __future__ import annotations
 
+# Enable faulthandler at startup so SIGSEGV / SIGABRT in C extensions emit a
+# Python + C stack trace to stderr before the worker dies. Helps diagnose
+# crashes inside _ssl, _asyncio, grpc, etc.
+import faulthandler
+import sys
+
+faulthandler.enable(file=sys.stderr, all_threads=True)
+
+# Install the anyio CancelScope spin-guard BEFORE any module that may use
+# anyio cancel scopes (FastAPI, Starlette, httpx, weaviate-client, ...).
+# This protects the worker from a CPU pin caused by ``_deliver_cancellation``
+# busy-loops when a task is stuck in non-cancellable synchronous I/O.
+from src.shared.diagnostics.anyio_spin_guard import install_anyio_spin_guard
+
+install_anyio_spin_guard()
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,41 +31,29 @@ from src.shared.config.settings import get_settings
 from src.shared.database import _get_session_maker
 import logging
 import asyncio
-import random
 
 log = logging.getLogger(__name__)
 
 _DIVIDER = "=" * 70
 
-async def _safe_setup_index(tracer):
-    """Attempt to create the ES index template at startup.
 
-    Uses asyncio.wait_for WITHOUT asyncio.shield so the underlying coroutine
-    is properly cancelled on timeout — avoiding leaked background tasks that
-    spin-retry against an unavailable ES instance and saturate the CPU.
+async def _safe_setup_index(tracer) -> None:
+    """Best-effort ES index template setup.
+
+    Runs the underlying sync Elasticsearch client in a worker thread (the
+    async wrapper in ``ElasticsearchTracer.setup_index_template`` uses
+    ``asyncio.to_thread``).  We deliberately do **NOT** wrap this in
+    ``asyncio.wait_for`` — past attempts caused the anyio
+    ``_deliver_cancellation`` busy-loop to pin a worker at 100% CPU when the
+    target task could not honour cancellation promptly (sync I/O inside C
+    extensions).  Any failure is logged and swallowed.
     """
-    log.info("Elasticsearch index template setup starting...")
-    for attempt in range(3):
-        try:
-            # No asyncio.shield here — we WANT cancellation on timeout so the
-            # ES client stops retrying and releases resources immediately.
-            await asyncio.wait_for(tracer.setup_index_template(), timeout=10)
-            log.info("Elasticsearch index template setup complete.")
-            return
-        except asyncio.TimeoutError:
-            log.warning("ES index template setup timed out (attempt %d/3)", attempt + 1)
-        except asyncio.CancelledError:
-            log.warning("ES index template setup cancelled (attempt %d/3)", attempt + 1)
-            raise  # propagate cancellation — do not retry
-        except Exception as exc:
-            log.warning("ES index template setup error (attempt %d/3): %s", attempt + 1, exc)
+    try:
+        await tracer.setup_index_template()
+        log.info("Elasticsearch index template setup complete.")
+    except Exception:
+        log.warning("ES index template setup failed — traces will be skipped", exc_info=True)
 
-        if attempt < 2:
-            # Exponential backoff with jitter: 2s, 4s, (no sleep on last attempt)
-            delay = 2 * (attempt + 1) + random.uniform(0, 1)
-            await asyncio.sleep(delay)
-
-    log.error("ES index template setup failed after 3 attempts — traces will be skipped")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,8 +61,6 @@ async def lifespan(app: FastAPI):
     # ── Elasticsearch index template ──────────────────────────────────────
     try:
         tracer = get_tracer()
-        #await tracer.setup_index_template() # was causing 100% CPU loop
-        #asyncio.create_task(_safe_setup_index(tracer)) # below is better
         task = asyncio.create_task(_safe_setup_index(tracer))
         task.add_done_callback(
             lambda t: log.error("setup_index task crashed", exc_info=t.exception()) if t.exception() else None
