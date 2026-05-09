@@ -55,8 +55,8 @@ framework (audience: developers).
 
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
-| `gitlab_manage` | 1 | `gitlab:write` | ✓ | ✓ | — | [devops/gitlab/gitlab_manage.md](devops/gitlab/gitlab_manage.md) |
-| `gitlab_read` | 1 | `gitlab:read` | — | ✓ | — | [devops/gitlab/gitlab_read.md](devops/gitlab/gitlab_read.md) |
+| `gitlab` | 3 | `gitlab:read`, `gitlab:write` | ✓ | ✓ | — | [devops/gitlab.md](devops/gitlab.md) |
+| `kubernetes` | 3 | `k8s:read`, `k8s:write` | ✓ | ✓ | ✓ | [devops/k8s/kubernetes.md](devops/k8s/kubernetes.md) |
 
 ## dns
 

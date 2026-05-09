@@ -139,6 +139,7 @@ def _patch_agno_session_history_includes_paused() -> None:
     We narrow the default to ``[cancelled, error]`` only.  ``paused`` runs
     carry valid user/assistant/tool messages that the LLM SHOULD see.
     """
+    from agno.models.message import Message
     from agno.run.base import RunStatus
     from agno.session.agent import AgentSession
 
@@ -146,6 +147,59 @@ def _patch_agno_session_history_includes_paused() -> None:
         return
 
     _orig_get_messages = AgentSession.get_messages
+
+    def _stub_orphan_tool_calls(messages):  # type: ignore[no-untyped-def]
+        """Inject synthetic ``tool`` messages for any ``tool_call`` that has
+        no matching response further down the list.
+
+        Without this, when a paused (HITL) run enters the history its
+        assistant message carrying ``tool_calls`` reaches the LLM with no
+        corresponding ``tool`` reply, and OpenAI rejects the request with
+        ``invalid_request_error: insufficient tool messages following
+        tool_calls message``.
+
+        We collect every ``tool_call_id`` that already has a matching
+        ``tool`` message in the list (regardless of position — agno keeps
+        them in order) and, for every assistant message with unanswered
+        tool_calls, append synthetic stubs immediately after it.
+        """
+        if not messages:
+            return messages
+        answered_ids = {
+            m.tool_call_id
+            for m in messages
+            if m.role == "tool" and m.tool_call_id
+        }
+        result = []
+        for msg in messages:
+            result.append(msg)
+            if msg.role != "assistant" or not msg.tool_calls:
+                continue
+            for tc in msg.tool_calls:
+                tc_id = tc.get("id") if isinstance(tc, dict) else None
+                if not tc_id or tc_id in answered_ids:
+                    continue
+                fn = (
+                    tc.get("function", {}).get("name")
+                    if isinstance(tc, dict)
+                    else None
+                ) or "unknown_tool"
+                stub = Message(
+                    role="tool",
+                    tool_call_id=tc_id,
+                    tool_name=fn,
+                    content=(
+                        "[pending] This tool call has not been executed yet "
+                        "(awaiting human approval or background task "
+                        "completion). Do not retry it; the system will "
+                        "report the result automatically once it is "
+                        "resolved."
+                    ),
+                    from_history=getattr(msg, "from_history", False),
+                )
+                answered_ids.add(tc_id)
+                result.append(stub)
+        return result
 
     def _patched_get_messages(  # type: ignore[no-untyped-def]
         self,
@@ -158,9 +212,10 @@ def _patch_agno_session_history_includes_paused() -> None:
         skip_history_messages=True,
     ):
         # Only override the default; explicit caller intent wins.
-        if skip_statuses is None:
+        override_default = skip_statuses is None
+        if override_default:
             skip_statuses = [RunStatus.cancelled, RunStatus.error]
-        return _orig_get_messages(
+        messages = _orig_get_messages(
             self,
             agent_id=agent_id,
             team_id=team_id,
@@ -170,6 +225,10 @@ def _patch_agno_session_history_includes_paused() -> None:
             skip_statuses=skip_statuses,
             skip_history_messages=skip_history_messages,
         )
+        # Stub orphan tool_calls only when paused runs may be present.
+        if override_default:
+            messages = _stub_orphan_tool_calls(messages)
+        return messages
 
     _patched_get_messages._gsage_patched = True  # type: ignore[attr-defined]
     AgentSession.get_messages = _patched_get_messages  # type: ignore[assignment]

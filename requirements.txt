@@ -60,6 +60,7 @@ nvdlib>=0.7,<1           # NVD (National Vulnerability Database) API client for 
 geoip2>=4.8,<6           # MaxMind GeoLite2 / GeoIP2 database reader (GeoLite2-ASN.mmdb)
 IP2Location>=8.10,<9     # IP2Location BIN database reader (IP2LOCATION-LITE-DB11.IPV6.BIN)
 zabbix-utils>=2.0.2,<3   # Official Zabbix SIA Python API client (used by zabbix_query tool)
+kubernetes>=30,<32       # Official Kubernetes Python client (used by k8s_* tools)
 polars>=1.0,<2           # DataFrame engine used by core CSV tools (csv_describe / csv_query / csv_soc)
 duckdb>=1.0,<2           # In-process SQL engine used by core CSV tools (csv_query, SELECT-only)
 pyarrow>=16,<22          # Required by polars.DataFrame.to_arrow() in csv_query (zero-copy DuckDB register)
