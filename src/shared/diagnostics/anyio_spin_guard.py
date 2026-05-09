@@ -163,6 +163,30 @@ def install_anyio_spin_guard() -> None:
         except Exception:
             count = 0
 
+        # Fast-path: anyio's _deliver_cancellation unconditionally sets
+        # should_retry=True for every task still in self._tasks, regardless
+        # of whether the task is done().  In real-world traces we have seen
+        # a finished host_task lingering in self._tasks (likely a race
+        # between scope teardown and a sibling cancellation arriving via
+        # StreamingResponse client-disconnect), which causes an infinite
+        # call_soon spin pinning the loop at 100 % CPU.  Short-circuit when
+        # the scope contains nothing actionable.
+        try:
+            tasks = self._tasks
+            child_scopes = self._child_scopes
+        except Exception:
+            tasks = ()
+            child_scopes = ()
+        if tasks and all(getattr(t, "done", lambda: False)() for t in tasks) \
+                and not child_scopes:
+            try:
+                self._spin_guard_count = 0
+                if origin is self and getattr(self, "_cancel_handle", None) is not None:
+                    self._cancel_handle = None
+            except Exception:
+                pass
+            return False
+
         try:
             should_retry = original(self, origin)
         except Exception:
