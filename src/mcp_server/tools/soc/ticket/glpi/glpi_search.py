@@ -17,6 +17,7 @@ from typing import ClassVar, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.mcp_server.tools.base import BaseTool, ToolResult, _tool_session_ctx
+from src.mcp_server.tools.result_export import AGENT_PREVIEW_ROWS, build_agent_payload
 from src.mcp_server.tools.soc.ticket.glpi._client import GLPIClient, GLPIError
 from src.shared.cache.decorator import cached
 from src.shared.security.context import AgentContext
@@ -63,7 +64,10 @@ _OPEN_STATUSES = (1, 2, 3, 4)  # new, assigned, planned, waiting
 # Ticket/ITIL priority labels
 _PRIORITY_LABELS = {1: "very_low", 2: "low", 3: "medium", 4: "high", 5: "very_high", 6: "major"}
 
+# Maximum rows shown inline to the AI agent (preview)
 _MAX_RESULTS_HARD_LIMIT = 50
+# Maximum rows fetched from GLPI for CSV export
+_CSV_FETCH_LIMIT = 10_000
 
 # Standard GLPI searchOption field IDs for Ticket
 _TICKET_FIELD_NAME = 1            # ticket title / name
@@ -118,6 +122,47 @@ _QUICK_SEARCH_FIELDS: dict[str, list[int]] = {
 # Cache TTL for listSearchOptions results (24 hours)
 _SEARCH_OPTIONS_CACHE_TTL_SECONDS = 24 * 3600
 _TOOL_NAME = "glpi_search"
+
+# Human-readable names for common GLPI searchOption field IDs, per itemtype.
+# Used to produce readable CSV column headers instead of bare numeric IDs.
+_GLPI_FIELD_NAMES_TICKET: dict[str, str] = {
+    "1": "name",
+    "2": "id",
+    "3": "priority",
+    "4": "requester",
+    "5": "technician",
+    "7": "content",
+    "8": "tech_group",
+    "12": "status",
+    "15": "date_creation",
+    "17": "date_resolution",
+    "19": "date_mod",
+    "22": "watcher",
+    "71": "requester_group",
+}
+_GLPI_FIELD_NAMES_ASSET: dict[str, str] = {
+    "1": "name",
+    "2": "id",
+    "5": "serial",
+    "21": "mac",
+    "47": "uuid",
+    "70": "user",
+    "71": "group",
+    "126": "ip",
+}
+_GLPI_FIELD_NAMES_COMMON: dict[str, str] = {"1": "name", "2": "id"}
+
+_GLPI_FIELD_NAMES_BY_ITEMTYPE: dict[str, dict[str, str]] = {
+    "Ticket": _GLPI_FIELD_NAMES_TICKET,
+    "Problem": _GLPI_FIELD_NAMES_TICKET,
+    "Change": _GLPI_FIELD_NAMES_TICKET,
+    "Computer": _GLPI_FIELD_NAMES_ASSET,
+    "Monitor": _GLPI_FIELD_NAMES_ASSET,
+    "NetworkEquipment": _GLPI_FIELD_NAMES_ASSET,
+    "Peripheral": _GLPI_FIELD_NAMES_ASSET,
+    "Phone": _GLPI_FIELD_NAMES_ASSET,
+    "Printer": _GLPI_FIELD_NAMES_ASSET,
+}
 
 
 @cached(
@@ -222,6 +267,8 @@ class GlpiSearchTool(BaseTool):
       → action="search", itemtype="Computer", user="john.doe"
     - ``"search knowledge base for password reset"``
       → action="search", itemtype="KnowbaseItem", quick_search="password reset"
+    - ``"list all computers"`` / ``"show all assets"`` / ``"export all tickets"``
+      → action="search", itemtype="Computer", list_all=True
     - ``"what field IDs can I use to search Tickets?"``
       → action="list_fields", itemtype="Ticket"
 
@@ -431,6 +478,28 @@ class GlpiSearchTool(BaseTool):
                 "default": 20,
                 "description": "Maximum number of results to return (default: 20, max: 50).",
             },
+            "list_all": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "When true, retrieves all items of the given itemtype with no filter. "
+                    "Use this when the user explicitly asks to list or export everything "
+                    "(e.g. 'list all computers', 'export all tickets'). "
+                    "Cannot be combined with any other filter parameter. "
+                    "Results are capped at the CSV fetch limit; the first max_results items "
+                    "are shown inline and the rest are available in the CSV artifact."
+                ),
+            },
+            "export_csv": {
+                "type": "boolean",
+                "default": True,
+                "description": (
+                    "Save all returned rows as a CSV file artifact (default: true). "
+                    "The CSV is automatically generated and a download link is provided "
+                    "so the user can open the results in a spreadsheet. Set to false only "
+                    "when the caller explicitly does not need the file."
+                ),
+            },
             "sort_field": {
                 "type": "integer",
                 "description": (
@@ -567,6 +636,7 @@ class GlpiSearchTool(BaseTool):
         date_from: Optional[str] = params.get("date_from") or None
         date_to: Optional[str] = params.get("date_to") or None
         raw_criteria: list[dict] = params.get("criteria") or []
+        list_all: bool = bool(params.get("list_all", False))
         max_results: int = min(int(params.get("max_results", 20)), _MAX_RESULTS_HARD_LIMIT)
         sort_field: Optional[int] = params.get("sort_field")
         order: str = params.get("order", "DESC")
@@ -611,20 +681,20 @@ class GlpiSearchTool(BaseTool):
                 retryable=False,
             )
 
-        # Guard: require at least one filter to avoid dumping the full table
+        # Guard: require at least one filter — unless list_all is explicitly set
         has_filter = any([
             quick_search, keyword, user, group, status, priority,
             date_from, date_to, raw_criteria,
             technician, requester, watcher, technician_group, requester_group,
         ])
-        if not has_filter:
+        if not has_filter and not list_all:
             return self._failure(
                 "NO_FILTER",
                 (
                     "At least one filter is required (quick_search, keyword, status, priority, "
                     f"date_from/date_to, technician/requester/watcher, or criteria) "
                     f"to avoid returning the full '{itemtype}' table. "
-                    "Tip: use quick_search='<term>' for a simple free-text search."
+                    "To list all items explicitly, set list_all=true."
                 ),
             )
 
@@ -680,7 +750,7 @@ class GlpiSearchTool(BaseTool):
                             forcedisplay.append(fid)
                             seen.add(fid)
 
-                range_str = f"0-{max_results - 1}"
+                range_str = f"0-{_CSV_FETCH_LIMIT - 1}"
 
                 log.info(
                     "glpi_search: itemtype=%s criteria_count=%d quick_search=%s",
@@ -712,6 +782,7 @@ class GlpiSearchTool(BaseTool):
         elapsed = int((time.monotonic() - t0) * 1000)
         total = result.get("totalcount", 0)
         data = result.get("data", [])
+        export_csv = bool(params.get("export_csv", True))
 
         # Build human-readable summary of filters applied
         filters: dict = {}
@@ -745,21 +816,57 @@ class GlpiSearchTool(BaseTool):
         if raw_criteria:
             filters["criteria_count"] = len(raw_criteria)
 
+        rows = _normalize_glpi_rows(data, itemtype)
+        agent_payload = await build_agent_payload(
+            self,
+            rows=rows,
+            export_csv=export_csv,
+            export_json=False,
+            filename_prefix=f"glpi_search_{itemtype.lower()}",
+            agent_context=agent_context,
+            preview_rows=max_results,
+        )
+
         return self._success(
             data={
                 "summary": {
                     "itemtype": itemtype,
                     "total_count": total,
-                    "returned_count": len(data),
+                    "returned_count": agent_payload["rows_total"],
                     "filters_applied": filters,
                 },
-                "items": data,
+                "rows_total": agent_payload["rows_total"],
+                "rows_overflow": agent_payload["rows_overflow"],
+                "rows_preview_limit": _MAX_RESULTS_HARD_LIMIT,
+                "artifacts": agent_payload["artifacts"],
+                "agent_hint": agent_payload["agent_hint"],
+                "items": agent_payload["rows_preview"],
             },
             execution_time_ms=elapsed,
         )
 
 
 # ── Module-level helpers ───────────────────────────────────────────────────
+
+
+def _normalize_glpi_rows(rows: list[dict], itemtype: str) -> list[dict]:
+    """Map numeric field-ID keys to human-readable names for the given itemtype.
+
+    GLPI search results use integer searchOption IDs as dict keys (e.g. ``"12"``
+    for Ticket status). This converts them to descriptive names so the exported
+    CSV has readable column headers. Unknown IDs are kept as-is.
+    """
+    field_map = {
+        **_GLPI_FIELD_NAMES_COMMON,
+        **_GLPI_FIELD_NAMES_BY_ITEMTYPE.get(itemtype, {}),
+    }
+    normalized: list[dict] = []
+    for row in rows:
+        new_row: dict = {}
+        for k, v in row.items():
+            new_row[field_map.get(str(k), str(k))] = v
+        normalized.append(new_row)
+    return normalized
 
 
 def _build_quick_search_criteria(itemtype: str, term: str) -> list[dict]:
