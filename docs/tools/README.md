@@ -55,6 +55,7 @@ framework (audience: developers).
 
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
+| `azure` | 5 | `azure:read`, `azure:write` | ✓ | ✓ | ✓ | [devops/azure.md](devops/azure.md) |
 | `gitlab` | 3 | `gitlab:read`, `gitlab:write` | ✓ | ✓ | — | [devops/gitlab.md](devops/gitlab.md) |
 | `kubernetes` | 3 | `k8s:read`, `k8s:write` | ✓ | ✓ | ✓ | [devops/k8s/kubernetes.md](devops/k8s/kubernetes.md) |
 

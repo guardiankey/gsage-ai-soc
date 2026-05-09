@@ -458,7 +458,8 @@ async def get_daily_diff(
     item_type, metadata = _diff_filename_parts(col, filename)
     path = await ensure_daily_file(col, item_type, year, month, day, metadata=metadata)
     return FileResponse(
-        path=str(path), media_type="text/plain; charset=utf-8", filename=filename
+        path=str(path), media_type="text/plain; charset=utf-8", filename=filename,
+        content_disposition_type="inline",
     )
 
 
@@ -486,7 +487,8 @@ async def get_monthly_diff(
     item_type, metadata = _diff_filename_parts(col, filename)
     path = await ensure_monthly_file(col, item_type, year, month, metadata=metadata)
     return FileResponse(
-        path=str(path), media_type="text/plain; charset=utf-8", filename=filename
+        path=str(path), media_type="text/plain; charset=utf-8", filename=filename,
+        content_disposition_type="inline",
     )
 
 
@@ -501,7 +503,10 @@ async def get_file(slug: str, filename: str) -> FileResponse:
         raise HTTPException(status_code=404, detail=f"File '{filename}' not found in collection '{slug}'")
 
     media_type = "text/plain; charset=utf-8"
-    return FileResponse(path=str(file_path), media_type=media_type, filename=filename)
+    return FileResponse(
+        path=str(file_path), media_type=media_type, filename=filename,
+        content_disposition_type="inline",
+    )
 
 
 def _guard_path(component: str) -> None:
