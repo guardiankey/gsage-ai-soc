@@ -383,6 +383,57 @@ class MinioFileStore:
 
         return await asyncio.to_thread(_download)
 
+    async def replace_content(
+        self,
+        storage_key: str,
+        data: bytes,
+        content_type: str,
+        category: str = "generated",
+    ) -> int:
+        """Overwrite an existing MinIO object with new *data* in-place.
+
+        The DB record (``GSageFile``) is **not** updated here — callers must
+        update ``size_bytes`` (and let ``onupdate`` refresh ``updated_at``).
+
+        Parameters
+        ----------
+        storage_key:
+            Full object key in MinIO (``{org_id}/{user_id}/{file_id}``).
+        data:
+            New file bytes.
+        content_type:
+            MIME type of the new content.
+        category:
+            Bucket category (default ``"generated"``).
+
+        Returns
+        -------
+        int
+            Size of the new content in bytes.
+
+        Raises
+        ------
+        FileStoreError
+            If the MinIO operation fails.
+        """
+        bucket = self._bucket_for(category)
+        size = len(data)
+
+        def _put() -> None:
+            self._client.put_object(
+                bucket,
+                storage_key,
+                io.BytesIO(data),
+                length=size,
+                content_type=content_type,
+            )
+
+        await asyncio.to_thread(_put)
+        log.debug(
+            "MinIO: replaced %s (%d bytes) in bucket '%s'", storage_key, size, bucket
+        )
+        return size
+
     async def delete_object(self, storage_key: str, category: str = "generated") -> None:
         """Delete *storage_key* from MinIO.
 

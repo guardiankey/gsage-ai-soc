@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import time
 from typing import ClassVar, Optional
 
@@ -20,6 +19,13 @@ import duckdb  # type: ignore[import-untyped]
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.core.csv.csv_loader import load_csv, result_to_payload
+from src.mcp_server.tools.core.csv.csv_shared import (
+    _COMMENT_RE,
+    _DENY_FUNCTION_PATTERNS,
+    _DENY_PATTERNS,
+    _strip_comments,
+    validate_sql_safe as _validate_sql,
+)
 from src.shared.security.context import AgentContext
 
 logger = logging.getLogger(__name__)
@@ -29,89 +35,6 @@ _QUERY_TIMEOUT_SECONDS: float = 10.0
 _MAX_RESULT_ROWS: int = 5000
 _MEMORY_LIMIT: str = "256MB"
 _MAX_INLINE_BYTES: int = 50_000
-
-# Statements / functions that must never appear in user SQL.
-# DuckDB exposes a lot of filesystem / extension surface — we hard-block it.
-_DENY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(rf"\b{kw}\b", re.IGNORECASE)
-    for kw in (
-        "ATTACH",
-        "DETACH",
-        "INSTALL",
-        "LOAD",
-        "COPY",
-        "EXPORT",
-        "IMPORT",
-        "PRAGMA",
-        "SET",
-        "RESET",
-        "CREATE",
-        "DROP",
-        "INSERT",
-        "UPDATE",
-        "DELETE",
-        "ALTER",
-        "TRUNCATE",
-        "CALL",
-        "GRANT",
-        "REVOKE",
-        "VACUUM",
-        "CHECKPOINT",
-    )
-)
-
-# Functions / table-functions that read the host filesystem or network.
-_DENY_FUNCTION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(rf"\b{kw}\s*\(", re.IGNORECASE)
-    for kw in (
-        "read_csv",
-        "read_csv_auto",
-        "read_parquet",
-        "read_json",
-        "read_json_auto",
-        "read_blob",
-        "read_text",
-        "parquet_scan",
-        "json_scan",
-        "iceberg_scan",
-        "delta_scan",
-        "glob",
-        "list_dir",
-        "httpfs",
-    )
-)
-
-_COMMENT_RE = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
-
-
-def _strip_comments(sql: str) -> str:
-    return _COMMENT_RE.sub(" ", sql)
-
-
-def _validate_sql(sql: str) -> Optional[str]:
-    """Return ``None`` if the SQL looks safe, otherwise an error string."""
-    stripped_for_check = _strip_comments(sql).strip().rstrip(";").strip()
-    if not stripped_for_check:
-        return "Empty SQL."
-
-    # Forbid multiple statements (block trailing ``;`` followed by content).
-    body = _strip_comments(sql).strip()
-    if body.rstrip(";").count(";") > 0:
-        return "Multiple SQL statements are not allowed."
-
-    head = stripped_for_check.lstrip("(").lstrip()
-    head_word = head.split(None, 1)[0].upper() if head else ""
-    if head_word not in {"SELECT", "WITH"}:
-        return "Only SELECT or WITH ... SELECT queries are allowed."
-
-    # Denylist scan over the comment-stripped body.
-    for pat in _DENY_PATTERNS:
-        if pat.search(stripped_for_check):
-            return f"Disallowed keyword: {pat.pattern}"
-    for pat in _DENY_FUNCTION_PATTERNS:
-        if pat.search(stripped_for_check):
-            return f"Disallowed function: {pat.pattern}"
-    return None
 
 
 def _run_duckdb_query(arrow_table, sql: str) -> tuple[list[str], list[list]]:

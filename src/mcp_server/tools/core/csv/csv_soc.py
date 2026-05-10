@@ -30,7 +30,8 @@ from typing import Any, Callable, ClassVar, Optional
 import polars as pl
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
-from src.mcp_server.tools.core.csv.csv_loader import load_csv, result_to_payload
+from src.mcp_server.tools.core.csv.csv_loader import load_csv
+from src.mcp_server.tools.core.csv.csv_shared import df_to_csv_bytes
 from src.shared.security.context import AgentContext
 
 logger = logging.getLogger(__name__)
@@ -118,15 +119,6 @@ def _classify_ip(ip_str: str) -> str:
     return "public"
 
 
-def _build_payload(df: pl.DataFrame) -> dict:
-    """Slice + JSON-budget a Polars frame into an inline payload."""
-    return result_to_payload(
-        df,
-        max_rows=_MAX_RESULT_ROWS,
-        max_inline_bytes=_MAX_INLINE_BYTES,
-    )
-
-
 # ── ip_in_cidr ─────────────────────────────────────────────────────────────
 
 
@@ -162,9 +154,9 @@ def _action_ip_in_cidr(
         mask = ~mask
     filtered = df.filter(mask)
     return {
+        "df": filtered,
         "matched_rows": int(filtered.height),
         "invalid_cidrs": invalid,
-        "result": _build_payload(filtered),
     }
 
 
@@ -188,8 +180,8 @@ def _action_ip_classify(
     )
     summary = {row[output_column]: row["count"] for row in summary_df.to_dicts()}
     return {
+        "df": enriched,
         "summary": summary,
-        "result": _build_payload(enriched),
     }
 
 
@@ -234,12 +226,26 @@ def _action_extract_iocs(
             for k, vs in scan.items():
                 aggregate[k].update(vs)
                 if len(aggregate[k]) > _MAX_IOC_PER_TYPE:
-                    # Truncate; keep first _MAX_IOC_PER_TYPE deterministically.
                     aggregate[k] = set(list(aggregate[k])[:_MAX_IOC_PER_TYPE])
+
+    counts = {k: len(v) for k, v in aggregate.items()}
+    # Build long-format DataFrame: ioc_type | value
+    rows = [
+        {"ioc_type": ioc_type, "value": val}
+        for ioc_type, vals in aggregate.items()
+        for val in sorted(vals)
+    ]
+    ioc_df = pl.DataFrame(
+        rows if rows else [{"ioc_type": "", "value": ""}],
+        schema={"ioc_type": pl.Utf8, "value": pl.Utf8},
+    )
+    if not rows:
+        ioc_df = ioc_df.clear()
     return {
+        "df": ioc_df,
         "scanned_columns": columns,
-        "iocs": {k: sorted(v) for k, v in aggregate.items()},
-        "counts": {k: len(v) for k, v in aggregate.items()},
+        "counts": counts,
+        "total_iocs": sum(counts.values()),
     }
 
 
@@ -299,10 +305,10 @@ def _action_geoip_enrich(df: pl.DataFrame, *, column: str) -> dict:
 
     enriched = df.with_columns([asn_series, asn_org_series, cc_series, country_series])
     return {
+        "df": enriched,
         "asn_db_available": asn_ok,
         "ip2location_db_available": ip2loc_ok,
         "unique_ips_resolved": len(unique_ips),
-        "result": _build_payload(enriched),
     }
 
 
@@ -540,17 +546,52 @@ class CsvSocTool(BaseTool):
             logger.exception("csv_soc: action %s failed: %s", action, exc)
             return self._failure("INTERNAL_ERROR", f"Action failed: {exc}")
 
+        # ── Persist result as a new CSV file ─────────────────────────────
+        result_df: pl.DataFrame = view.pop("df")
+        summary = {k: v for k, v in view.items()}
+
+        original_name = file_meta.get("filename") or "output"
+        base = original_name[:-4] if original_name.lower().endswith(".csv") else original_name
+        output_filename = f"{base}_{action}.csv"
+
+        csv_bytes = await asyncio.to_thread(df_to_csv_bytes, result_df)
+
+        output_file: Optional[dict] = None
+        try:
+            from src.shared.database import _get_session_maker  # noqa: PLC0415
+
+            async with _get_session_maker()() as db_session:
+                output_file = await self._store_file(
+                    data=csv_bytes,
+                    filename=output_filename,
+                    content_type="text/csv",
+                    agent_context=agent_context,
+                    session=db_session,
+                    description=(
+                        f"csv_soc/{action} result from '{original_name}' "
+                        f"({result_df.height} rows, {result_df.width} cols)"
+                    ),
+                )
+        except Exception as exc:  # pragma: no cover - storage issues are non-fatal
+            logger.warning("csv_soc: could not store result file: %s", exc)
+
         elapsed = int((time.monotonic() - start) * 1000)
-        return self._success(
-            {
-                "action": action,
-                "file": {
-                    "file_id": file_meta.get("file_id"),
-                    "filename": file_meta.get("filename"),
-                    "rows": file_meta.get("rows"),
-                    "columns": file_meta.get("columns"),
-                },
-                **view,
+        result_data: dict = {
+            "action": action,
+            "source_file": {
+                "file_id": file_meta.get("file_id"),
+                "filename": file_meta.get("filename"),
+                "rows": file_meta.get("rows"),
+                "columns": file_meta.get("columns"),
             },
-            execution_time_ms=elapsed,
-        )
+            "output_file": output_file,
+            "output_rows": result_df.height,
+            "output_columns": result_df.width,
+            **summary,
+        }
+        if output_file is None:
+            result_data["warning"] = (
+                "Result could not be saved to storage. "
+                "The operation succeeded but the output file is unavailable."
+            )
+        return self._success(result_data, execution_time_ms=elapsed)

@@ -1335,6 +1335,88 @@ class BaseTool(ABC):
             )
             return None
 
+    async def _replace_file_content(
+        self,
+        file_id: str,
+        data: bytes,
+        agent_context: "AgentContext",
+        session: AsyncSession,
+    ) -> Optional[dict]:
+        """Overwrite the bytes of an existing file in MinIO and update its DB record.
+
+        Intended for in-place editing: the ``file_id`` (and all references to
+        it) remain valid; only the stored content and ``size_bytes`` change.
+
+        Access control: the file must belong to ``agent_context.org_id``.
+
+        Parameters
+        ----------
+        file_id:
+            UUID of the file to overwrite (``GSageFile.id``).
+        data:
+            New file bytes.
+        agent_context:
+            Current request context.  Used to enforce ``org_id`` ownership.
+        session:
+            Open ``AsyncSession``.  Changes are flushed but **not committed** —
+            the caller (or ``BaseTool.run``) handles the commit lifecycle.
+
+        Returns
+        -------
+        dict or None
+            Same shape as :meth:`_store_file` on success.  ``None`` if the
+            file is not found, access is denied, or the storage call fails.
+        """
+        try:
+            from src.shared.services.file_store import get_file_store  # noqa: PLC0415
+            from src.shared.models.generated_file import GSageFile  # noqa: PLC0415
+            from sqlalchemy import select  # noqa: PLC0415
+
+            org_id = str(agent_context.org_id)
+            stmt = (
+                select(GSageFile)
+                .where(
+                    GSageFile.id == uuid.UUID(file_id),
+                    GSageFile.org_id == uuid.UUID(org_id),
+                    GSageFile.purged_at.is_(None),
+                )
+            )
+            result = await session.execute(stmt)
+            gfile = result.scalar_one_or_none()
+            if gfile is None:
+                logger.warning(
+                    "Tool %s: _replace_file_content: file %s not found or access denied (org=%s)",
+                    self.name, file_id, org_id,
+                )
+                return None
+
+            store = get_file_store()
+            new_size = await store.replace_content(
+                storage_key=gfile.storage_key,
+                data=data,
+                content_type=gfile.content_type,
+                category=gfile.category,
+            )
+
+            gfile.size_bytes = new_size
+            await session.flush()
+
+            return {
+                "file_id": str(gfile.id),
+                "filename": gfile.filename,
+                "content_type": gfile.content_type,
+                "size_bytes": new_size,
+                "download_path": f"/v1/orgs/{org_id}/files/{gfile.id}/download",
+                "expires_at": gfile.expires_at.isoformat() if gfile.expires_at else None,
+                "description": gfile.description,
+            }
+        except Exception as exc:
+            logger.error(
+                "Tool %s: _replace_file_content failed for file %s: %s",
+                self.name, file_id, exc,
+            )
+            return None
+
     async def _load_file(
         self,
         file_id: str,
