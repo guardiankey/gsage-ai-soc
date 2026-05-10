@@ -70,6 +70,7 @@ import polars as pl
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.core.csv.csv_loader import load_csv, invalidate_cache
 from src.mcp_server.tools.core.csv.csv_shared import (
+    _fetch_edited_filenames,
     apply_where_sql,
     build_filter_predicate,
     compute_edited_filename,
@@ -86,7 +87,6 @@ logger = logging.getLogger(__name__)
 # ── Limits ─────────────────────────────────────────────────────────────────
 _MAX_NEW_COLUMNS: int = 50
 _MAX_SPLIT_PARTS: int = 20
-
 
 # ── Action helpers (synchronous — run in worker thread) ─────────────────────
 
@@ -439,7 +439,7 @@ class CsvEditTool(BaseTool):
     )
     category: ClassVar[str] = "data"
     permissions: ClassVar[list[str]] = ["core:csv_edit"]
-    rate_limit_per_minute: ClassVar[int] = 20
+    rate_limit_per_minute: ClassVar[int] = 200
     timeout_seconds: ClassVar[int] = 60
     use_circuit_breaker: ClassVar[bool] = False
 
@@ -644,6 +644,22 @@ class CsvEditTool(BaseTool):
                 "type": "string",
                 "description": "Override encoding detection (e.g. 'utf-8', 'latin-1').",
             },
+            "create_new": {
+                "type": "boolean",
+                "description": (
+                    "Controls whether the result is saved as a new file or overwrites "
+                    "the source in-place.\n"
+                    "- true: always create a new file with an incremented suffix "
+                    "('_edited.csv', '_edited2.csv', '_edited3.csv', \u2026). "
+                    "The system checks existing filenames and picks the first available one.\n"
+                    "- false (default for all actions except filter_to_new): overwrite "
+                    "the source file in-place when its name already ends with '_edited*.csv'. "
+                    "If the source is an original file (no '_edited*' suffix), a new "
+                    "'_edited.csv' is always created regardless \u2014 the original is never "
+                    "overwritten.\n"
+                    "- filter_to_new default: true (materialises a subset into a new file)."
+                ),
+            },
         },
         "additionalProperties": False,
     }
@@ -726,17 +742,42 @@ class CsvEditTool(BaseTool):
             logger.exception("csv_edit: action %s failed: %s", action, exc)
             return self._failure("INTERNAL_ERROR", f"Action failed: {exc}")
 
+        # ── Resolve create_new flag ──────────────────────────────────────
+        # filter_to_new always defaults to True (its purpose is materialising
+        # a subset, not mutating the source).  All other actions default to
+        # False (overwrite _edited* in-place; create only when source is plain).
+        create_new_param = params.get("create_new")
+        create_new: bool = (
+            action == "filter_to_new"
+            if create_new_param is None
+            else bool(create_new_param)
+        )
+
         # ── Persist output ───────────────────────────────────────────────
         original_filename = file_meta.get("filename") or "output.csv"
-        output_filename, is_inplace = compute_edited_filename(original_filename)
 
         csv_bytes = await asyncio.to_thread(df_to_csv_bytes, result_df)
 
         output_file: Optional[dict] = None
+        output_filename: str = original_filename
+        is_inplace: bool = False
         try:
             from src.shared.database import _get_session_maker  # noqa: PLC0415
 
             async with _get_session_maker()() as db_session:
+                # Query existing _edited* filenames to find the next free name.
+                existing = await _fetch_edited_filenames(
+                    org_id=agent_context.org_id,
+                    user_id=agent_context.user_id,
+                    original_filename=original_filename,
+                    session=db_session,
+                )
+                output_filename, is_inplace = compute_edited_filename(
+                    original_filename,
+                    force_new=create_new,
+                    existing_filenames=existing,
+                )
+
                 if is_inplace:
                     output_file = await self._replace_file_content(
                         file_id=str(file_meta.get("file_id", file_id)),

@@ -30,8 +30,12 @@ from typing import Any, Callable, ClassVar, Optional
 import polars as pl
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
-from src.mcp_server.tools.core.csv.csv_loader import load_csv
-from src.mcp_server.tools.core.csv.csv_shared import df_to_csv_bytes
+from src.mcp_server.tools.core.csv.csv_loader import invalidate_cache, load_csv
+from src.mcp_server.tools.core.csv.csv_shared import (
+    _fetch_edited_filenames,
+    compute_edited_filename,
+    df_to_csv_bytes,
+)
 from src.shared.security.context import AgentContext
 
 logger = logging.getLogger(__name__)
@@ -341,7 +345,7 @@ class CsvSocTool(BaseTool):
     )
     category: ClassVar[str] = "data"
     permissions: ClassVar[list[str]] = ["core:csv_soc"]
-    rate_limit_per_minute: ClassVar[int] = 30
+    rate_limit_per_minute: ClassVar[int] = 300
     timeout_seconds: ClassVar[int] = 30
     use_circuit_breaker: ClassVar[bool] = False
 
@@ -420,6 +424,20 @@ class CsvSocTool(BaseTool):
             "encoding": {
                 "type": "string",
                 "description": "Override encoding detection.",
+            },
+            "create_new": {
+                "type": "boolean",
+                "description": (
+                    "Controls whether the result is saved as a new file or overwrites "
+                    "the source in-place.\n"
+                    "- true: always create a new file with an incremented suffix "
+                    "('_edited.csv', '_edited2.csv', '_edited3.csv', \u2026). "
+                    "The system checks existing filenames and picks the first available one.\n"
+                    "- false (default): overwrite the source file in-place when its name "
+                    "already ends with '_edited*.csv'. If the source is an original file "
+                    "(no '_edited*' suffix), a new '_edited.csv' is always created "
+                    "regardless \u2014 the original is never overwritten."
+                ),
             },
         },
         "additionalProperties": False,
@@ -546,34 +564,69 @@ class CsvSocTool(BaseTool):
             logger.exception("csv_soc: action %s failed: %s", action, exc)
             return self._failure("INTERNAL_ERROR", f"Action failed: {exc}")
 
-        # ── Persist result as a new CSV file ─────────────────────────────
+        # ── Persist output ────────────────────────────────────────────────
         result_df: pl.DataFrame = view.pop("df")
         summary = {k: v for k, v in view.items()}
 
-        original_name = file_meta.get("filename") or "output"
-        base = original_name[:-4] if original_name.lower().endswith(".csv") else original_name
-        output_filename = f"{base}_{action}.csv"
+        original_filename = file_meta.get("filename") or "output.csv"
+
+        # ── Resolve create_new flag ───────────────────────────────────────
+        create_new_param = params.get("create_new")
+        create_new: bool = bool(create_new_param) if create_new_param is not None else False
 
         csv_bytes = await asyncio.to_thread(df_to_csv_bytes, result_df)
 
         output_file: Optional[dict] = None
+        output_filename: str = original_filename
+        is_inplace: bool = False
         try:
             from src.shared.database import _get_session_maker  # noqa: PLC0415
 
             async with _get_session_maker()() as db_session:
-                output_file = await self._store_file(
-                    data=csv_bytes,
-                    filename=output_filename,
-                    content_type="text/csv",
-                    agent_context=agent_context,
+                # Query existing _edited* filenames (with advisory lock) to
+                # find the next free name and prevent concurrent collisions.
+                existing = await _fetch_edited_filenames(
+                    org_id=agent_context.org_id,
+                    user_id=agent_context.user_id,
+                    original_filename=original_filename,
                     session=db_session,
-                    description=(
-                        f"csv_soc/{action} result from '{original_name}' "
-                        f"({result_df.height} rows, {result_df.width} cols)"
-                    ),
                 )
+                output_filename, is_inplace = compute_edited_filename(
+                    original_filename,
+                    force_new=create_new,
+                    existing_filenames=existing,
+                )
+
+                if is_inplace:
+                    output_file = await self._replace_file_content(
+                        file_id=str(file_meta.get("file_id", file_id)),
+                        data=csv_bytes,
+                        agent_context=agent_context,
+                        session=db_session,
+                    )
+                    if output_file is not None:
+                        await db_session.commit()
+                else:
+                    output_file = await self._store_file(
+                        data=csv_bytes,
+                        filename=output_filename,
+                        content_type="text/csv",
+                        agent_context=agent_context,
+                        session=db_session,
+                        description=(
+                            f"csv_soc/{action} result from '{original_filename}' "
+                            f"({result_df.height} rows, {result_df.width} cols)"
+                        ),
+                    )
         except Exception as exc:  # pragma: no cover - storage issues are non-fatal
-            logger.warning("csv_soc: could not store result file: %s", exc)
+            logger.warning("csv_soc: could not persist output: %s", exc)
+
+        # Invalidate the loader cache so subsequent reads reflect new content.
+        org_id_str = str(agent_context.org_id)
+        out_file_id = (output_file or {}).get("file_id") or str(file_meta.get("file_id", file_id))
+        invalidate_cache(org_id_str, str(file_meta.get("file_id", file_id)))
+        if out_file_id != str(file_meta.get("file_id", file_id)):
+            invalidate_cache(org_id_str, out_file_id)
 
         elapsed = int((time.monotonic() - start) * 1000)
         result_data: dict = {
@@ -585,13 +638,24 @@ class CsvSocTool(BaseTool):
                 "columns": file_meta.get("columns"),
             },
             "output_file": output_file,
+            "is_inplace": is_inplace,
             "output_rows": result_df.height,
             "output_columns": result_df.width,
             **summary,
         }
         if output_file is None:
             result_data["warning"] = (
-                "Result could not be saved to storage. "
-                "The operation succeeded but the output file is unavailable."
+                "Output could not be saved to storage. "
+                "The operation succeeded but the result file is unavailable."
             )
+        else:
+            hint = (
+                "File updated in-place — use the same file_id for further operations."
+                if is_inplace
+                else (
+                    f"New file created: '{output_filename}'. "
+                    "Use output_file.file_id for further operations."
+                )
+            )
+            result_data["hint"] = hint
         return self._success(result_data, execution_time_ms=elapsed)

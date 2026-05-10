@@ -11,7 +11,8 @@ SQL sandbox
 DataFrame helpers
 -----------------
 * :func:`df_to_csv_bytes`         — serialize a Polars frame to CSV bytes.
-* :func:`compute_edited_filename` — derive the output filename for edits.
+* :func:`compute_edited_filename` — derive the output filename for edits
+  (supports ``force_new`` and ``existing_filenames`` for suffix increments).
 
 Filter helpers
 --------------
@@ -32,9 +33,10 @@ Sort detection
 from __future__ import annotations
 
 import ast
+import hashlib
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 
 import polars as pl
 
@@ -205,21 +207,119 @@ def df_to_csv_bytes(df: pl.DataFrame) -> bytes:
     return df.write_csv().encode("utf-8")
 
 
-def compute_edited_filename(filename: str) -> tuple[str, bool]:
+# Matches filenames that already carry an _edited<N>.csv suffix.
+# Group 1 = base name (before _edited), group 2 = optional numeric suffix.
+_EDITED_SUFFIX_RE: re.Pattern[str] = re.compile(
+    r"^(.+?)_edited(\d*)(\.csv)$", re.IGNORECASE
+)
+
+
+def compute_edited_filename(
+    filename: str,
+    *,
+    force_new: bool = False,
+    existing_filenames: Optional[set[str]] = None,
+) -> tuple[str, bool]:
     """Derive the output filename and whether to edit in-place.
 
-    Returns ``(output_filename, is_inplace)``:
+    Returns ``(output_filename, is_inplace)``.
 
-    - When *filename* already ends with ``_edited.csv`` → edit in-place
-      (same file_id, ``is_inplace=True``).
-    - Otherwise → append ``_edited.csv`` suffix and create a new file
-      (``is_inplace=False``).
+    In-place overwrite (``is_inplace=True``) happens when *filename* already
+    carries the ``_edited<N>.csv`` suffix **and** *force_new* is ``False``.
+
+    New-file creation (``is_inplace=False``) happens when *force_new* is
+    ``True`` or *filename* does not carry an ``_edited*`` suffix.  The
+    function picks the first available name from
+    ``<base>_edited.csv``, ``<base>_edited2.csv``, ``<base>_edited3.csv``, …
+    that is not present in *existing_filenames* (case-insensitive) and is
+    not identical to *filename* itself.
+
+    Parameters
+    ----------
+    filename:
+        Source filename.
+    force_new:
+        When ``True``, always create a new file even if *filename* is
+        already ``_edited*``.  Default ``False``.
+    existing_filenames:
+        Filenames already in use (e.g. from a DB query).  Used to select
+        the next free increment.  ``None`` is treated as an empty set.
     """
-    lower = filename.lower()
-    if lower.endswith("_edited.csv"):
+    existing_lower = {f.lower() for f in (existing_filenames or set())}
+    source_lower = filename.lower()
+    m = _EDITED_SUFFIX_RE.match(filename)
+
+    if m and not force_new:
+        # Source already carries the _edited* suffix → overwrite in-place.
         return filename, True
-    base = filename[:-4] if lower.endswith(".csv") else filename
-    return f"{base}_edited.csv", False
+
+    # Compute base (strip any _edited* suffix and .csv extension).
+    if m:
+        base = m.group(1)
+    elif source_lower.endswith(".csv"):
+        base = filename[:-4]
+    else:
+        base = filename
+
+    # Find the first available _edited<N>.csv name.
+    candidate = f"{base}_edited.csv"
+    if candidate.lower() != source_lower and candidate.lower() not in existing_lower:
+        return candidate, False
+    i = 2
+    while True:
+        candidate = f"{base}_edited{i}.csv"
+        if candidate.lower() != source_lower and candidate.lower() not in existing_lower:
+            return candidate, False
+        i += 1
+
+
+async def _fetch_edited_filenames(
+    org_id: Any,
+    user_id: Any,
+    original_filename: str,
+    session: Any,
+) -> set[str]:
+    """Return non-purged filenames matching '<base>_edited*.csv' for the user.
+
+    The *base* is extracted from *original_filename* by stripping any
+    ``_edited<N>`` suffix and the ``.csv`` extension.  Only files owned by
+    *user_id* within *org_id* are returned.
+
+    Acquires a PostgreSQL advisory transaction lock on ``(org_id, base)``
+    before querying, preventing concurrent requests from allocating the same
+    suffix.  The lock is released automatically when the surrounding
+    transaction commits.
+    """
+    from src.shared.models.generated_file import GSageFile  # noqa: PLC0415
+    from sqlalchemy import select, text  # noqa: PLC0415
+
+    m = _EDITED_SUFFIX_RE.match(original_filename)
+    if m:
+        base = m.group(1)
+    elif original_filename.lower().endswith(".csv"):
+        base = original_filename[:-4]
+    else:
+        base = original_filename
+
+    # Acquire a PostgreSQL advisory transaction lock keyed on (org_id, base)
+    # to prevent race conditions when concurrent requests allocate the next
+    # available suffix simultaneously.  The lock is held until the surrounding
+    # session commits (covering the full query → insert window).
+    lock_bytes = hashlib.md5(f"{org_id}:{base}".encode()).digest()
+    lock_int = int.from_bytes(lock_bytes[:8], "big", signed=True)
+    await session.execute(text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=lock_int))
+
+    stmt = (
+        select(GSageFile.filename)
+        .where(
+            GSageFile.org_id == org_id,
+            GSageFile.user_id == user_id,
+            GSageFile.filename.ilike(f"{base}_edited%.csv"),
+            GSageFile.purged_at.is_(None),
+        )
+    )
+    result = await session.execute(stmt)
+    return {row[0] for row in result.all()}
 
 
 # ── Structured filter ───────────────────────────────────────────────────────

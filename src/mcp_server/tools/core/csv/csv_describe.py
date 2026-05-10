@@ -125,7 +125,7 @@ class CsvDescribeTool(BaseTool):
     )
     category: ClassVar[str] = "data"
     permissions: ClassVar[list[str]] = ["core:csv_describe"]
-    rate_limit_per_minute: ClassVar[int] = 60
+    rate_limit_per_minute: ClassVar[int] = 600
     timeout_seconds: ClassVar[int] = 30
     use_circuit_breaker: ClassVar[bool] = False  # local-only, no external deps
 
