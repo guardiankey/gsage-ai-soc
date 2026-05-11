@@ -320,7 +320,7 @@ class Settings(BaseSettings):
     # Default TTL for tool-generated files (hours). 0 = never expires.
     file_default_ttl_hours: int = 72
     # Hard limit on file size accepted by _store_file() (bytes).
-    file_max_size_bytes: int = 52_428_800  # 50 MB
+    file_max_size_bytes: int = 230_686_720  # 220 MB
 
     # ── GuardianKey (Adaptive Authentication) ────────────────────────────────
     # Post-credential risk check via GuardianKey API v2. Fail-open: if the API

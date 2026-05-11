@@ -30,7 +30,7 @@ from typing import Any, Callable, ClassVar, Optional
 import polars as pl
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
-from src.mcp_server.tools.core.csv.csv_loader import invalidate_cache, load_csv
+from src.mcp_server.tools.core.csv.csv_loader import access_error_code, invalidate_cache, load_csv
 from src.mcp_server.tools.core.csv.csv_shared import (
     _fetch_edited_filenames,
     compute_edited_filename,
@@ -482,7 +482,7 @@ class CsvSocTool(BaseTool):
                 encoding=encoding if isinstance(encoding, str) else None,
             )
         except FileNotFoundError as exc:
-            return self._failure("FILE_NOT_FOUND", str(exc))
+            return self._failure(access_error_code(exc), str(exc))
         except ValueError as exc:
             return self._failure("PARSE_ERROR", str(exc))
         except Exception as exc:  # pragma: no cover - defensive

@@ -34,9 +34,27 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 logger = logging.getLogger(__name__)
 
+
+class CSVAccessError(FileNotFoundError):
+    """Raised when a CSV file cannot be loaded.
+
+    The ``reason`` attribute carries one of the codes returned by
+    :meth:`BaseTool._load_file_with_reason`:
+    ``"NOT_FOUND"``, ``"PURGED"``, ``"ACCESS_DENIED"``, ``"LOAD_FAILED"``.
+
+    Inherits from :class:`FileNotFoundError` so existing ``except
+    FileNotFoundError`` clauses keep working.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+
 # ── Tunables ───────────────────────────────────────────────────────────────
 # Maximum bytes pulled from MinIO per file (cap the read to keep memory bounded).
-DEFAULT_MAX_BYTES: int = 25 * 1024 * 1024  # 25 MB
+DEFAULT_MAX_BYTES: int = 200 * 1024 * 1024  # 200 MB
 # Cache settings.
 _CACHE_TTL_SECONDS: float = 10 * 60.0  # 10 minutes
 _CACHE_MAX_ENTRIES: int = 5
@@ -90,6 +108,29 @@ def invalidate_cache(org_id: str, file_id: str) -> None:
     key = (str(org_id), str(file_id))
     _cache.pop(key, None)
     _cache_locks.pop(key, None)
+
+
+# Mapping from :class:`CSVAccessError` reason codes to the public
+# ``error_code`` values surfaced by CSV tools.  Used by ``csv_describe``,
+# ``csv_query``, ``csv_soc`` and ``csv_edit`` so the LLM receives a precise
+# code (and matching message) instead of a generic ``FILE_NOT_FOUND``.
+ACCESS_REASON_TO_ERROR_CODE: dict[str, str] = {
+    "NOT_FOUND": "FILE_NOT_FOUND",
+    "PURGED": "FILE_EXPIRED",
+    "ACCESS_DENIED": "FILE_ACCESS_DENIED",
+    "LOAD_FAILED": "FILE_LOAD_FAILED",
+    "TOO_LARGE": "FILE_TOO_LARGE",
+}
+
+
+def access_error_code(exc: "FileNotFoundError") -> str:
+    """Return the canonical ``error_code`` for a CSV load failure.
+
+    Falls back to ``"FILE_NOT_FOUND"`` for plain ``FileNotFoundError``
+    instances that don't carry a ``reason`` attribute.
+    """
+    reason = getattr(exc, "reason", None)
+    return ACCESS_REASON_TO_ERROR_CODE.get(reason or "", "FILE_NOT_FOUND")
 
 
 # ── Encoding / delimiter detection ─────────────────────────────────────────
@@ -243,7 +284,7 @@ async def load_csv(
         if cached is not None:
             return cached.df, dict(cached.meta)
 
-        file_meta = await tool._load_file(
+        file_meta, reason = await tool._load_file_with_reason(
             file_id=file_id,
             org_id=org_id,
             user_id=str(agent_context.user_id),
@@ -251,8 +292,39 @@ async def load_csv(
             max_bytes=max_bytes,
         )
         if file_meta is None:
-            raise FileNotFoundError(
-                f"File '{file_id}' not found or access denied for org '{org_id}'."
+            # Map the reason to a user-friendly message so the LLM can
+            # explain *why* the file is unavailable.
+            messages = {
+                "NOT_FOUND": (
+                    f"File '{file_id}' does not exist in org '{org_id}'. "
+                    "It may have been deleted, or the ID is wrong."
+                ),
+                "PURGED": (
+                    f"File '{file_id}' has expired and its contents were purged. "
+                    "Attachments have a TTL — ask the user to upload it again."
+                ),
+                "ACCESS_DENIED": (
+                    f"Access denied to file '{file_id}'. "
+                    "The current user does not own this file and it is not org-scoped."
+                ),
+                "LOAD_FAILED": (
+                    f"Failed to read file '{file_id}' from storage (transient error)."
+                ),
+            }
+            msg = messages.get(reason or "", f"File '{file_id}' unavailable.")
+            raise CSVAccessError(reason or "NOT_FOUND", msg)
+
+        # Truncation means the file exceeded max_bytes.  For CSV this is
+        # unacceptable — the last row would be partial and parsing would
+        # either fail or silently corrupt the data.
+        if file_meta.get("truncated"):
+            size_mb = file_meta.get("size_bytes", 0) / (1024 * 1024)
+            limit_mb = max_bytes / (1024 * 1024)
+            raise CSVAccessError(
+                "TOO_LARGE",
+                f"File '{file_id}' is too large to process "
+                f"({size_mb:.0f} MB; limit is {limit_mb:.0f} MB). "
+                "Ask the user to split the file into smaller chunks.",
             )
 
         raw: bytes = file_meta.get("data") or b""

@@ -44,7 +44,7 @@ _ATTACHMENT_ALLOWED_EXTENSIONS = _TEMPLATE_ALLOWED_EXTENSIONS | {
     ".py", ".js", ".ts", ".sh", ".rb", ".go", ".java", ".c", ".cpp", ".h",
 }
 
-_ATTACHMENT_SIZE_LIMIT_BYTES = 50 * 1024 * 1024  # 50 MB
+_ATTACHMENT_SIZE_LIMIT_BYTES = 200 * 1024 * 1024  # 200 MB
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -509,7 +509,7 @@ async def upload_attachment(
     415
         Unsupported file extension.
     413
-        File exceeds the attachment size limit (50 MB).
+        File exceeds the attachment size limit (200 MB).
     """
     ctx.require_permission("agents:run")
 
@@ -553,7 +553,7 @@ async def upload_attachment(
     if len(raw) > _ATTACHMENT_SIZE_LIMIT_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File exceeds the 50 MB attachment size limit.",
+            detail="File exceeds the 200 MB attachment size limit.",
         )
 
     from src.shared.services.file_store import FileStoreError, get_file_store

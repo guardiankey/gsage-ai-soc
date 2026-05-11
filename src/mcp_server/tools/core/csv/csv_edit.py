@@ -68,7 +68,7 @@ from typing import Any, ClassVar, Optional
 import polars as pl
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
-from src.mcp_server.tools.core.csv.csv_loader import load_csv, invalidate_cache
+from src.mcp_server.tools.core.csv.csv_loader import access_error_code, load_csv, invalidate_cache
 from src.mcp_server.tools.core.csv.csv_shared import (
     _fetch_edited_filenames,
     apply_where_sql,
@@ -724,7 +724,7 @@ class CsvEditTool(BaseTool):
                 encoding=encoding if isinstance(encoding, str) else None,
             )
         except FileNotFoundError as exc:
-            return self._failure("FILE_NOT_FOUND", str(exc))
+            return self._failure(access_error_code(exc), str(exc))
         except ValueError as exc:
             return self._failure("PARSE_ERROR", str(exc))
         except Exception as exc:  # pragma: no cover

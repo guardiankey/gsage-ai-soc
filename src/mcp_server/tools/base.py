@@ -1225,7 +1225,8 @@ class BaseTool(ABC):
         Parameters
         ----------
         data:
-            Raw file bytes.  Must not exceed ``file_max_size_bytes`` (50 MB).
+            Raw file bytes.  Must not exceed ``file_max_size_bytes``
+            (default 220 MB).
         filename:
             User-facing filename (e.g. "report-2026.csv").
         content_type:
@@ -1428,8 +1429,39 @@ class BaseTool(ABC):
     ) -> Optional[dict]:
         """Fetch a file's bytes from MinIO by its DB ID.
 
-        Intended for use inside :meth:`execute` implementations, typically to
-        read a chat attachment before processing it.
+        Thin wrapper over :meth:`_load_file_with_reason` that discards the
+        failure reason — kept for backward compatibility with callers that
+        only need the success payload.
+
+        Returns
+        -------
+        dict or None
+            On success: see :meth:`_load_file_with_reason`.
+            On failure (not found, access denied, purged, …): ``None``.
+        """
+        result, _reason = await self._load_file_with_reason(
+            file_id=file_id,
+            org_id=org_id,
+            session=session,
+            user_id=user_id,
+            dept_id=dept_id,
+            max_bytes=max_bytes,
+        )
+        return result
+
+    async def _load_file_with_reason(
+        self,
+        file_id: str,
+        org_id: str,
+        session: Optional[AsyncSession] = None,
+        user_id: Optional[str] = None,
+        dept_id: Optional[str] = None,
+        max_bytes: int = 1 * 1024 * 1024,
+    ) -> tuple[Optional[dict], Optional[str]]:
+        """Fetch a file's bytes from MinIO by its DB ID, returning a reason on failure.
+
+        Intended for callers that need to surface the specific failure cause
+        (e.g. CSV tools mapping it to an ``error_code``).
 
         Parameters
         ----------
@@ -1452,19 +1484,13 @@ class BaseTool(ABC):
 
         Returns
         -------
-        dict or None
-            On success::
-
-                {
-                    "file_id": str,
-                    "filename": str,
-                    "content_type": str,
-                    "size_bytes": int,
-                    "data": bytes,          # raw bytes (possibly truncated)
-                    "truncated": bool,      # True if data was capped
-                }
-
-            On failure (not found, access denied, purged, …): ``None``.
+        tuple[dict | None, str | None]
+            On success: ``(payload, None)`` where payload has keys
+            ``file_id``, ``filename``, ``content_type``, ``size_bytes``,
+            ``data``, ``truncated``.
+            On failure: ``(None, reason)`` where ``reason`` is one of
+            ``"NOT_FOUND"``, ``"PURGED"``, ``"ACCESS_DENIED"``,
+            ``"LOAD_FAILED"``.
         """
         try:
             from sqlalchemy import select as _select
@@ -1499,11 +1525,11 @@ class BaseTool(ABC):
 
             if row is None:
                 logger.warning("Tool %s: _load_file: file %s not found in org %s", self.name, file_id, org_id)
-                return None
+                return None, "NOT_FOUND"
 
             if row.purged_at is not None:
                 logger.warning("Tool %s: _load_file: file %s has been purged", self.name, file_id)
-                return None
+                return None, "PURGED"
 
             # Access check: 3-way scope resolution
             # - organization: visible to all members → always allow
@@ -1517,15 +1543,16 @@ class BaseTool(ABC):
                         "Tool %s: _load_file: access denied to dept-scoped file %s (dept_id mismatch)",
                         self.name, file_id,
                     )
-                    return None
+                    return None, "ACCESS_DENIED"
             else:
                 # scope == "user" or any unknown scope — owner only
                 if user_id is None or str(row.user_id) != user_id:
                     logger.warning(
-                        "Tool %s: _load_file: access denied to user-scoped file %s for user %s",
-                        self.name, file_id, user_id,
+                        "Tool %s: _load_file: access denied to user-scoped file %s "
+                        "(owner=%s requester=%s)",
+                        self.name, file_id, row.user_id, user_id,
                     )
-                    return None
+                    return None, "ACCESS_DENIED"
 
             store = get_file_store()
             # Read up to max_bytes; truncation is signalled in the return value
@@ -1539,7 +1566,7 @@ class BaseTool(ABC):
                 "size_bytes": row.size_bytes,
                 "data": data,
                 "truncated": truncated,
-            }
+            }, None
         except Exception as exc:
             logger.error("Tool %s: failed to load file '%s': %s", self.name, file_id, exc)
-            return None
+            return None, "LOAD_FAILED"

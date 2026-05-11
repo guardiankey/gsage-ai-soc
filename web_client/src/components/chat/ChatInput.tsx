@@ -4,6 +4,7 @@ import { Send, Square, Paperclip, X, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import axios from 'axios'
 
 interface QueuedFile {
   id: string          // resolved attachment UUID from the API
@@ -19,6 +20,15 @@ interface Props {
   orgId?: string
   convId?: string
   onUploadAttachment?: (file: File) => Promise<{ id: string; filename: string; size_bytes: number }>
+}
+
+function getUploadErrorKey(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status
+    if (status === 413) return 'chat.attachUploadErrorTooLarge'
+    if (status === 415) return 'chat.attachUploadErrorInvalidType'
+  }
+  return 'chat.attachUploadErrorGeneric'
 }
 
 export function ChatInput({ onSend, onAbort, isStreaming, disabled, onUploadAttachment }: Props) {
@@ -72,8 +82,8 @@ export function ChatInput({ onSend, onAbort, isStreaming, disabled, onUploadAtta
         files.slice(0, 10 - queuedFiles.length).map((f) => onUploadAttachment(f))
       )
       setQueuedFiles((prev) => [...prev, ...results])
-    } catch {
-      toast.error(t('chat.attachUploadError'))
+    } catch (error) {
+      toast.error(t(getUploadErrorKey(error)))
     } finally {
       setUploading(false)
     }
@@ -89,8 +99,8 @@ export function ChatInput({ onSend, onAbort, isStreaming, disabled, onUploadAtta
         files.slice(0, available).map((f) => onUploadAttachment(f))
       )
       setQueuedFiles((prev) => [...prev, ...results])
-    } catch {
-      toast.error(t('chat.attachUploadError'))
+    } catch (error) {
+      toast.error(t(getUploadErrorKey(error)))
     } finally {
       setUploading(false)
     }

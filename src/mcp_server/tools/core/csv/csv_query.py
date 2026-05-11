@@ -18,7 +18,7 @@ from typing import ClassVar, Optional
 import duckdb  # type: ignore[import-untyped]
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
-from src.mcp_server.tools.core.csv.csv_loader import load_csv, result_to_payload
+from src.mcp_server.tools.core.csv.csv_loader import access_error_code, load_csv, result_to_payload
 from src.mcp_server.tools.core.csv.csv_shared import (
     _COMMENT_RE,
     _DENY_FUNCTION_PATTERNS,
@@ -173,7 +173,7 @@ class CsvQueryTool(BaseTool):
                 encoding=encoding if isinstance(encoding, str) else None,
             )
         except FileNotFoundError as exc:
-            return self._failure("FILE_NOT_FOUND", str(exc))
+            return self._failure(access_error_code(exc), str(exc))
         except ValueError as exc:
             return self._failure("PARSE_ERROR", str(exc))
         except Exception as exc:  # pragma: no cover - defensive
