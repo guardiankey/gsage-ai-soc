@@ -16,6 +16,7 @@ import time
 from typing import ClassVar, Optional
 
 import duckdb  # type: ignore[import-untyped]
+import polars as pl
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.core.csv.csv_loader import access_error_code, load_csv, result_to_payload
@@ -24,6 +25,7 @@ from src.mcp_server.tools.core.csv.csv_shared import (
     _DENY_FUNCTION_PATTERNS,
     _DENY_PATTERNS,
     _strip_comments,
+    df_to_csv_bytes,
     validate_sql_safe as _validate_sql,
 )
 from src.shared.security.context import AgentContext
@@ -81,6 +83,11 @@ class CsvQueryTool(BaseTool):
       tool runner; DuckDB itself has no SQL-level timeout setting.
     * Up to 5 000 result rows are returned; anything beyond is truncated.
 
+    Set ``output_file=true`` to save the full query result as a new CSV
+    file in MinIO.  The inline preview is still returned alongside a
+    ``generated_file`` dict containing the ``file_id`` and ``download_path``
+    for the stored CSV.
+
     Use ``csv_describe`` first to discover columns; this tool returns rows
     as a list of dicts, with rich preview / truncation metadata.
 
@@ -115,6 +122,24 @@ class CsvQueryTool(BaseTool):
                     "DDL / DML / filesystem functions are rejected."
                 ),
             },
+            "output_file": {
+                "type": "boolean",
+                "description": (
+                    "When true, save the full query result as a new CSV file "
+                    "in MinIO. The returned data includes a 'generated_file' "
+                    "dict with 'file_id' and 'download_path'. "
+                    "Use this when the result is large or the user wants to "
+                    "download / share it."
+                ),
+            },
+            "output_filename": {
+                "type": "string",
+                "description": (
+                    "Custom filename for the output CSV (e.g. 'result.csv'). "
+                    "Defaults to 'query_result.csv'. Only used when "
+                    "output_file=true."
+                ),
+            },
             "delimiter": {
                 "type": "string",
                 "description": (
@@ -145,6 +170,10 @@ class CsvQueryTool(BaseTool):
 
         file_id = params.get("file_id")
         sql = params.get("sql")
+        output_file: bool = bool(params.get("output_file") or False)
+        output_filename: str = str(params.get("output_filename") or "query_result.csv").strip()
+        if not output_filename.lower().endswith(".csv"):
+            output_filename += ".csv"
         if not isinstance(file_id, str) or not file_id.strip():
             return self._failure("INVALID_INPUT", "'file_id' is required.")
         if not isinstance(sql, str) or not sql.strip():
@@ -209,6 +238,41 @@ class CsvQueryTool(BaseTool):
 
         rows_dicts = [dict(zip(columns, r)) for r in raw_rows]
 
+        # ── Optional: save full result as a CSV file in MinIO ──────────────
+        generated_file: Optional[dict] = None
+        if output_file:
+            try:
+                # Build a Polars frame from the DuckDB result and serialise
+                # via the shared helper (same path as csv_edit / csv_soc).
+                result_df = pl.DataFrame(
+                    {col: [r[i] for r in raw_rows] for i, col in enumerate(columns)},
+                    strict=False,
+                )
+                csv_bytes = await asyncio.to_thread(df_to_csv_bytes, result_df)
+
+                from src.shared.database import _get_session_maker  # noqa: PLC0415
+
+                async with _get_session_maker()() as db_session:
+                    generated_file = await self._store_file(
+                        data=csv_bytes,
+                        filename=output_filename,
+                        content_type="text/csv",
+                        agent_context=agent_context,
+                        session=db_session,
+                        description=(
+                            f"csv_query result from '{file_meta.get('filename')}' "
+                            f"({result_df.height} rows, {result_df.width} cols)"
+                        ),
+                    )
+                if generated_file is None:
+                    logger.warning(
+                        "csv_query: _store_file returned None for output '%s'",
+                        output_filename,
+                    )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("csv_query: could not persist output file: %s", exc)
+                # Non-fatal: still return the inline result.
+
         # Build inline payload, trim rows if it busts the inline budget.
         import json
 
@@ -232,19 +296,19 @@ class CsvQueryTool(BaseTool):
             serialised = json.dumps(result_payload, ensure_ascii=False, default=str)
 
         elapsed = int((time.monotonic() - start) * 1000)
-        return self._success(
-            {
-                "file": {
-                    "file_id": file_meta.get("file_id"),
-                    "filename": file_meta.get("filename"),
-                    "rows": file_meta.get("rows"),
-                    "columns": file_meta.get("columns"),
-                },
-                "sql": sql,
-                "result": result_payload,
+        result_data: dict = {
+            "file": {
+                "file_id": file_meta.get("file_id"),
+                "filename": file_meta.get("filename"),
+                "rows": file_meta.get("rows"),
+                "columns": file_meta.get("columns"),
             },
-            execution_time_ms=elapsed,
-        )
+            "sql": sql,
+            "result": result_payload,
+        }
+        if generated_file is not None:
+            result_data["generated_file"] = generated_file
+        return self._success(result_data, execution_time_ms=elapsed)
 
 
 # Re-export to keep import-time cost low — payload helper is only used in
