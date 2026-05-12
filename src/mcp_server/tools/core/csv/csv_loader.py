@@ -54,7 +54,7 @@ class CSVAccessError(FileNotFoundError):
 
 # ── Tunables ───────────────────────────────────────────────────────────────
 # Maximum bytes pulled from MinIO per file (cap the read to keep memory bounded).
-DEFAULT_MAX_BYTES: int = 200 * 1024 * 1024  # 200 MB
+DEFAULT_MAX_BYTES: int = 1024 * 1024 * 1024  # 1 GB
 # Cache settings.
 _CACHE_TTL_SECONDS: float = 10 * 60.0  # 10 minutes
 _CACHE_MAX_ENTRIES: int = 5
@@ -356,8 +356,8 @@ async def load_csv(
 def result_to_payload(
     df: pl.DataFrame,
     *,
-    max_rows: int = 500,
-    max_inline_bytes: int = 50_000,
+    max_rows: int = 50,
+    max_inline_bytes: int = 16_000,
 ) -> dict:
     """Serialise a Polars frame into an inline JSON-friendly preview.
 

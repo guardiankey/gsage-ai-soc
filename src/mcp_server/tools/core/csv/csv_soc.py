@@ -42,8 +42,8 @@ logger = logging.getLogger(__name__)
 
 # ── Limits ─────────────────────────────────────────────────────────────────
 _MAX_CIDRS: int = 256
-_MAX_RESULT_ROWS: int = 5000
-_MAX_INLINE_BYTES: int = 50_000
+_MAX_RESULT_ROWS: int = 1_000_000
+_MAX_INLINE_BYTES: int = 16_000
 _MAX_TEXT_COLUMNS: int = 10
 _MAX_IOC_PER_TYPE: int = 5000
 

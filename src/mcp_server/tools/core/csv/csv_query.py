@@ -34,9 +34,16 @@ logger = logging.getLogger(__name__)
 
 # ── Safety limits ──────────────────────────────────────────────────────────
 _QUERY_TIMEOUT_SECONDS: float = 10.0
-_MAX_RESULT_ROWS: int = 5000
-_MEMORY_LIMIT: str = "256MB"
-_MAX_INLINE_BYTES: int = 50_000
+# Maximum number of rows materialised from DuckDB into Python (hard cap on
+# the full result set kept in memory, before optional persistence to CSV).
+_MAX_RESULT_ROWS: int = 1_000_000
+_MEMORY_LIMIT: str = "1GB"
+# Inline preview budget returned to the LLM agent.  Both caps act together;
+# whichever triggers first causes the preview to be trimmed.  When the full
+# result exceeds either limit and ``output_file`` was not explicitly set, a
+# CSV is auto-generated so the user can download / reference it.
+_MAX_INLINE_ROWS: int = 50
+_MAX_INLINE_BYTES: int = 16_000
 
 
 def _run_duckdb_query(arrow_table, sql: str) -> tuple[list[str], list[list]]:
@@ -78,15 +85,20 @@ class CsvQueryTool(BaseTool):
     Hard limits applied to every query:
 
     * ``SET disabled_filesystems='LocalFileSystem'`` — no host file access.
-    * ``memory_limit=256MB`` — bounded RAM per query.
+    * ``memory_limit=1GB`` — bounded RAM per query.
     * ``timeout_seconds=30`` (class-level) — wall-clock cap enforced by the
       tool runner; DuckDB itself has no SQL-level timeout setting.
-    * Up to 5 000 result rows are returned; anything beyond is truncated.
+    * Up to 1 000 000 result rows are kept in memory; anything beyond is
+      truncated.  The inline preview returned to the LLM is capped at
+      50 rows (and ~16 KB of serialised JSON).
 
-    Set ``output_file=true`` to save the full query result as a new CSV
-    file in MinIO.  The inline preview is still returned alongside a
-    ``generated_file`` dict containing the ``file_id`` and ``download_path``
-    for the stored CSV.
+    When the full result exceeds the inline preview limit, the tool
+    **automatically** saves the complete result as a CSV file in MinIO
+    and returns its ``file_id`` / ``download_path`` in ``generated_file``,
+    along with a ``notice`` field describing the truncation.
+
+    Set ``output_file=true`` to force saving the full query result as a
+    new CSV file even when it would fit inline.
 
     Use ``csv_describe`` first to discover columns; this tool returns rows
     as a list of dicts, with rich preview / truncation metadata.
@@ -125,11 +137,12 @@ class CsvQueryTool(BaseTool):
             "output_file": {
                 "type": "boolean",
                 "description": (
-                    "When true, save the full query result as a new CSV file "
-                    "in MinIO. The returned data includes a 'generated_file' "
-                    "dict with 'file_id' and 'download_path'. "
-                    "Use this when the result is large or the user wants to "
-                    "download / share it."
+                    "Force saving the full query result as a new CSV file "
+                    "in MinIO, even when the result would fit inline. "
+                    "Results larger than the inline preview (~50 rows) are "
+                    "auto-saved regardless of this flag. The response "
+                    "includes a 'generated_file' dict with 'file_id' and "
+                    "'download_path'."
                 ),
             },
             "output_filename": {
@@ -170,7 +183,7 @@ class CsvQueryTool(BaseTool):
 
         file_id = params.get("file_id")
         sql = params.get("sql")
-        output_file: bool = bool(params.get("output_file") or False)
+        output_file_requested: bool = bool(params.get("output_file") or False)
         output_filename: str = str(params.get("output_filename") or "query_result.csv").strip()
         if not output_filename.lower().endswith(".csv"):
             output_filename += ".csv"
@@ -236,11 +249,26 @@ class CsvQueryTool(BaseTool):
         if truncated_rows:
             raw_rows = raw_rows[:_MAX_RESULT_ROWS]
 
-        rows_dicts = [dict(zip(columns, r)) for r in raw_rows]
+        total_rows = len(raw_rows)
+
+        # ── Decide whether to auto-persist the full result ─────────────────
+        # If the caller did not explicitly request output_file but the
+        # result is larger than the inline preview can hold, we save it
+        # automatically and surface a notice to the agent.
+        auto_output_file = (
+            not output_file_requested and total_rows > _MAX_INLINE_ROWS
+        )
+        persist_output = output_file_requested or auto_output_file
+
+        # Build the inline preview (capped to _MAX_INLINE_ROWS upfront so the
+        # payload trim loop only handles the byte budget afterwards).
+        inline_raw_rows = raw_rows[:_MAX_INLINE_ROWS]
+        rows_dicts = [dict(zip(columns, r)) for r in inline_raw_rows]
+        preview_trimmed_rows = total_rows > len(inline_raw_rows)
 
         # ── Optional: save full result as a CSV file in MinIO ──────────────
         generated_file: Optional[dict] = None
-        if output_file:
+        if persist_output:
             try:
                 # Build a Polars frame from the DuckDB result and serialise
                 # via the shared helper (same path as csv_edit / csv_soc).
@@ -273,14 +301,15 @@ class CsvQueryTool(BaseTool):
                 logger.warning("csv_query: could not persist output file: %s", exc)
                 # Non-fatal: still return the inline result.
 
-        # Build inline payload, trim rows if it busts the inline budget.
+        # Build inline payload, trim rows further if it busts the byte budget.
         import json
 
         result_payload: dict = {
             "columns": columns,
             "rows": rows_dicts,
-            "row_count": len(rows_dicts),
-            "truncated_rows": truncated_rows,
+            "row_count": total_rows,
+            "preview_row_count": len(rows_dicts),
+            "truncated_rows": truncated_rows or preview_trimmed_rows,
             "truncated_bytes": False,
         }
         serialised = json.dumps(result_payload, ensure_ascii=False, default=str)
@@ -291,6 +320,7 @@ class CsvQueryTool(BaseTool):
             result_payload["rows"] = result_payload["rows"][
                 : max(1, len(result_payload["rows"]) // 2)
             ]
+            result_payload["preview_row_count"] = len(result_payload["rows"])
             result_payload["truncated_rows"] = True
             result_payload["truncated_bytes"] = True
             serialised = json.dumps(result_payload, ensure_ascii=False, default=str)
@@ -308,6 +338,19 @@ class CsvQueryTool(BaseTool):
         }
         if generated_file is not None:
             result_data["generated_file"] = generated_file
+            if auto_output_file:
+                result_data["notice"] = (
+                    f"Query result has {total_rows} rows, exceeding the inline "
+                    f"preview limit of {_MAX_INLINE_ROWS}. The full result was "
+                    "saved automatically as a CSV file — see 'generated_file' "
+                    "for the download path / file_id."
+                )
+        elif preview_trimmed_rows or truncated_rows:
+            result_data["notice"] = (
+                f"Inline preview shows {len(result_payload['rows'])} of "
+                f"{total_rows} rows. Re-run with output_file=true to receive "
+                "the full result as a downloadable CSV."
+            )
         return self._success(result_data, execution_time_ms=elapsed)
 
 
