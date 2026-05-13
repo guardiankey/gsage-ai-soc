@@ -200,7 +200,11 @@ class GenerateDocumentTool(BaseTool):
             "content": {
                 "type": "string",
                 "description": (
-                    "Markdown content (or JSON / Markdown table for CSV). "
+                    "Markdown content. For output_format='csv': either (a) a "
+                    "JSON array of objects — '[{\"col\": \"val\"}]' — or (b) a "
+                    "GitHub-flavoured pipe-table "
+                    "('| col |\\n|-----|\\n| val |'). "
+                    "Ignored when the 'rows' parameter is provided. "
                     "Available as the '{{content}}' variable inside Markdown "
                     "and DOCX templates. "
                     "For any PDF generation path that uses Pandoc/LaTeX, send "
@@ -253,9 +257,11 @@ class GenerateDocumentTool(BaseTool):
                 "type": "array",
                 "items": {"type": "object"},
                 "description": (
-                    "Tabular rows for CSV output. Each item is a JSON object "
-                    "(column name -> value). Takes priority over 'content' "
-                    "when output_format='csv'."
+                    "Tabular rows for CSV output (output_format='csv' only). "
+                    "Each item is a JSON object mapping column name to value. "
+                    "Takes priority over 'content'. "
+                    "Use this when you already have structured data; "
+                    "otherwise embed a JSON array or pipe-table in 'content'."
                 ),
             },
             "headers": {
@@ -401,7 +407,12 @@ class GenerateDocumentTool(BaseTool):
                 elapsed = int((time.monotonic() - t0) * 1000)
                 return self._failure(
                     "INVALID_INPUT",
-                    f"Cannot build CSV: {exc}",
+                    f"Cannot build CSV: {exc} "
+                    "Provide data in one of three ways: "
+                    "(1) 'rows' parameter — list of JSON objects; "
+                    "(2) 'content' as a JSON array string starting with '['; "
+                    "(3) 'content' containing a GitHub-flavoured pipe-table "
+                    "(| col1 | col2 |\\n|------|------|\\n| v1 | v2 |).",
                     execution_time_ms=elapsed,
                 )
 

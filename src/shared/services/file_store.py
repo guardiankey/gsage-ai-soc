@@ -343,7 +343,7 @@ class MinioFileStore:
         self,
         storage_key: str,
         category: str = "generated",
-        max_bytes: int = 10 * 1024 * 1024,
+        max_bytes: int = 100 * 1024 * 1024,
     ) -> bytes:
         """Download *storage_key* from MinIO and return the raw bytes.
 
@@ -354,7 +354,7 @@ class MinioFileStore:
         category:
             File category used to select the correct bucket.
         max_bytes:
-            Hard cap on how many bytes to read (default 10 MB).  Raises
+            Hard cap on how many bytes to read (default 100 MB).  Raises
             ``FileStoreError`` if the object is larger.
 
         Returns

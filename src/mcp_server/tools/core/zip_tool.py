@@ -20,17 +20,22 @@ import zipfile
 from typing import ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
+from src.shared.config.settings import get_settings as _get_settings
 from src.shared.security.context import AgentContext
 
 log = logging.getLogger(__name__)
 
-# Max bytes read from MinIO per individual file (50 MB).
-_FILE_MAX_BYTES = 50 * 1024 * 1024
+_settings = _get_settings()
+
+# Per-file read limit when creating a ZIP from source files (action=zip).
+_FILE_MAX_BYTES = _settings.file_max_size_bytes
+# Read limit for loading a ZIP archive (action=list / action=unzip).
+_ZIP_ARCHIVE_MAX_BYTES = _settings.file_max_size_bytes
 _ZIP_CONTENT_TYPE = "application/zip"
 
 # Zip-bomb guards for unzip action.
-_UNZIP_MAX_TOTAL_BYTES = 100 * 1024 * 1024   # 100 MB total extracted
-_UNZIP_MAX_ENTRIES = 200                       # max files to extract
+_UNZIP_MAX_TOTAL_BYTES = _settings.file_max_size_bytes  # mirrors upload size limit
+_UNZIP_MAX_ENTRIES = 200                                 # max files to extract
 
 
 class ZipTool(BaseTool):
@@ -290,17 +295,23 @@ class ZipTool(BaseTool):
                 execution_time_ms=int((time.monotonic() - t0) * 1000),
             )
 
-        result = await self._load_file(
+        result, reason = await self._load_file_with_reason(
             file_id=file_id,
             org_id=str(agent_context.org_id),
             user_id=str(agent_context.user_id),
             dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
-            max_bytes=_FILE_MAX_BYTES,
+            max_bytes=_ZIP_ARCHIVE_MAX_BYTES,
         )
         if result is None:
+            _reason_to_code = {
+                "PURGED": "FILE_EXPIRED",
+                "ACCESS_DENIED": "FILE_ACCESS_DENIED",
+                "LOAD_FAILED": "FILE_LOAD_FAILED",
+            }
+            error_code = _reason_to_code.get(reason or "", "FILE_NOT_FOUND")
             return self._failure(
-                "FILE_NOT_FOUND",
-                f"File '{file_id}' not found or access denied.",
+                error_code,
+                f"File '{file_id}' not found or access denied (reason: {reason}).",
                 execution_time_ms=int((time.monotonic() - t0) * 1000),
             )
 
@@ -368,17 +379,23 @@ class ZipTool(BaseTool):
 
         output_prefix: str = str(params.get("output_prefix") or "").strip()
 
-        result = await self._load_file(
+        result, reason = await self._load_file_with_reason(
             file_id=file_id,
             org_id=str(agent_context.org_id),
             user_id=str(agent_context.user_id),
             dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
-            max_bytes=_FILE_MAX_BYTES,
+            max_bytes=_ZIP_ARCHIVE_MAX_BYTES,
         )
         if result is None:
+            _reason_to_code = {
+                "PURGED": "FILE_EXPIRED",
+                "ACCESS_DENIED": "FILE_ACCESS_DENIED",
+                "LOAD_FAILED": "FILE_LOAD_FAILED",
+            }
+            error_code = _reason_to_code.get(reason or "", "FILE_NOT_FOUND")
             return self._failure(
-                "FILE_NOT_FOUND",
-                f"File '{file_id}' not found or access denied.",
+                error_code,
+                f"File '{file_id}' not found or access denied (reason: {reason}).",
                 execution_time_ms=int((time.monotonic() - t0) * 1000),
             )
 

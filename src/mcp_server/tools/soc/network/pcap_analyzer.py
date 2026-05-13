@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-# Max bytes to load from MinIO for PCAP analysis (50 MB)
-_PCAP_MAX_BYTES = 50 * 1024 * 1024
+# Max bytes to load from MinIO for PCAP analysis (200 MB)
+_PCAP_MAX_BYTES = 200 * 1024 * 1024
 
 # Accepted PCAP MIME types (content_type stored in DB may vary by upload client)
 _PCAP_CONTENT_TYPES = {
