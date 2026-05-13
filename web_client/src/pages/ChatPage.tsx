@@ -213,7 +213,8 @@ export default function ChatPage() {
               disabled={pendingApprovals || !hasPermission('agents:run')}
               onUploadAttachment={
                 orgId
-                  ? (file) => uploadChatAttachment(orgId, conversationId, file)
+                  ? (file, options) =>
+                      uploadChatAttachment(orgId, conversationId, file, options)
                   : undefined
               }
             />

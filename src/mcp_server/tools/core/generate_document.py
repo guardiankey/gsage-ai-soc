@@ -203,6 +203,11 @@ class GenerateDocumentTool(BaseTool):
                     "Markdown content (or JSON / Markdown table for CSV). "
                     "Available as the '{{content}}' variable inside Markdown "
                     "and DOCX templates. "
+                    "For any PDF generation path that uses Pandoc/LaTeX, send "
+                    "PLAIN ASCII ONLY whenever possible: no emojis, no accented "
+                    "letters, no smart quotes, no en/em dashes, no bullets, and "
+                    "no other special Unicode characters. Unsupported characters "
+                    "may be normalized or stripped automatically before rendering. "
                     "For PDF via pandoc bundles (e.g. 'builtin:pandoc_gsage' "
                     "or pandoc=true), prepend a YAML front-matter block with "
                     "document metadata so the cover/title page is populated, "
@@ -266,7 +271,8 @@ class GenerateDocumentTool(BaseTool):
                 "type": "object",
                 "description": (
                     "Additional template variables merged with {'content': content}. "
-                    "Values must be strings or coercible to string."
+                    "Values must be strings or coercible to string. For PDF "
+                    "generation, prefer plain ASCII values here as well."
                 ),
                 "additionalProperties": {"type": "string"},
             },
@@ -348,20 +354,6 @@ class GenerateDocumentTool(BaseTool):
                 f"'scope' must be 'user' or 'department'. Got: {scope_param!r}",
             )
 
-        # ── Sanitize content for PDF/LaTeX generation ─────────────────────
-        # Detect unsafe chars BEFORE stripping so we can warn the agent.
-        unsafe_chars = find_latex_unsafe_chars(content) if content else []
-        if unsafe_chars:
-            samples = ", ".join(
-                f"{c} (U+{ord(c):04X})" for c in unsafe_chars[:10]
-            )
-            log.warning(
-                "generate_document: stripping %d LaTeX-unsafe char(s) from content: %s",
-                len(unsafe_chars),
-                samples,
-            )
-        content = strip_non_bmp(content)
-
         if output_format not in _OUTPUT_FORMATS:
             return self._failure(
                 "INVALID_INPUT",
@@ -373,6 +365,26 @@ class GenerateDocumentTool(BaseTool):
             if isinstance(raw_variables, dict)
             else {}
         )
+
+        if output_format == "pdf":
+            unsafe_chars = _collect_latex_unsafe_chars(
+                [content, *variables.values()],
+                find_latex_unsafe_chars=find_latex_unsafe_chars,
+            )
+            if unsafe_chars:
+                samples = ", ".join(
+                    f"{c} (U+{ord(c):04X})" for c in unsafe_chars[:10]
+                )
+                log.warning(
+                    "generate_document: normalizing %d LaTeX-unsafe char(s) in PDF input: %s",
+                    len(unsafe_chars),
+                    samples,
+                )
+            content = strip_non_bmp(content)
+            variables = {
+                key: strip_non_bmp(value) for key, value in variables.items()
+            }
+
         variables["content"] = content
 
         # ── CSV pipeline (no template) ────────────────────────────────────
@@ -957,6 +969,24 @@ def _stem(filename: str) -> str:
     if "." in filename:
         return filename.rsplit(".", 1)[0]
     return filename
+
+
+def _collect_latex_unsafe_chars(
+    text_values: list[str],
+    *,
+    find_latex_unsafe_chars,
+) -> list[str]:
+    """Return unique PDF-unsafe characters across multiple input strings."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for text in text_values:
+        if not text:
+            continue
+        for ch in find_latex_unsafe_chars(text):
+            if ch not in seen:
+                seen.add(ch)
+                result.append(ch)
+    return result
 
 
 async def _resolve_unique_filename(

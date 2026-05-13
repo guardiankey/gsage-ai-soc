@@ -24,6 +24,7 @@ from src.backend_api.app.api.deps import get_tenant_context
 from src.backend_api.app.core.tenant import TenantContext
 from src.shared.database import get_db
 from src.shared.models.generated_file import GSageFile
+from src.shared.config.settings import get_settings as _get_settings
 
 router = APIRouter()
 
@@ -44,7 +45,7 @@ _ATTACHMENT_ALLOWED_EXTENSIONS = _TEMPLATE_ALLOWED_EXTENSIONS | {
     ".py", ".js", ".ts", ".sh", ".rb", ".go", ".java", ".c", ".cpp", ".h",
 }
 
-_ATTACHMENT_SIZE_LIMIT_BYTES = 200 * 1024 * 1024  # 200 MB
+_ATTACHMENT_SIZE_LIMIT_BYTES: int = _get_settings().file_max_size_bytes
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -509,7 +510,7 @@ async def upload_attachment(
     415
         Unsupported file extension.
     413
-        File exceeds the attachment size limit (200 MB).
+        File exceeds the attachment size limit (set by FILE_MAX_SIZE_BYTES).
     """
     ctx.require_permission("agents:run")
 
@@ -551,9 +552,10 @@ async def upload_attachment(
             detail="Empty file is not allowed.",
         )
     if len(raw) > _ATTACHMENT_SIZE_LIMIT_BYTES:
+        limit_mb = _ATTACHMENT_SIZE_LIMIT_BYTES // (1024 * 1024)
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="File exceeds the 200 MB attachment size limit.",
+            detail=f"File exceeds the {limit_mb} MB attachment size limit.",
         )
 
     from src.shared.services.file_store import FileStoreError, get_file_store

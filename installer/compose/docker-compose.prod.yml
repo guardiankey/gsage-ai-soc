@@ -444,7 +444,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 64M
+          # nginx serves the SPA and proxies uploads up to 1 GB.
+          # 256 M is enough for nginx worker processes + upload streaming.
+          memory: 256M
 
   curator:
     image: ${GSAGE_IMAGE_REGISTRY:-guardiankey}/gsage-curator:${GSAGE_VERSION}

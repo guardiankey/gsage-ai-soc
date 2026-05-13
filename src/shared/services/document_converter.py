@@ -36,59 +36,80 @@ _PANDOC_BIN = "pandoc"
 # Subprocess timeout (seconds) for pandoc calls
 _PANDOC_TIMEOUT = 30
 
-# Unicode code points in the "Symbol, Other" (So) category that pdflatex
-# can typeset via the standard T1 + inputenc utf8 setup without extra packages.
-_LATEX_SAFE_SO: frozenset[int] = frozenset([
-    0x00A9,  # © COPYRIGHT SIGN
-    0x00AE,  # ® REGISTERED SIGN
-    0x00B0,  # ° DEGREE SIGN
-    0x2122,  # ™ TRADE MARK SIGN  (\texttrademark via textcomp)
-])
+_LATEX_ASCII_REPLACEMENTS: dict[str, str] = {
+    "\u00A0": " ",
+    "\u00A9": "(C)",
+    "\u00AE": "(R)",
+    "\u00B0": " deg",
+    "\u00B7": "-",
+    "\u00AB": '"',
+    "\u00BB": '"',
+    "\u2010": "-",
+    "\u2011": "-",
+    "\u2012": "-",
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u2015": "-",
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201A": ",",
+    "\u201B": "'",
+    "\u201C": '"',
+    "\u201D": '"',
+    "\u201E": '"',
+    "\u201F": '"',
+    "\u2022": "-",
+    "\u2023": "-",
+    "\u2026": "...",
+    "\u2027": "-",
+    "\u202F": " ",
+    "\u2032": "'",
+    "\u2033": '"',
+    "\u2035": "'",
+    "\u2036": '"',
+    "\u2043": "-",
+    "\u2044": "/",
+    "\u2122": "TM",
+    "\u2212": "-",
+    "\u2219": "-",
+    "\u25E6": "-",
+    "\uFFFD": "",
+}
 
 
-def _is_latex_safe(ch: str) -> bool:
-    """Return True if *ch* can be typeset by pdflatex with inputenc utf8 + fontenc T1.
+def _coerce_text(text: str | bytes) -> str:
+    """Return *text* as a valid UTF-8 string, replacing invalid sequences."""
+    if isinstance(text, str):
+        return text.encode("utf-8", errors="replace").decode("utf-8")
+    return bytes(text).decode("utf-8", errors="replace")
 
-    Strips:
-    - Control characters (except \\t \\n \\r)
-    - Non-BMP code points (U+10000+)
-    - Unicode category "So" (Symbol, Other): emoji, pictographs, ⏳ ✅ ❌ ☀ ⭐ …
-      Exceptions: © ® ° ™ which pdflatex handles via T1/textcomp.
-    - Unicode category "Sm" above Latin-1 (U+00FF): → ← ∑ ∫ ∞ …
-      (require amssymb/unicode-math not loaded by default)
-    - Unicode categories "Cs" / "Co" / "Cn": surrogates, private use, unassigned
-    """
-    cp = ord(ch)
-    # Whitespace explicitly kept
-    if cp in (0x09, 0x0A, 0x0D):
-        return True
-    # Other control chars and DEL
-    if cp < 0x20 or cp == 0x7F:
-        return False
-    # ASCII printable — always safe
-    if cp <= 0x7E:
-        return True
-    # Non-BMP supplementary planes
-    if cp > 0xFFFF:
-        return False
-    # Variation selectors (U+FE00–FE0F) — emoji presentation modifiers
-    # commonly emitted alongside emoji; strip even when emoji itself is gone.
-    if 0xFE00 <= cp <= 0xFE0F:
-        return False
-    cat = unicodedata.category(ch)
-    # Surrogates, private use, unassigned
-    if cat in ("Cs", "Co", "Cn"):
-        return False
-    # Format characters: ZWJ (U+200D), ZWNJ (U+200C), BOM (U+FEFF), bidi marks …
-    if cat == "Cf":
-        return False
-    # Symbol, Other: strip unless known to work in pdflatex
-    if cat == "So" and cp not in _LATEX_SAFE_SO:
-        return False
-    # Symbol, Math above Latin-1 Supplement: arrows, ∑, ∫ …
-    if cat == "Sm" and cp > 0x00FF:
-        return False
-    return True
+
+def _latex_ascii_fragment(ch: str) -> str:
+    """Map a single Unicode character to a LaTeX-safe ASCII fragment."""
+    if ch in ("\t", "\n", "\r"):
+        return ch
+    if ch in _LATEX_ASCII_REPLACEMENTS:
+        return _LATEX_ASCII_REPLACEMENTS[ch]
+
+    category = unicodedata.category(ch)
+    if category.startswith("Z"):
+        return " "
+    if category in ("Cc", "Cf", "Cs", "Co", "Cn"):
+        return ""
+    return ch
+
+
+def _normalize_latex_text(text: str | bytes) -> str:
+    """Normalize text to plain ASCII so Pandoc/PDF generation stays deterministic."""
+    normalized = unicodedata.normalize(
+        "NFKD",
+        "".join(_latex_ascii_fragment(ch) for ch in _coerce_text(text)),
+    )
+    return "".join(
+        ch
+        for ch in normalized
+        if ch in ("\t", "\n", "\r") or 0x20 <= ord(ch) <= 0x7E
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -143,40 +164,34 @@ def extract_template_variables(template_text: str) -> list[str]:
 
 
 def find_latex_unsafe_chars(text: str) -> list[str]:
-    """Return sorted list of unique characters in *text* that pdflatex cannot typeset.
-
-    Useful for generating user-facing warnings before PDF generation.
-    """
+    """Return unique characters that would be normalized or stripped for PDF generation."""
+    text = _coerce_text(text)
     seen: set[str] = set()
     result: list[str] = []
     for ch in text:
-        if ch not in seen and not _is_latex_safe(ch) and ch not in ("\t", "\n", "\r"):
+        if ch in ("\t", "\n", "\r"):
+            continue
+        if ch not in seen and _normalize_latex_text(ch) != ch:
             seen.add(ch)
             result.append(ch)
     return result
 
 
 def strip_non_bmp(text: str) -> str:
-    """Remove characters that cause LaTeX errors when pandoc generates PDF.
+    """Normalize text to plain ASCII for LaTeX/PDF safety.
 
-    Uses :func:`_is_latex_safe` (Unicode-category based) instead of a fixed
-    regex, so newly-assigned emoji / symbol code-points are handled
-    automatically without updating a block-list.
+    The historical function name is kept because existing callers already
+    import it. Current behavior is intentionally stricter than just removing
+    non-BMP code points:
 
-    Strips:
-    - Non-BMP supplementary-plane characters (U+10000+, e.g. 📊 ⏳)
-    - BMP Symbol, Other ("So"): emoji, pictographs, ⏳ ✅ ❌ ☀ ⭐ …
-    - BMP Symbol, Math ("Sm") above Latin-1: → ← ∑ ∫ …
-    - Surrogates, private use, unassigned characters
-    - Control characters (except \\t \\n \\r)
-    - Invalid UTF-8 byte sequences
+    - invalid UTF-8 sequences are replaced, then dropped
+    - accented Latin letters are normalized to ASCII equivalents
+    - common Unicode punctuation is mapped to ASCII (smart quotes, dashes,
+      bullets, ellipsis)
+    - remaining non-ASCII characters, emoji, symbols, and control/format
+      characters are stripped
     """
-    if isinstance(text, bytes):
-        text = text.decode("utf-8", errors="replace")
-    else:
-        text = text.encode("utf-8", errors="replace").decode("utf-8")
-
-    return "".join(ch for ch in text if _is_latex_safe(ch))
+    return _normalize_latex_text(text)
 
 
 def render_jinja2_template(template_text: str, variables: dict) -> str:
@@ -250,8 +265,9 @@ async def html_to_pdf(html: str) -> bytes:
     """Convert an HTML string to PDF bytes using pandoc.
 
     pandoc reads from stdin and writes PDF to stdout (via ``--output=-``).
-    Non-BMP characters (emoji, supplementary symbols) are stripped before
-    conversion to avoid LaTeX encoding errors.
+    The HTML is normalized to plain ASCII before conversion to avoid LaTeX
+    encoding errors from emoji, smart punctuation, replacement characters,
+    and other unsupported Unicode code points.
 
     Parameters
     ----------
@@ -277,8 +293,8 @@ async def html_to_pdf(html: str) -> bytes:
 async def html_to_docx(html: str) -> bytes:
     """Convert an HTML string to DOCX bytes using pandoc.
 
-    Non-BMP characters (emoji, supplementary symbols) are stripped before
-    conversion for consistency and to avoid potential encoding issues.
+    DOCX output preserves Unicode content; unlike the PDF path, no LaTeX-safe
+    ASCII normalization is applied here.
 
     Parameters
     ----------
@@ -298,7 +314,7 @@ async def html_to_docx(html: str) -> bytes:
         If pandoc exits with a non-zero status.
     """
     cmd = [_PANDOC_BIN, "--from=html", "--to=docx", "--output=-"]
-    return await _run_pandoc(cmd, input_data=strip_non_bmp(html).encode("utf-8"))
+    return await _run_pandoc(cmd, input_data=html.encode("utf-8"))
 
 
 def fill_docx_template(docx_bytes: bytes, variables: dict) -> bytes:

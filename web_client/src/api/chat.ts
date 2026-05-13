@@ -215,19 +215,40 @@ export interface UploadedAttachment {
   size_bytes: number
 }
 
+export interface UploadChatAttachmentOptions {
+  description?: string
+  /** Called with the upload progress percentage (0-100) as bytes are sent. */
+  onProgress?: (percent: number) => void
+  /** Abort the in-flight upload. */
+  signal?: AbortSignal
+}
+
 export async function uploadChatAttachment(
   orgId: string,
   convId: string,
   file: File,
-  description?: string
+  options?: UploadChatAttachmentOptions
 ): Promise<UploadedAttachment> {
   const form = new FormData()
   form.append('file', file)
-  const params = description ? `?description=${encodeURIComponent(description)}` : ''
+  const params = options?.description
+    ? `?description=${encodeURIComponent(options.description)}`
+    : ''
   const response = await apiClient.post(
     `/v1/orgs/${orgId}/chat/conversations/${convId}/attachments${params}`,
     form,
-    { headers: { 'Content-Type': 'multipart/form-data' } }
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      signal: options?.signal,
+      onUploadProgress: (event) => {
+        if (!options?.onProgress) return
+        // event.total may be undefined for some browsers/proxies; fall back to file.size.
+        const total = event.total ?? file.size
+        if (!total) return
+        const percent = Math.min(100, Math.round((event.loaded / total) * 100))
+        options.onProgress(percent)
+      },
+    }
   )
   const data = response.data
   return {

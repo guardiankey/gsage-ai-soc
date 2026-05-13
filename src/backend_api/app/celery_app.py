@@ -10,9 +10,30 @@ Usage::
 
 from __future__ import annotations
 
+import socket
+
 from celery import Celery
 
 from src.shared.config.settings import get_settings
+
+
+def _tcp_keepalive_options() -> dict[int, int]:
+    """Build TCP keepalive options dict using actual ``socket`` constants.
+
+    redis-py iterates this mapping and calls
+    ``sock.setsockopt(socket.IPPROTO_TCP, k, v)`` directly, so the keys must
+    be the integer constants (e.g. ``socket.TCP_KEEPIDLE``) and not their
+    string names. Some constants are platform-specific (TCP_KEEPIDLE only
+    exists on Linux), so we probe each one defensively.
+    """
+    opts: dict[int, int] = {}
+    if hasattr(socket, "TCP_KEEPIDLE"):
+        opts[socket.TCP_KEEPIDLE] = 60
+    if hasattr(socket, "TCP_KEEPINTVL"):
+        opts[socket.TCP_KEEPINTVL] = 10
+    if hasattr(socket, "TCP_KEEPCNT"):
+        opts[socket.TCP_KEEPCNT] = 5
+    return opts
 
 
 def _make_celery() -> Celery:
@@ -37,6 +58,28 @@ def _make_celery() -> Celery:
         accept_content=["json"],
         timezone="UTC",
         enable_utc=True,
+        # ── Broker connection resilience ──────────────────────────────────
+        # Retry connecting to the broker on worker startup (required in Celery 5+).
+        broker_connection_retry_on_startup=True,
+        # Retry indefinitely instead of dying after a few failed attempts.
+        broker_connection_max_retries=None,
+        # Transport-level options for Redis broker via kombu.
+        # socket_keepalive prevents idle connections from being dropped by
+        # firewalls / NAT / cloud load-balancers (common cause of the
+        # _disconnect_raise_connect / readline() traceback in long-idle workers).
+        broker_transport_options={
+            # TCP keepalive — send a probe after 60 s of inactivity, retry every
+            # 10 s up to 5 times before declaring the connection dead.
+            "socket_keepalive": True,
+            "socket_keepalive_options": _tcp_keepalive_options(),
+            # Visibility timeout must be longer than the longest task.
+            # Knowledge ingest of large archives can run up to ~15 min.
+            "visibility_timeout": 18000,
+            # Retry policy for transient broker connection errors.
+            "retry_policy": {
+                "timeout": 5.0,
+            },
+        },
         # Beat schedule — periodic tasks
         beat_schedule={
             "cleanup-inactive-sessions": {
