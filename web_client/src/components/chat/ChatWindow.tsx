@@ -102,7 +102,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0">
       {/* HITL approval banner */}
       {pendingApprovals && (
         <div className="sticky top-0 z-10 mx-4 mt-2">

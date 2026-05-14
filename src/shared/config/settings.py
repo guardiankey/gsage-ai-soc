@@ -23,6 +23,27 @@ class Settings(BaseSettings):
     postgres_host: str = "postgres"
     postgres_port: int = 5432
 
+    # SQLAlchemy async pool sizing. The default ``pool_size=5`` /
+    # ``max_overflow=10`` is too tight for the MCP server when an LLM
+    # agent fans out many tool calls in parallel — every blocked
+    # request that waits for a connection past the MCP 30 s read
+    # timeout risks being cancelled mid-flight and leaving an
+    # "idle in transaction" zombie connection behind.
+    database_pool_size: int = 10
+    database_max_overflow: int = 20
+    # Recycle pooled connections after this many seconds. Defends
+    # against connections silently killed by an upstream load
+    # balancer / firewall.
+    database_pool_recycle_seconds: int = 1800
+    # Server-side safety nets enforced by PostgreSQL itself.
+    # ``statement_timeout`` aborts any single statement that runs
+    # longer than the limit. ``idle_in_transaction_session_timeout``
+    # kills sessions left in an open transaction with no further
+    # activity (the failure mode that triggered this setting).
+    # Values are in milliseconds; set to 0 to disable.
+    database_statement_timeout_ms: int = 20000
+    database_idle_in_tx_timeout_ms: int = 30000
+
     @property
     def database_url(self) -> str:
         return (

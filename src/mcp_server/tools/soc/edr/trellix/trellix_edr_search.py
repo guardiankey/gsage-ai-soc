@@ -208,9 +208,22 @@ class TrellixEdrSearchTool(BaseTool):
             "payload": {
                 "type": "object",
                 "description": (
-                    "v1 Active Response structured payload "
-                    "({\"projections\": [...], \"condition\": {...}}).  "
-                    "Mutually exclusive with 'query'."
+                    "v1 Active Response structured payload. Mutually "
+                    "exclusive with 'query'. Required shape: "
+                    "{\"projections\": [{\"name\": \"<Collector>\", "
+                    "\"outputs\": [\"<field>\", ...]}, ...], "
+                    "\"condition\": {\"or\": [{\"and\": [<leaf>, <leaf>, "
+                    "...]}, ...]}}. EVERY leaf predicate MUST sit inside "
+                    "an 'and' array (never directly inside 'or') and use "
+                    "the keys {\"name\": <Collector>, \"output\": <field>, "
+                    "\"op\": <OPERATOR>, \"value\": <literal>}. The "
+                    "operator key is 'op' (NOT 'operator'). Operators are "
+                    "UPPERCASE: EQUALS, NOT_EQUALS, CONTAINS, NOT_CONTAINS, "
+                    "STARTS_WITH, ENDS_WITH, GREATER_THAN, LESS_THAN, "
+                    "BEFORE, AFTER. To match all rows of a collector "
+                    "without filtering, use {\"or\": [{\"and\": []}]}. "
+                    "Use the 'v1_payload_example' returned by "
+                    "trellix_edr_collectors as a copy-paste template."
                 ),
             },
             "max_rows": {

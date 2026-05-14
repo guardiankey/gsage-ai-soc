@@ -15,9 +15,9 @@ export function StreamingMessage({ content, isStreaming = true }: Props) {
       <div className="shrink-0 w-8 h-8 rounded-full bg-[hsl(var(--primary))] flex items-center justify-center mt-1">
         <Bot className="h-4 w-4 text-white" />
       </div>
-      <div className="relative max-w-[80%] rounded-2xl rounded-tl-sm px-4 py-3 text-sm shadow-sm bg-card border">
+      <div className="relative max-w-[80%] min-w-0 rounded-2xl rounded-tl-sm px-4 py-3 text-sm shadow-sm bg-card border overflow-hidden">
         {content ? (
-          <div className="prose-chat">
+          <div className="prose-chat min-w-0">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink, pre: StreamingMarkdownCode }}>{content}</ReactMarkdown>
           </div>
         ) : isStreaming ? (

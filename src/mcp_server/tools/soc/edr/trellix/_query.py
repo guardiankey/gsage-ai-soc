@@ -616,81 +616,233 @@ def build_host_locator_payload(
     }
 
 
-# ── v1 payload validation ───────────────────────────────────────────────────
+# ── v1 payload + v2 query validation ────────────────────────────────────────
+
+# Operators accepted by the Trellix v1 Active Response search API.
+# Source: external_code/TrellixEDR/trellix_edr_api.py and collector
+# v1_payload_example fixtures.
+_V1_OPERATORS: frozenset[str] = frozenset({
+    "EQUALS",
+    "NOT_EQUALS",
+    "CONTAINS",
+    "NOT_CONTAINS",
+    "STARTS_WITH",
+    "ENDS_WITH",
+    "GREATER_THAN",
+    "LESS_THAN",
+    "BEFORE",
+    "AFTER",
+})
+
+_V2_RESERVED: frozenset[str] = frozenset({"AND", "OR", "WHERE"})
 
 
-def _check_condition_tree(condition: Any, *, path: str) -> Optional[str]:
-    """Recursively walk a v1 condition tree looking for null/missing outputs.
+def _known_collectors() -> frozenset[str]:
+    """Discover collector names from the bundled collectors/*.json fixtures.
 
-    Returns a human-readable error string on the first problem found, or
-    ``None`` when the tree is structurally valid.
+    Lazily loaded and cached on the function attribute so the disk scan only
+    happens once per process. Returns an empty set if the directory is
+    missing — validators degrade gracefully in that case.
     """
-    if isinstance(condition, list):
-        for i, item in enumerate(condition):
-            err = _check_condition_tree(item, path=f"{path}[{i}]")
-            if err:
-                return err
-        return None
-    if not isinstance(condition, dict):
-        return None
-    # Leaf condition: identified by the presence of "op".
-    if "op" in condition:
-        collector = condition.get("name") or "unknown"
-        output = condition.get("output")
-        if output is None:
-            return (
-                f"{path}: condition for collector '{collector}' has a null/missing "
-                "'output' field — specify the exact field name "
-                "(e.g. 'displayname', 'version', 'hostname')"
-            )
-        return None
-    # Branch node: {"and": [...]} or {"or": [...]}.
-    for key in ("and", "or"):
-        if key in condition:
-            err = _check_condition_tree(condition[key], path=f"{path}.{key}")
-            if err:
-                return err
-    return None
+    cached = getattr(_known_collectors, "_cache", None)
+    if cached is not None:
+        return cached
+    import json
+    from pathlib import Path
+
+    base = Path(__file__).parent / "collectors"
+    names: set[str] = set()
+    if base.is_dir():
+        for f in base.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            n = data.get("name") if isinstance(data, dict) else None
+            if isinstance(n, str) and n and " " not in n:
+                names.add(n)
+    cached = frozenset(names)
+    _known_collectors._cache = cached  # type: ignore[attr-defined]
+    return cached
 
 
 def validate_v1_payload(payload: dict) -> Optional[str]:
     """Validate a v1 Active Response payload before submitting to the API.
 
-    Returns a descriptive error string when the payload is structurally
-    invalid, or ``None`` when it looks correct.  Designed to catch common
-    LLM-generated mistakes (null output fields, missing projections) before
-    they reach the Trellix API and produce cryptic AR-806 errors.
+    Catches the common LLM-generated mistakes that otherwise produce a
+    cryptic ``AR-806`` / HTTP 500 from Trellix:
+
+    * missing or empty ``projections`` / ``outputs``
+    * leaf predicate placed directly inside ``or`` (must be wrapped in
+      ``and``)
+    * operator key spelled ``operator`` instead of ``op``
+    * operator value not in the accepted (uppercase) set
     """
     if not isinstance(payload, dict):
         return "payload must be a JSON object"
 
     projections = payload.get("projections")
-    if not projections or not isinstance(projections, list):
-        return "payload must have a non-empty 'projections' list"
-
+    if not isinstance(projections, list) or not projections:
+        return (
+            "'payload.projections' must be a non-empty list of "
+            "{name, outputs} objects."
+        )
     for i, proj in enumerate(projections):
         if not isinstance(proj, dict):
-            return f"projections[{i}] must be an object"
-        if not proj.get("name"):
-            return f"projections[{i}] is missing 'name'"
+            return f"'payload.projections[{i}]' must be an object."
+        if not isinstance(proj.get("name"), str) or not proj["name"]:
+            return f"'payload.projections[{i}].name' is required."
         outputs = proj.get("outputs")
-        if not outputs or not isinstance(outputs, list):
+        if not isinstance(outputs, list) or not outputs:
             return (
-                f"projections[{i}] ({proj.get('name')!r}) must have a "
-                "non-empty 'outputs' list"
+                f"'payload.projections[{i}].outputs' must be a non-empty "
+                "list of field names."
             )
         for j, out in enumerate(outputs):
-            if out is None:
+            if not isinstance(out, str) or not out:
                 return (
-                    f"projections[{i}].outputs[{j}] is null — "
-                    "provide the field name (e.g. 'displayname')"
+                    f"'payload.projections[{i}].outputs[{j}]' must be a "
+                    "non-empty field name string."
                 )
 
     condition = payload.get("condition")
-    if condition is None:
-        return "payload is missing 'condition'"
+    if not isinstance(condition, dict):
+        return (
+            "'payload.condition' is required and must be an object of the "
+            "form {\"or\": [{\"and\": [<leaf>, ...]}, ...]}."
+        )
+    or_clauses = condition.get("or")
+    if not isinstance(or_clauses, list) or not or_clauses:
+        return (
+            "'payload.condition.or' must be a non-empty list. Use "
+            "[{\"and\": []}] to match all rows without filtering."
+        )
+    for i, group in enumerate(or_clauses):
+        if not isinstance(group, dict):
+            return (
+                f"'payload.condition.or[{i}]' must be an object with an "
+                "'and' key. Leaf predicates ({name, output, op, value}) "
+                "must be wrapped inside {\"and\": [...]} — they cannot "
+                "sit directly inside 'or'."
+            )
+        if "name" in group and "output" in group and (
+            "op" in group or "operator" in group
+        ):
+            return (
+                f"'payload.condition.or[{i}]' looks like a leaf predicate "
+                "placed directly inside 'or'. Wrap it: "
+                "{\"or\": [{\"and\": [<this object>]}]}. "
+                "The leaf keys are {name, output, op, value}."
+            )
+        and_clauses = group.get("and")
+        if not isinstance(and_clauses, list):
+            return (
+                f"'payload.condition.or[{i}].and' must be a list (possibly "
+                "empty) of leaf predicates."
+            )
+        for j, leaf in enumerate(and_clauses):
+            if not isinstance(leaf, dict):
+                return (
+                    f"'payload.condition.or[{i}].and[{j}]' must be an "
+                    "object {name, output, op, value}."
+                )
+            if "operator" in leaf and "op" not in leaf:
+                return (
+                    f"'payload.condition.or[{i}].and[{j}]' uses 'operator' "
+                    "— Trellix expects the key 'op' instead. Rename it."
+                )
+            missing = [k for k in ("name", "output", "op", "value") if k not in leaf]
+            if missing:
+                return (
+                    f"'payload.condition.or[{i}].and[{j}]' is missing "
+                    f"required keys: {missing}. Expected shape: "
+                    "{name, output, op, value}."
+                )
+            output = leaf.get("output")
+            if not isinstance(output, str) or not output:
+                return (
+                    f"'payload.condition.or[{i}].and[{j}].output' must be a "
+                    "non-empty field name string. Run trellix_edr_collectors "
+                    "to discover valid field names for the collector."
+                )
+            op = leaf.get("op")
+            if not isinstance(op, str) or op not in _V1_OPERATORS:
+                return (
+                    f"'payload.condition.or[{i}].and[{j}].op' must be one "
+                    f"of {sorted(_V1_OPERATORS)} (UPPERCASE). Got "
+                    f"{op!r}."
+                )
+    return None
 
-    return _check_condition_tree(condition, path="condition")
+
+import re
+
+_V2_FIRST_TOKEN_RE = re.compile(r"\s*([A-Za-z][A-Za-z0-9]*)")
+
+
+def validate_v2_query(query: str) -> Optional[str]:
+    """Validate a v2 SQL-like query before submitting it to Trellix.
+
+    Catches the obvious agent mistakes:
+
+    * empty / non-string query
+    * first token is not a known collector (a hint to call
+      ``trellix_edr_collectors`` first)
+    * collector immediately followed by ``AND`` / ``OR`` / ``WHERE`` or
+      end-of-string (i.e. no projected fields)
+
+    The check is intentionally shallow: a full v2 grammar parser would be
+    fragile and risk false-positives against legitimate queries.
+    """
+    if not isinstance(query, str):
+        return "'query' must be a string."
+    q = query.strip()
+    if not q:
+        return "'query' must be a non-empty string."
+
+    m = _V2_FIRST_TOKEN_RE.match(q)
+    if not m:
+        return (
+            "'query' must start with a collector name (e.g. 'HostInfo', "
+            "'Processes', 'ScheduledTasks')."
+        )
+    first = m.group(1)
+    if first.upper() in _V2_RESERVED:
+        return (
+            f"'query' starts with the reserved keyword '{first}'. The first "
+            "token must be a collector name."
+        )
+    known = _known_collectors()
+    if known and first not in known:
+        # case-insensitive fallback (Trellix collectors are CamelCase)
+        ci_match = next((k for k in known if k.lower() == first.lower()), None)
+        if ci_match is None:
+            sample = ", ".join(sorted(known)[:6])
+            return (
+                f"Unknown collector '{first}'. Examples of known collectors: "
+                f"{sample}. Run trellix_edr_collectors to list every "
+                "collector and its fields."
+            )
+        return (
+            f"Collector '{first}' has the wrong casing — Trellix expects "
+            f"'{ci_match}' (CamelCase). Fix the casing and retry."
+        )
+
+    rest = q[m.end():].lstrip()
+    if not rest:
+        return (
+            f"Collector '{first}' has no projected fields. Add at least one "
+            f"field, e.g. '{first} <field1>, <field2>'. Run "
+            "trellix_edr_collectors to discover the field names."
+        )
+    nxt = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", rest)
+    if nxt and nxt.group(1).upper() in _V2_RESERVED:
+        return (
+            f"Collector '{first}' has no projected fields before "
+            f"'{nxt.group(1)}'. Projections are mandatory — list at least "
+            "one field name (comma-separated) right after the collector."
+        )
+    return None
 
 
 def build_host_locator_query(
@@ -851,6 +1003,12 @@ async def run_search_pipeline(
     if api_version == "v2":
         if not query:
             raise TrellixEDRError("v2 search requires a query string.", code="INVALID_INPUT")
+        validation_error = validate_v2_query(query)
+        if validation_error:
+            raise TrellixEDRError(
+                f"Invalid v2 query: {validation_error}",
+                code="INVALID_INPUT",
+            )
         query_id = await client.start_search_v2(query)
     else:
         if not payload:

@@ -9,8 +9,10 @@ natural for the task at hand:
   conflicting non-key column names with ``__<alias>`` suffixes.
 * **SQL mode** — provide ``files`` (each with an ``alias``) plus a raw
   ``sql`` SELECT statement that references the aliases as DuckDB views.
-  Useful for complex joins with subqueries, CTEs, expression-based
-  conditions, etc. Same sandbox rules as ``csv_query``.
+  Useful for complex joins with subqueries, CTEs (``WITH ...``),
+  ``UNION`` / ``UNION ALL`` / ``INTERSECT`` / ``EXCEPT`` set operations,
+  expression-based conditions, deduplication via ``DISTINCT`` or
+  ``QUALIFY ROW_NUMBER()``, etc. Same sandbox rules as ``csv_query``.
 
 Each CSV is loaded via the shared :func:`load_csv` (MinIO + cache + access
 control) and registered with DuckDB as a zero-copy Arrow view named after
@@ -289,6 +291,40 @@ class CsvJoinTool(BaseTool):
     Same sandbox rules as ``csv_query``: only ``SELECT`` / ``WITH``,
     no DDL / DML / filesystem functions.
 
+    SQL mode is not limited to joins — any read-only DuckDB query that
+    combines the registered views is allowed. Common patterns:
+
+    * **Vertical stack (UNION ALL)** — append rows from multiple files
+      that share a schema::
+
+          SELECT * FROM t1
+          UNION ALL
+          SELECT * FROM t2
+
+      Use plain ``UNION`` to also deduplicate identical rows.
+
+    * **Stack + deduplicate by key** — keep the first occurrence of
+      each IP across files::
+
+          WITH stacked AS (
+              SELECT *, 't1' AS __src FROM t1
+              UNION ALL BY NAME
+              SELECT *, 't2' AS __src FROM t2
+          )
+          SELECT * FROM stacked
+          QUALIFY ROW_NUMBER() OVER (PARTITION BY ip ORDER BY __src) = 1
+
+      ``UNION ALL BY NAME`` aligns columns by name (filling missing
+      columns with NULL) instead of by position — handy when files
+      have overlapping but not identical schemas.
+
+    * **Set difference / intersection** — ``EXCEPT`` and ``INTERSECT``
+      also work directly between the aliased views.
+
+    * **CTEs** — ``WITH cte AS (...) SELECT ... FROM cte JOIN t2 ...``
+      is fully supported and is the recommended way to structure
+      multi-step transformations.
+
     Hard limits:
 
     * Up to 5 files per call.
@@ -396,10 +432,16 @@ class CsvJoinTool(BaseTool):
             "sql": {
                 "type": "string",
                 "description": (
-                    "SQL mode: a DuckDB SELECT / WITH statement referencing "
-                    "the file aliases as views. Provide instead of 'joins'. "
-                    "Only one statement; DDL / DML / filesystem functions "
-                    "are rejected."
+                    "SQL mode: a single DuckDB read-only statement that "
+                    "references the file aliases as views. Provide instead "
+                    "of 'joins'. Supports SELECT / WITH (CTEs), JOINs, "
+                    "UNION / UNION ALL [BY NAME] / INTERSECT / EXCEPT, "
+                    "subqueries, window functions and QUALIFY for "
+                    "deduplication. Use 'UNION ALL' to stack rows from "
+                    "multiple files vertically (same schema) and "
+                    "'UNION ALL BY NAME' when files have overlapping but "
+                    "not identical columns. Only one statement; DDL / DML "
+                    "/ filesystem functions are rejected."
                 ),
             },
             "output_filename": {

@@ -40,7 +40,7 @@ export function MessageBubble({ message }: Props) {
         </div>
       )}
 
-      <div className="flex flex-col gap-1 max-w-[80%]">
+      <div className="flex flex-col gap-1 max-w-[80%] min-w-0">
         {/* Attachment chips (user messages) */}
         {isUser && message.attachments && message.attachments.length > 0 && (
           <div className="flex flex-wrap gap-1 justify-end">
@@ -60,7 +60,7 @@ export function MessageBubble({ message }: Props) {
         {/* Bubble */}
         <div
           className={cn(
-            'relative rounded-2xl px-4 py-3 text-sm shadow-sm',
+            'relative rounded-2xl px-4 py-3 text-sm shadow-sm min-w-0 max-w-full overflow-hidden',
             isUser
               ? 'bg-[hsl(var(--primary))] text-white rounded-tr-sm'
               : isError
@@ -75,9 +75,9 @@ export function MessageBubble({ message }: Props) {
             </div>
           )}
           {isUser ? (
-            <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+            <p className="whitespace-pre-wrap leading-relaxed break-words [overflow-wrap:anywhere]">{message.content}</p>
           ) : (
-            <div className="prose-chat">
+            <div className="prose-chat min-w-0">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink, pre: MarkdownCode }}>
                 {message.content}
               </ReactMarkdown>

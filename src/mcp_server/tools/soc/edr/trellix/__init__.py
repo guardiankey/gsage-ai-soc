@@ -14,7 +14,9 @@ Authentication is OAuth2 client-credentials at
 Tools:
     trellix_edr_search                       — Generic v1/v2 search dispatcher.
     trellix_edr_search_files                 — File hunt by name/hash + host.
+    trellix_edr_search_bulk_files            — Bulk file hunt by list of hashes or names.
     trellix_edr_search_network               — Network flow hunt.
+    trellix_edr_search_bulk_network          — Bulk network flow hunt by list of IPs or process names.
     trellix_edr_search_processes             — Process hunt (Processes/ProcessHistory).
     trellix_edr_quarantine_host              — Host (un)quarantine by hostname/IP.
     trellix_edr_get_host_quarantine_status   — Read quarantine state per host.

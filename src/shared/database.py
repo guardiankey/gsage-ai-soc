@@ -51,10 +51,34 @@ def _get_engine():
     if _engine is None:
         from src.shared.config.settings import get_settings
         settings = get_settings()
+
+        # asyncpg supports ``server_settings`` via SQLAlchemy's
+        # ``connect_args``.  Use it to enforce server-side statement
+        # and idle-in-transaction timeouts so a cancelled / leaked
+        # session cannot keep a Postgres backend in
+        # "idle in transaction" forever.
+        server_settings: dict[str, str] = {}
+        if settings.database_statement_timeout_ms > 0:
+            server_settings["statement_timeout"] = str(
+                settings.database_statement_timeout_ms
+            )
+        if settings.database_idle_in_tx_timeout_ms > 0:
+            server_settings["idle_in_transaction_session_timeout"] = str(
+                settings.database_idle_in_tx_timeout_ms
+            )
+
+        connect_args: dict = {}
+        if server_settings:
+            connect_args["server_settings"] = server_settings
+
         _engine = create_async_engine(
             settings.database_url,
             echo=settings.debug,
             pool_pre_ping=True,
+            pool_size=settings.database_pool_size,
+            max_overflow=settings.database_max_overflow,
+            pool_recycle=settings.database_pool_recycle_seconds,
+            connect_args=connect_args,
         )
         _engine_loop_id = current_loop_id
 

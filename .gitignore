@@ -73,3 +73,6 @@ docs-local
 docs-local/*
 limbo
 limbo/*
+
+# MCP Vector Search index directory
+.mcp-vector-search/
