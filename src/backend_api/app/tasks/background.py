@@ -32,17 +32,30 @@ log = logging.getLogger(__name__)
     name="src.backend_api.app.tasks.background.execute_background_tool",
 )
 def execute_background_tool(self, task_id: str) -> None:  # type: ignore[misc]
-    """Execute a queued background tool task synchronously via asyncio.run."""
+    """Execute a queued background tool task synchronously via asyncio.run.
+
+    Failure handling: any exception escaping the async implementation is
+    treated as a terminal failure for this task — the row is marked FAILED
+    and the agent continuation is dispatched immediately so the user sees
+    the error without waiting for Celery retries.  Celery retries are not
+    useful here because :func:`_async_execute_background_tool` guards on
+    ``status == QUEUED`` and would silently skip every retry, only adding
+    latency before the user is notified.
+    """
     try:
         asyncio.run(_async_execute_background_tool(task_id))
     except Exception as exc:
         log.error("Background task %s failed: %s", task_id, exc, exc_info=True)
-        # Best-effort: mark as failed in DB
+        # Best-effort: mark as failed in DB and notify the agent so the user
+        # receives the failure immediately instead of after retries / the next
+        # user message.
         try:
             asyncio.run(_mark_failed(task_id, str(exc)))
         except Exception:
-            pass
-        raise
+            log.warning("Background task %s: mark-failed fallback failed", task_id, exc_info=True)
+        _dispatch_continuation(task_id)
+        # Do NOT re-raise: retries cannot make progress (status guard) and
+        # only delay user notification.
 
 
 # ---------------------------------------------------------------------------
@@ -223,10 +236,27 @@ async def _async_execute_background_tool(task_id: str) -> None:
         log.error("Background task %s error: %s", task_id, exc, exc_info=True)
         async with session_factory() as session:
             await _mark_failed_in_session(session, task_id, str(exc))
-        raise
+        # Notify the agent immediately so the user gets the failure message
+        # without waiting for Celery retries (which the status guard skips).
+        _dispatch_continuation(task_id)
     finally:
         await redis_client.aclose()
         await engine.dispose()
+
+
+def _dispatch_continuation(task_id: str) -> None:
+    """Best-effort dispatch of the agent continuation task. Never raises."""
+    try:
+        from src.backend_api.app.tasks.agent_continuation import (
+            continue_after_bg_task_completed,
+        )
+        continue_after_bg_task_completed.delay(task_id)
+        log.info("Background task %s: dispatched continuation task (failure path)", task_id)
+    except Exception as exc:
+        log.warning(
+            "Background task %s: failed to dispatch continuation (failure path): %s",
+            task_id, exc,
+        )
 
 
 async def _mark_failed(task_id: str, error_message: str) -> None:
