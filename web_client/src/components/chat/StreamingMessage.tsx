@@ -3,6 +3,7 @@ import remarkGfm from 'remark-gfm'
 import { Bot } from 'lucide-react'
 import { MarkdownLink } from './MarkdownLink'
 import { StreamingMarkdownCode } from './MarkdownCode'
+import { MarkdownTable } from './MarkdownTable'
 
 interface Props {
   content: string
@@ -18,7 +19,7 @@ export function StreamingMessage({ content, isStreaming = true }: Props) {
       <div className="relative max-w-[80%] min-w-0 rounded-2xl rounded-tl-sm px-4 py-3 text-sm shadow-sm bg-card border overflow-hidden">
         {content ? (
           <div className="prose-chat min-w-0">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink, pre: StreamingMarkdownCode }}>{content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink, pre: StreamingMarkdownCode, table: MarkdownTable }}>{content}</ReactMarkdown>
           </div>
         ) : isStreaming ? (
           <div className="flex gap-1 items-center py-1">

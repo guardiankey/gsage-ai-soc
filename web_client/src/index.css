@@ -151,6 +151,10 @@
   }
   .prose-chat code:not(pre code) {
     @apply bg-muted px-1.5 py-0.5 rounded text-xs font-mono;
+    /* Allow long unbroken tokens (e.g. queries, IDs) to wrap so they
+       never force a parent <td>/bubble to grow past the viewport. */
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .prose-chat pre {
     @apply bg-muted rounded-lg p-3 overflow-x-auto mb-3 text-xs max-w-full;
@@ -172,15 +176,25 @@
     @apply border-s-4 border-primary/30 ps-4 italic text-muted-foreground;
   }
   /* Wide tables get their own horizontal scroll container so they never
-     push the chat layout past the viewport width. */
-  .prose-chat table {
-    @apply w-full text-xs border-collapse mb-3 block overflow-x-auto max-w-full;
+     push the chat layout past the viewport width. The wrapper is what
+     scrolls; the <table> keeps default table layout so columns stay
+     aligned between rows. */
+  .prose-chat-table-wrapper {
+    @apply mb-3 max-w-full overflow-x-auto;
+  }
+  .prose-chat-table-wrapper table {
+    @apply w-full text-xs border-collapse;
   }
   .prose-chat th {
-    @apply bg-muted font-semibold text-left px-2 py-1 border border-border;
+    @apply bg-muted font-semibold text-left px-2 py-1 border border-border whitespace-nowrap;
   }
   .prose-chat td {
-    @apply px-2 py-1 border border-border;
+    @apply px-2 py-1 border border-border align-top;
+    /* Force long tokens (inline <code>, URLs, IDs) to wrap inside cells
+       so wide cells don't blow up column widths under table-layout: auto. */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    max-width: 32rem;
   }
   .prose-chat a {
     @apply text-[hsl(var(--accent))] underline underline-offset-2 hover:text-[hsl(var(--accent))]/80;

@@ -8,6 +8,7 @@ import { cn, formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { MarkdownLink } from './MarkdownLink'
 import { MarkdownCode } from './MarkdownCode'
+import { MarkdownTable } from './MarkdownTable'
 
 interface Props {
   message: Message
@@ -78,7 +79,7 @@ export function MessageBubble({ message }: Props) {
             <p className="whitespace-pre-wrap leading-relaxed break-words [overflow-wrap:anywhere]">{message.content}</p>
           ) : (
             <div className="prose-chat min-w-0">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink, pre: MarkdownCode }}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink, pre: MarkdownCode, table: MarkdownTable }}>
                 {message.content}
               </ReactMarkdown>
             </div>

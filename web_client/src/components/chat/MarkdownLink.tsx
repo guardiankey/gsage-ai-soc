@@ -29,8 +29,13 @@ function extractDownloadPath(href: string): string | null {
  *
  * All other links are rendered as normal anchors opening in a new tab.
  */
-export function MarkdownLink(props: AnchorHTMLAttributes<HTMLAnchorElement>) {
-  const { href, children, ...rest } = props
+type Props = AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown }
+
+export function MarkdownLink(props: Props) {
+  // Strip `node` injected by react-markdown so it isn't forwarded to the
+  // DOM (which would render as `node="[object Object]"`).
+  const { href, children, node: _node, ...rest } = props
+  void _node
 
   const downloadPath = href ? extractDownloadPath(href) : null
 
