@@ -35,7 +35,7 @@ FROM python:3.12-slim AS builder
 # unixodbc-dev: required to compile pyodbc (dep of aioodbc / SQL Server support)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc python3-dev libffi-dev libssl-dev libpq-dev \
-        unixodbc-dev \
+        unixodbc-dev git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
