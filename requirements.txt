@@ -82,3 +82,6 @@ pyarrow>=16,<22          # Required by polars.DataFrame.to_arrow() in csv_query 
 chardet>=5.2,<6          # Encoding auto-detection for CSV loader
 rt>=3,<4                 # Request Tracker REST 2.0 client used by RT tools (rt.rest2.AsyncRt)
 authlib>=1.3,<2          # OIDC id_token validation (Microsoft Entra ID SSO)
+# E-goi marketing platform official SDK (used by egoi_* tools). Distributed only via GitHub
+# (not on PyPI); pin to a specific commit/tag of E-goi/sdk-python for reproducible builds.
+egoi_sdk @ git+https://github.com/guardiankey/egoi_sdk-python.git
