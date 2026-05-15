@@ -57,6 +57,7 @@ checkdmarc>=5.14,<6
 pydnsbl>=1.1,<2
 zeep[async]>=4.2,<5
 nvdlib>=0.7,<1           # NVD (National Vulnerability Database) API client for CVE/CPE lookups
+python-gvm>=24,<28       # Greenbone Vulnerability Manager Protocol (GMP) client — OpenVAS / GVM (used by openvas_* tools)
 geoip2>=4.8,<6           # MaxMind GeoLite2 / GeoIP2 database reader (GeoLite2-ASN.mmdb)
 IP2Location>=8.10,<9     # IP2Location BIN database reader (IP2LOCATION-LITE-DB11.IPV6.BIN)
 zabbix-utils>=2.0.2,<3   # Official Zabbix SIA Python API client (used by zabbix_query tool)
