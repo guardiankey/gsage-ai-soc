@@ -207,11 +207,15 @@ class GenerateDocumentTool(BaseTool):
                     "Ignored when the 'rows' parameter is provided. "
                     "Available as the '{{content}}' variable inside Markdown "
                     "and DOCX templates. "
-                    "For any PDF generation path that uses Pandoc/LaTeX, send "
-                    "PLAIN ASCII ONLY whenever possible: no emojis, no accented "
-                    "letters, no smart quotes, no en/em dashes, no bullets, and "
-                    "no other special Unicode characters. Unsupported characters "
-                    "may be normalized or stripped automatically before rendering. "
+                    "For any PDF generation path that uses Pandoc/LaTeX, UTF-8 "
+                    "text is supported — accented Latin letters (e.g. Portuguese "
+                    "\u00e1\u00e9\u00ed\u00f3\u00fa\u00e3\u00f5\u00e7) are preserved. "
+                    "AVOID emojis, pictographic symbols, smart/curly quotes "
+                    "(\u201c\u201d\u2018\u2019), en/em dashes (\u2013\u2014), bullet glyphs (\u2022\u2023), "
+                    "and other characters typical of typographic rich-text — these "
+                    "are either normalized to ASCII equivalents or stripped before "
+                    "rendering. Prefer straight quotes, hyphens, and plain hyphen-minus "
+                    "list markers in source content. "
                     "For PDF via pandoc bundles (e.g. 'builtin:pandoc_gsage' "
                     "or pandoc=true), prepend a YAML front-matter block with "
                     "document metadata so the cover/title page is populated, "
@@ -278,7 +282,8 @@ class GenerateDocumentTool(BaseTool):
                 "description": (
                     "Additional template variables merged with {'content': content}. "
                     "Values must be strings or coercible to string. For PDF "
-                    "generation, prefer plain ASCII values here as well."
+                    "generation, UTF-8 with accented letters is supported; avoid "
+                    "emojis and pictographic symbols."
                 ),
                 "additionalProperties": {"type": "string"},
             },

@@ -132,8 +132,9 @@ class EgoiCampaignReportTool(BaseTool):
         # E-goi schema version).
         breakdown_payload: dict[str, list[dict]] = {}
         for key in _BREAKDOWN_KEYS:
-            api_key = f"by_{key}" if key != "date" else "by_date"
-            rows = list(Q.iter_email_breakdown(report, api_key))
+            # API returns breakdowns under bare keys (date, domain, url, ...).
+            # iter_email_breakdown also falls back to the legacy ``by_*`` form.
+            rows = list(Q.iter_email_breakdown(report, key))
             if rows:
                 breakdown_payload[key] = rows
 

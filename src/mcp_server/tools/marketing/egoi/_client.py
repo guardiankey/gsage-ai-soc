@@ -52,6 +52,57 @@ except Exception as _exc:  # pragma: no cover — import-time fallback
 
 log = logging.getLogger(__name__)
 
+
+def _install_egoi_serializer_patch() -> None:
+    """Patch the egoi_api RFC6570 query-string serializer to accept booleans.
+
+    Background
+    ----------
+    Endpoints like ``GET /reports/email/{campaign_hash}`` declare bool
+    query params (``date``, ``weekday``, ...) which the SDK's input
+    validator strictly requires as ``BoolClass``/raw ``bool``. However,
+    the SDK's URL builder (``ParameterSerializerBase._ref6570_expansion``)
+    only accepts ``type(value) in {str, float, int}`` — using exact type
+    identity rather than ``isinstance``, so ``bool`` falls through and
+    raises ``Unable to generate a ref6570 representation of True``.
+
+    This catch-22 (validator wants bool / serializer rejects bool) is
+    an upstream SDK bug. We patch the serializer once at import time to
+    map booleans to the canonical ``"true"``/``"false"`` strings that
+    the E-goi API accepts on the wire.
+
+    Idempotent: the patch tags the method with ``_gsage_bool_patch`` so
+    repeated imports do not re-wrap it.
+    """
+    if egoi_api is None:
+        return
+    try:
+        from egoi_api.api_client import ParameterSerializerBase  # type: ignore[import-not-found,unused-ignore]
+    except Exception:  # pragma: no cover
+        log.warning("egoi_api: ParameterSerializerBase not found — skip bool patch")
+        return
+
+    original = ParameterSerializerBase._ref6570_expansion
+    if getattr(original, "_gsage_bool_patch", False):
+        return
+
+    def _patched(cls, variable_name, in_data, explode, percent_encode, prefix_separator_iterator):  # type: ignore[no-untyped-def]
+        # Convert bool to the canonical wire-format string before the
+        # original serializer touches it. ``type(in_data) is bool`` matches
+        # only literal booleans, not subclasses, mirroring the SDK style.
+        if type(in_data) is bool:  # noqa: E721 — exact identity by design
+            in_data = "true" if in_data else "false"
+        return original.__func__(  # type: ignore[attr-defined]
+            cls, variable_name, in_data, explode, percent_encode, prefix_separator_iterator
+        )
+
+    _patched._gsage_bool_patch = True  # type: ignore[attr-defined]
+    ParameterSerializerBase._ref6570_expansion = classmethod(_patched)  # type: ignore[assignment]
+
+
+_install_egoi_serializer_patch()
+
+
 _DEFAULT_HOST = "https://api.egoiapp.com"
 _DEFAULT_TIMEOUT = 60.0
 

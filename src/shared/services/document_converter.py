@@ -85,31 +85,50 @@ def _coerce_text(text: str | bytes) -> str:
 
 
 def _latex_ascii_fragment(ch: str) -> str:
-    """Map a single Unicode character to a LaTeX-safe ASCII fragment."""
+    """Map a single Unicode character to a LaTeX-safe fragment.
+
+    Strategy: preserve accented letters and other Unicode that LaTeX with
+    ``utf8`` inputenc (or XeLaTeX/LuaLaTeX) renders natively. Only strip
+    or remap characters that are known to break the pipeline:
+
+    - Tabs/newlines/carriage returns: kept verbatim.
+    - Characters in :data:`_LATEX_ASCII_REPLACEMENTS` (smart quotes,
+      dashes, bullets, ellipsis, NBSP, registered/trademark, ...): mapped
+      to ASCII equivalents.
+    - Non-BMP code points (``ord(ch) > 0xFFFF``), which cover most emoji
+      and pictographs: stripped.
+    - Unicode general categories ``Cc``/``Cf``/``Cs``/``Co``/``Cn``
+      (controls, formatting, surrogates, private use, unassigned) and
+      ``So`` (other symbols, includes emoji in BMP): stripped.
+    - Separators (``Z`` categories) other than the regular space: mapped
+      to a regular space.
+    - Everything else (letters incl. accented Latin, marks, numbers,
+      punctuation, math symbols): kept verbatim.
+    """
     if ch in ("\t", "\n", "\r"):
         return ch
     if ch in _LATEX_ASCII_REPLACEMENTS:
         return _LATEX_ASCII_REPLACEMENTS[ch]
+    if ord(ch) > 0xFFFF:
+        return ""
 
     category = unicodedata.category(ch)
-    if category.startswith("Z"):
-        return " "
-    if category in ("Cc", "Cf", "Cs", "Co", "Cn"):
+    if category in ("Cc", "Cf", "Cs", "Co", "Cn", "So"):
         return ""
+    if category.startswith("Z") and ch != " ":
+        return " "
     return ch
 
 
 def _normalize_latex_text(text: str | bytes) -> str:
-    """Normalize text to plain ASCII so Pandoc/PDF generation stays deterministic."""
-    normalized = unicodedata.normalize(
-        "NFKD",
-        "".join(_latex_ascii_fragment(ch) for ch in _coerce_text(text)),
-    )
-    return "".join(
-        ch
-        for ch in normalized
-        if ch in ("\t", "\n", "\r") or 0x20 <= ord(ch) <= 0x7E
-    )
+    """Normalize text for Pandoc/PDF generation while preserving accents.
+
+    Maps known problematic punctuation to ASCII equivalents and strips
+    characters that break LaTeX (emoji, control/format characters,
+    non-BMP code points). Accented Latin letters and other safe Unicode
+    are kept verbatim — the template ships with ``utf8`` inputenc.
+    """
+    return "".join(_latex_ascii_fragment(ch) for ch in _coerce_text(text))
 
 
 # ---------------------------------------------------------------------------
@@ -178,18 +197,18 @@ def find_latex_unsafe_chars(text: str) -> list[str]:
 
 
 def strip_non_bmp(text: str) -> str:
-    """Normalize text to plain ASCII for LaTeX/PDF safety.
+    """Normalize text for LaTeX/PDF safety while preserving accented letters.
 
     The historical function name is kept because existing callers already
-    import it. Current behavior is intentionally stricter than just removing
-    non-BMP code points:
+    import it. Current behavior:
 
     - invalid UTF-8 sequences are replaced, then dropped
-    - accented Latin letters are normalized to ASCII equivalents
     - common Unicode punctuation is mapped to ASCII (smart quotes, dashes,
-      bullets, ellipsis)
-    - remaining non-ASCII characters, emoji, symbols, and control/format
-      characters are stripped
+      bullets, ellipsis, NBSP, copyright/registered/trademark)
+    - emoji, other symbols (``So``), control/format characters, surrogates,
+      private-use and non-BMP code points are stripped
+    - accented Latin letters, marks, numbers and regular punctuation are
+      kept verbatim (the gSage LaTeX template uses ``utf8`` inputenc)
     """
     return _normalize_latex_text(text)
 

@@ -114,7 +114,7 @@ async def view_recent_campaigns(
 async def view_delivery_funnel(
     client: EgoiClient, *, campaign_hash: Optional[str] = None
 ) -> dict:
-    """Funnel ``sent → delivered → opens → clicks`` for one campaign.
+    """Funnel ``sends → delivered → opens → clicks`` for one campaign.
 
     If ``campaign_hash`` is not given, picks the most-recently updated
     email campaign with a usable status.
@@ -134,12 +134,40 @@ async def view_delivery_funnel(
     if not target:
         return {"campaign_hash": None, "funnel": {}}
     report = await client.get_email_report(campaign_hash=target)
-    totals = (report.get("totals") if isinstance(report, dict) else {}) or {}
-    funnel = {
-        k: totals.get(k)
-        for k in ("sent", "delivered", "opens", "unique_opens", "clicks", "unique_clicks")
-        if isinstance(totals.get(k), (int, float))
-    }
+    # E-goi reports the totals under either ``totals`` (legacy) or
+    # ``overall`` (current schema). Keep both as fallbacks.
+    totals = (
+        (report.get("totals") if isinstance(report, dict) else None)
+        or (report.get("overall") if isinstance(report, dict) else None)
+        or {}
+    )
+
+    def _num(key: str) -> Optional[float]:
+        v = totals.get(key)
+        return v if isinstance(v, (int, float)) else None
+
+    sends = _num("sends") or _num("sent")
+    hard = _num("hard_bounces") or 0
+    soft = _num("soft_bounces") or 0
+    delivered = (sends - hard - soft) if isinstance(sends, (int, float)) else None
+    funnel: dict[str, Any] = {}
+    if sends is not None:
+        funnel["sends"] = sends
+    if delivered is not None:
+        funnel["delivered"] = delivered
+    for key in (
+        "opens",
+        "unique_opens",
+        "clicks",
+        "unique_clicks",
+        "hard_bounces",
+        "soft_bounces",
+        "complaints",
+        "unsubscriptions",
+    ):
+        v = _num(key)
+        if v is not None:
+            funnel[key] = v
     return {"campaign_hash": target, "funnel": funnel}
 
 
@@ -161,8 +189,12 @@ async def view_engagement_trend(
                 break
     if not target:
         return {"campaign_hash": None, "rows": []}
-    report = await client.get_email_report(campaign_hash=target)
-    rows = list(Q.iter_email_breakdown(report, "by_date"))
+    # ``date=True`` instructs E-goi to include the daily breakdown
+    # section in the response (otherwise only ``overall`` is returned).
+    report = await client.get_email_report(campaign_hash=target, date=True)
+    # API returns the daily breakdown under the bare ``date`` key; the
+    # iterator also accepts the legacy ``by_date`` form as a fallback.
+    rows = list(Q.iter_email_breakdown(report, "date"))
     return {"campaign_hash": target, "rows": rows}
 
 

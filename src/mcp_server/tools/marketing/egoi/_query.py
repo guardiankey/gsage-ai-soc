@@ -294,14 +294,27 @@ def normalize_email_report(item: Any) -> dict:
 
 
 def iter_email_breakdown(report: Any, key: str) -> Iterable[dict]:
-    """Yield rows from an EmailReport breakdown (e.g. ``by_date``, ``by_url``)."""
+    """Yield rows from an EmailReport breakdown section.
+
+    The current E-goi schema exposes breakdowns under bare keys
+    (``date``, ``domain``, ``url``, ``reader``, ``location``, ``hour``,
+    ``weekday``). Older schemas used a ``by_*`` prefix. We accept both
+    so callers can pass either form.
+    """
     if not isinstance(report, dict):
         return
-    section = report.get(key)
-    if isinstance(section, list):
-        for row in section:
-            if isinstance(row, dict):
-                yield row
+    candidates: list[str] = [key]
+    if key.startswith("by_"):
+        candidates.append(key[3:])
+    else:
+        candidates.append(f"by_{key}")
+    for candidate in candidates:
+        section = report.get(candidate)
+        if isinstance(section, list):
+            for row in section:
+                if isinstance(row, dict):
+                    yield row
+            return
 
 
 # ── Config schema ──────────────────────────────────────────────────────────
