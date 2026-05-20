@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, Optional
+from typing import Any, Annotated, Optional, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -415,7 +415,7 @@ async def resolve_approval(
             from src.backend_api.app.tasks.agent_continuation import (
                 continue_after_approval_resolved,
             )
-            continue_after_approval_resolved.delay(approval_id, str(org_id))
+            cast(Any, continue_after_approval_resolved).delay(approval_id, str(org_id))
             log.info(
                 "resolve_approval: dispatched continuation for approval=%s org=%s",
                 approval_id, org_id,

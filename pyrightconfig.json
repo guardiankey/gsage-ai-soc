@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/pyright/main/packages/vscode-pyright/schemas/pyrightconfig.schema.json",
+  "venvPath": ".",
+  "venv": ".venv",
+  "reportIncompatibleVariableOverride": "none",
+  "exclude": [
+    ".venv",
+    "dist",
+    "external_code",
+    "limbo",
+    "**/node_modules"
+  ]
+}

@@ -242,7 +242,12 @@ async def maybe_export_artifacts(
     Failures are logged but never raised — the caller still gets a usable
     payload (with the inline preview) and can warn the user separately.
     """
-    artifacts: dict = {"csv_file": None, "json_file": None}
+    artifacts: dict = {
+        "csv_file": None,
+        "json_file": None,
+        "csv_error": None,
+        "json_error": None,
+    }
     if not rows or (not export_csv and not export_json):
         return artifacts
 
@@ -280,23 +285,41 @@ async def maybe_export_artifacts(
 
     if export_csv:
         try:
-            artifacts["csv_file"] = await _store(
+            stored = await _store(
                 export_to_csv(rows),
                 f"{safe_prefix}_{ts}.csv",
                 "text/csv",
             )
+            artifacts["csv_file"] = stored
+            if stored is None:
+                # _store_file already logged the underlying cause; surface
+                # a generic marker so the agent knows the export was
+                # attempted but did not persist (e.g. MinIO offline, size
+                # cap exceeded, DB commit refused).
+                artifacts["csv_error"] = (
+                    "file storage returned no record (see backend logs "
+                    "for the underlying cause)"
+                )
         except Exception as exc:  # noqa: BLE001
             log.warning("%s: CSV export failed: %s", tool.name, exc)
+            artifacts["csv_error"] = f"{type(exc).__name__}: {exc}"
 
     if export_json:
         try:
-            artifacts["json_file"] = await _store(
+            stored = await _store(
                 export_to_json(rows),
                 f"{safe_prefix}_{ts}.json",
                 "application/json",
             )
+            artifacts["json_file"] = stored
+            if stored is None:
+                artifacts["json_error"] = (
+                    "file storage returned no record (see backend logs "
+                    "for the underlying cause)"
+                )
         except Exception as exc:  # noqa: BLE001
             log.warning("%s: JSON export failed: %s", tool.name, exc)
+            artifacts["json_error"] = f"{type(exc).__name__}: {exc}"
 
     return artifacts
 

@@ -66,7 +66,7 @@ _No configuration-derived environment variables._
 
 | Tool | Version | Rate limit/min | Timeout (s) | Circuit breaker | Background | Multi-config |
 | --- | --- | ---: | ---: | :---: | :---: | :---: |
-| `csv_describe` | `1.0.0` | 60 | 30 | — | — | — |
+| `csv_describe` | `1.0.0` | 600 | 30 | — | — | — |
 
 ## Source files
 

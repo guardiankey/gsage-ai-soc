@@ -1034,6 +1034,9 @@ async def run_search_pipeline(
         # after the queue-jobs 303, especially under load.
         _v2_result_retries = 3
         _v2_result_retry_delay = 10
+        rows: list = []
+        meta: dict = {}
+        truncated = False
         for _attempt in range(1, _v2_result_retries + 1):
             try:
                 rows, meta, truncated = await fetch_all_results_v2(

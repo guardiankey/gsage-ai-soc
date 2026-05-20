@@ -24,6 +24,7 @@ import os
 import shutil
 import uuid
 from pathlib import Path
+from typing import Any, cast
 
 from src.backend_api.app.celery_app import celery_app
 
@@ -657,7 +658,7 @@ def ingest_url_task(
         return {"status": "failed", "error": str(exc)}
 
     # Hand off to the standard document pipeline (it will mark COMPLETED).
-    ingest_document_task.apply_async(
+    cast(Any, ingest_document_task).apply_async(
         kwargs={
             "job_id": job_id,
             "org_id": org_id,

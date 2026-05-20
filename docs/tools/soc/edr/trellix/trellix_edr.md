@@ -14,6 +14,8 @@ gSage AI — Trellix EDR host quarantine status tool.
 | `trellix_edr_get_host_quarantine_status` | Look up Trellix EDR hosts by hostname/IP and return their quarantine and metadata status | `edr:read` | — | — |
 | `trellix_edr_quarantine_host` | Quarantine or release a host on Trellix EDR by hostname/IP (requires approval) | `edr:write`, `edr:quarantine` | ✓ | — |
 | `trellix_edr_search` | Hunt across endpoints with Trellix EDR realtime searches (SQL-like v2 or structured v1) | `edr:read` | — | — |
+| `trellix_edr_search_bulk_files` | Bulk file hunt across Trellix EDR endpoints by a LIST of hashes or file-name substrings (single OR-combined search) | `edr:read` | — | — |
+| `trellix_edr_search_bulk_network` | Bulk network flow hunt across Trellix EDR endpoints by a LIST of remote IPs or process-name substrings (single OR-combined search) | `edr:read` | — | — |
 | `trellix_edr_search_files` | Search files across Trellix EDR endpoints by name and/or hash (MD5/SHA1/SHA256 auto-detected by length) | `edr:read` | — | — |
 | `trellix_edr_search_network` | Search network flows on Trellix EDR endpoints by remote IP/port, process name or hostname | `edr:read` | — | — |
 | `trellix_edr_search_processes` | Hunt processes across Trellix EDR endpoints (Processes / ProcessHistory) — fleet-wide aggregation by default. | `edr:read` | — | — |
@@ -88,6 +90,8 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 | `trellix_edr_get_host_quarantine_status` | `edr:read` |
 | `trellix_edr_quarantine_host` | `edr:write`, `edr:quarantine` |
 | `trellix_edr_search` | `edr:read` |
+| `trellix_edr_search_bulk_files` | `edr:read` |
+| `trellix_edr_search_bulk_network` | `edr:read` |
 | `trellix_edr_search_files` | `edr:read` |
 | `trellix_edr_search_network` | `edr:read` |
 | `trellix_edr_search_processes` | `edr:read` |
@@ -99,6 +103,8 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 | `trellix_edr_get_host_quarantine_status` | `1.0.0` | 30 | 600 | ✓ | always | ✓ |
 | `trellix_edr_quarantine_host` | `1.0.0` | 5 | 900 | ✓ | always | ✓ |
 | `trellix_edr_search` | `1.0.0` | 20 | 900 | ✓ | always | ✓ |
+| `trellix_edr_search_bulk_files` | `1.0.0` | 20 | 900 | ✓ | always | ✓ |
+| `trellix_edr_search_bulk_network` | `1.0.0` | 20 | 900 | ✓ | always | ✓ |
 | `trellix_edr_search_files` | `1.0.0` | 20 | 900 | ✓ | always | ✓ |
 | `trellix_edr_search_network` | `1.0.0` | 20 | 900 | ✓ | always | ✓ |
 | `trellix_edr_search_processes` | `1.0.0` | 20 | 900 | ✓ | always | ✓ |
@@ -108,6 +114,8 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_get_host_quarantine_status.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_get_host_quarantine_status.py)
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_quarantine_host.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_quarantine_host.py)
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_search.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_search.py)
+- [src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_bulk_files.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_bulk_files.py)
+- [src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_bulk_network.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_bulk_network.py)
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_files.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_files.py)
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_network.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_network.py)
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_processes.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_processes.py)

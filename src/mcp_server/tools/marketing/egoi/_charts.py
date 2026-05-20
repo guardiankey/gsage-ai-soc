@@ -55,11 +55,15 @@ def build_bar_by_metric(
         "bounces",
         "unsubscribed",
     ]
-    pairs = [(k, overall.get(k)) for k in keys if isinstance(overall.get(k), (int, float))]
+    pairs: list[tuple[str, float]] = []
+    for key in keys:
+        metric_value = overall.get(key)
+        if isinstance(metric_value, (int, float)):
+            pairs.append((key, float(metric_value)))
     if not pairs:
         return None
-    labels = [p[0] for p in pairs]
-    values = [float(p[1]) for p in pairs]
+    labels = [label for label, _ in pairs]
+    values = [value for _, value in pairs]
     return (
         "```mermaid\n"
         "xychart-beta\n"

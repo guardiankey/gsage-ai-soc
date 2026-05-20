@@ -38,6 +38,7 @@ in the JWT claims so downstream services can enforce RBAC without extra DB looku
 from __future__ import annotations
 
 import re
+from typing import Any, cast
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -579,7 +580,7 @@ async def register(
     # Enqueue KB seeding for the new org (best-effort — never blocks registration)
     try:
         from src.backend_api.app.tasks.ingest import load_default_knowledge_task
-        load_default_knowledge_task.apply_async(
+        cast(Any, load_default_knowledge_task).apply_async(
             kwargs={"org_id": str(org.id)},
             queue="knowledge",
         )

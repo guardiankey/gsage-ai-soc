@@ -518,6 +518,7 @@ class IMAPClientWrapper:
         # Pass charset=None so the CHARSET token is omitted \u2014 "UNSEEN" is
         # pure ASCII so omitting CHARSET is always safe. The uid() raw-
         # command path never sends CHARSET, so it does not need the kwarg.
+        search_resp: Any = None
         if self._uid_search_supported:
             try:
                 search_resp = await self._client.uid("SEARCH", "UNSEEN")
@@ -550,6 +551,9 @@ class IMAPClientWrapper:
                     search_resp.lines,
                 )
                 return
+
+        if search_resp is None:
+            return
 
         # Parse UID/sequence-number list from the first line of the SEARCH
         # response. Subsequent lines may contain unrelated untagged responses

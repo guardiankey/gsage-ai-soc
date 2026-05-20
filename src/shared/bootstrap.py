@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -224,7 +224,7 @@ async def ensure_admin(session: AsyncSession) -> Optional[str]:
     # Enqueue KB seeding for the new org (best-effort — never blocks bootstrap)
     try:
         from src.backend_api.app.tasks.ingest import load_default_knowledge_task
-        load_default_knowledge_task.apply_async(
+        cast(Any, load_default_knowledge_task).apply_async(
             kwargs={"org_id": str(org.id)},
             queue="knowledge",
         )

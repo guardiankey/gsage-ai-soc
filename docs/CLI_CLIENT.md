@@ -93,6 +93,9 @@ pip install -r requirements-cli.txt
 The REPL entry-point wrapper is `run-cli.sh`.
 The batch ingest wrapper is `ingest-documents` (already executable).
 The TUI admin console is launched via `run-admin.sh`.
+Static analysis in development uses the repository root `pyrightconfig.json`,
+which excludes generated or vendored directories such as `dist/` and
+`external_code/` so Pylance focuses on maintained workspace packages.
 
 ---
 

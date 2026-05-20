@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
@@ -400,7 +400,7 @@ async def ingest_document(
     # --- Dispatch Celery task --------------------------------------------------
     from src.backend_api.app.tasks.ingest import ingest_document_task  # noqa: PLC0415
 
-    ingest_document_task.apply_async(
+    cast(Any, ingest_document_task).apply_async(
         kwargs={
             "job_id": str(job.id),
             "org_id": str(org_id),
@@ -465,7 +465,7 @@ async def ingest_url(
 
     from src.backend_api.app.tasks.ingest import ingest_url_task  # noqa: PLC0415
 
-    ingest_url_task.apply_async(
+    cast(Any, ingest_url_task).apply_async(
         kwargs={
             "job_id": str(job.id),
             "org_id": str(org_id),

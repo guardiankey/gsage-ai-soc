@@ -23,8 +23,44 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# Fetcher: receives an open EgoiClient, returns a list of already-normalised rows.
-Fetcher = Callable[[EgoiClient], Awaitable[list[dict]]]
+# Fetcher: receives an open EgoiClient and returns a tuple of
+# ``(rows, server_total_items)``. ``server_total_items`` is the *true*
+# count reported by the upstream API (``total_items`` field on paginated
+# responses) which may exceed ``len(rows)`` when ``max_rows`` capped the
+# fetch. Return ``None`` when the endpoint does not report a total.
+Fetcher = Callable[[EgoiClient], Awaitable[tuple[list[dict], Optional[int]]]]
+
+
+def should_background_for_size(
+    params: dict,
+    *,
+    rows_threshold: int,
+    export_rows_threshold: Optional[int] = None,
+) -> bool:
+    """Decide whether a search invocation should be dispatched to Celery
+    immediately, based on the requested ``max_rows`` and export flags.
+
+    Heuristic (empirical for E-goi at ~300-500 rows/sec sustained):
+
+    * ``max_rows >= rows_threshold`` → background (large enumeration).
+    * Any export flag set AND ``max_rows >= export_rows_threshold`` →
+      background (writing the artifact is part of the long path).
+
+    Always returns False when ``max_rows`` is missing or non-positive
+    (the schema default applies and is small).
+    """
+    try:
+        max_rows = int(params.get("max_rows") or 0)
+    except (TypeError, ValueError):
+        max_rows = 0
+    if max_rows <= 0:
+        return False
+    if max_rows >= rows_threshold:
+        return True
+    if export_rows_threshold is not None and max_rows >= export_rows_threshold:
+        if bool(params.get("export_csv")) or bool(params.get("export_json")):
+            return True
+    return False
 
 
 async def run_search(
@@ -74,7 +110,7 @@ async def run_search(
     t0 = time.monotonic()
     try:
         async with Q.build_client(config) as client:
-            rows = await fetcher(client)
+            rows, server_total = await fetcher(client)
     except EgoiError as exc:
         elapsed = int((time.monotonic() - t0) * 1000)
         return tool._failure(  # type: ignore[attr-defined]
@@ -101,10 +137,25 @@ async def run_search(
         preview_rows=Q.AGENT_PREVIEW_ROWS_EGOI,
     )
 
+    # ``rows_total`` historically reported the number of *fetched* rows,
+    # which confuses agents into thinking the dataset is small. Prefer
+    # the upstream-reported total when available, and force overflow=true
+    # whenever the server total exceeds what we returned.
+    rows_fetched = int(agent_payload["rows_total"])
+    overflow = bool(agent_payload["rows_overflow"])
+    if isinstance(server_total, int) and server_total > rows_fetched:
+        overflow = True
+
     elapsed = int((time.monotonic() - t0) * 1000)
     payload: dict[str, Any] = {
-        "rows_total": agent_payload["rows_total"],
-        "rows_overflow": agent_payload["rows_overflow"],
+        "rows_total": (
+            int(server_total) if isinstance(server_total, int) else rows_fetched
+        ),
+        "rows_fetched": rows_fetched,
+        "server_total_items": (
+            int(server_total) if isinstance(server_total, int) else None
+        ),
+        "rows_overflow": overflow,
         "rows": agent_payload["rows_preview"],
         "summary": smry,
         "artifacts": agent_payload["artifacts"],

@@ -48,6 +48,8 @@ framework (audience: developers).
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `csv_describe` | 1 | `core:csv_describe` | — | — | — | [core/csv/csv_describe.md](core/csv/csv_describe.md) |
+| `csv_edit` | 1 | `core:csv_edit` | — | — | — | [core/csv/csv_edit.md](core/csv/csv_edit.md) |
+| `csv_join` | 1 | `core:csv_join` | — | — | — | [core/csv/csv_join.md](core/csv/csv_join.md) |
 | `csv_query` | 1 | `core:csv_query` | — | — | — | [core/csv/csv_query.md](core/csv/csv_query.md) |
 | `csv_soc` | 1 | `core:csv_soc` | — | — | — | [core/csv/csv_soc.md](core/csv/csv_soc.md) |
 
@@ -78,7 +80,7 @@ framework (audience: developers).
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `gravityzone` | 3 | `gravityzone:read`, `gravityzone:write` | ✓ | ✓ | — | [soc/edr/gravityzone.md](soc/edr/gravityzone.md) |
-| `trellix_edr` | 6 | `edr:quarantine`, `edr:read`, `edr:write` | ✓ | ✓ | ✓ | [soc/edr/trellix/trellix_edr.md](soc/edr/trellix/trellix_edr.md) |
+| `trellix_edr` | 8 | `edr:quarantine`, `edr:read`, `edr:write` | ✓ | ✓ | ✓ | [soc/edr/trellix/trellix_edr.md](soc/edr/trellix/trellix_edr.md) |
 | `trellix_edr_collectors` | 1 | `edr:read` | — | — | — | [soc/edr/trellix/trellix_edr_collectors.md](soc/edr/trellix/trellix_edr_collectors.md) |
 
 ## email
@@ -111,6 +113,12 @@ framework (audience: developers).
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `knowledge_base` | 1 | `crud:knowledge_base:read`, `crud:knowledge_base:write` | — | — | — | [crud/knowledge_base.md](crud/knowledge_base.md) |
 | `wikijs_editor` | 1 | `wiki:read`, `wiki:write` | — | ✓ | ✓ | [core/wikijs/wikijs_editor.md](core/wikijs/wikijs_editor.md) |
+
+## marketing
+
+| Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
+| --- | ---: | --- | :---: | :---: | :---: | --- |
+| `egoi` | 10 | `egoi:delete`, `egoi:read`, `egoi:write` | ✓ | ✓ | ✓ | [marketing/egoi.md](marketing/egoi.md) |
 
 ## monitoring
 
@@ -151,3 +159,9 @@ framework (audience: developers).
 | `mermaid_reference` | 1 | — | — | — | — | [core/mermaid_reference.md](core/mermaid_reference.md) |
 | `mermaid_validate` | 1 | — | — | — | — | [core/mermaid_validate.md](core/mermaid_validate.md) |
 | `search_tools` | 1 | — | — | — | — | [core/search_tools.md](core/search_tools.md) |
+
+## vulnerability
+
+| Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
+| --- | ---: | --- | :---: | :---: | :---: | --- |
+| `openvas` | 8 | `openvas:read`, `openvas:write` | ✓ | ✓ | ✓ | [soc/vulnerability/openvas.md](soc/vulnerability/openvas.md) |

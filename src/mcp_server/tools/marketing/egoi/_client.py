@@ -136,6 +136,25 @@ def _parse_error_body(body: Any) -> Optional[Any]:
         return text
 
 
+def _normalise_query_param_value(value: Any) -> Any:
+    """Coerce query params into RFC6570-safe primitives for the SDK.
+
+    The generated E-goi client advertises bool query params, but its
+    internal RFC6570 serializer raises on raw ``True``/``False`` values.
+    Converting booleans to lowercase strings preserves the wire format the
+    API expects while avoiding the SDK bug.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, tuple):
+        return [_normalise_query_param_value(item) for item in value]
+    if isinstance(value, list):
+        return [_normalise_query_param_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _normalise_query_param_value(item) for key, item in value.items()}
+    return value
+
+
 def _wrap_exception(exc: Exception, *, operation: str) -> EgoiError:
     """Translate an SDK exception into :class:`EgoiError`."""
     if isinstance(exc, ApiException):
@@ -319,11 +338,18 @@ class EgoiClient:
         body: Any = None,
         accept_content_types: Any = None,
         extra_kwargs: Optional[dict] = None,
+        coerce_bool_query: bool = True,
     ) -> Any:
         """Invoke ``api_instance.<method_name>(...)`` in a worker thread.
 
         Every call uses ``skip_deserialization=True`` and returns the
         JSON-decoded body. Errors are wrapped in :class:`EgoiError`.
+
+        ``coerce_bool_query``: when True (default), bool query-param
+        values are converted to lowercase strings to work around the
+        RFC6570 serializer bug on certain endpoints. Set to False for
+        endpoints whose generated schema validates bools strictly
+        (``BoolClass``), e.g. ``get_email_report``.
         """
         self._require_client()
         method = getattr(api_instance, method_name, None)
@@ -339,7 +365,16 @@ class EgoiClient:
             "timeout": self._timeout,
         }
         if query_params is not None:
-            kwargs["query_params"] = {k: v for k, v in query_params.items() if v is not None}
+            if coerce_bool_query:
+                kwargs["query_params"] = {
+                    k: _normalise_query_param_value(v)
+                    for k, v in query_params.items()
+                    if v is not None
+                }
+            else:
+                kwargs["query_params"] = {
+                    k: v for k, v in query_params.items() if v is not None
+                }
         if path_params is not None:
             kwargs["path_params"] = path_params
         if body is not None:
@@ -445,14 +480,16 @@ class EgoiClient:
             },
         )
 
-    async def get_contact(self, list_id: int, contact_id: int) -> Any:
+    async def get_contact(self, list_id: int, contact_id: Any) -> Any:
+        # E-goi contact_id is a 10-char hex hash on modern accounts but
+        # may also be a numeric id on older lists — forward as-is.
         return await self._call(
             self._contacts_api,
             "get_contact",
             operation="get_contact",
             path_params={
                 "list_id": int(list_id),
-                "contact_id": int(contact_id),
+                "contact_id": str(contact_id),
             },
         )
 
@@ -497,14 +534,14 @@ class EgoiClient:
             body=body,
         )
 
-    async def patch_contact(self, list_id: int, contact_id: int, body: Any) -> Any:
+    async def patch_contact(self, list_id: int, contact_id: Any, body: Any) -> Any:
         return await self._call(
             self._contacts_api,
             "patch_contact",
             operation="patch_contact",
             path_params={
                 "list_id": int(list_id),
-                "contact_id": int(contact_id),
+                "contact_id": str(contact_id),
             },
             body=body,
         )
@@ -656,6 +693,10 @@ class EgoiClient:
                 "url": url,
                 "reader": reader,
             },
+            # This endpoint's generated schema validates bool params
+            # via ``BoolClass`` and rejects the string coercion used
+            # elsewhere as an RFC6570 workaround.
+            coerce_bool_query=False,
         )
 
     # ── Segments ────────────────────────────────────────────────────────

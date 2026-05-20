@@ -58,7 +58,15 @@ class EgoiContactGetTool(BaseTool):
         "required": ["list_id", "contact_id"],
         "properties": {
             "list_id": {"type": "integer", "minimum": 1},
-            "contact_id": {"type": "integer", "minimum": 1},
+            "contact_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": (
+                    "E-goi contact identifier. Usually a 10-char hex "
+                    "hash (e.g. 'a7c0458bb4'); pass it verbatim from "
+                    "egoi_contact_search results."
+                ),
+            },
         },
         "additionalProperties": False,
     }
@@ -72,7 +80,11 @@ class EgoiContactGetTool(BaseTool):
     ) -> ToolResult:
         t0 = time.monotonic()
         list_id = int(params["list_id"])
-        contact_id = int(params["contact_id"])
+        contact_id = str(params["contact_id"]).strip()
+        if not contact_id:
+            return self._failure(
+                "VALIDATION_ERROR", "contact_id must be a non-empty string"
+            )
 
         try:
             async with Q.build_client(config) as client:

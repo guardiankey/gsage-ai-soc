@@ -180,12 +180,40 @@ def normalize_list(item: Any) -> dict:
     }
 
 
+def _compact_extra(extra: Any) -> Any:
+    """Drop empty values from an E-goi ``extra`` payload.
+
+    The API echoes every extra field defined on the list — even when the
+    contact has no value for that field. Keeping the empties bloats each
+    contact row (~13 entries × ~40 bytes) and makes the LLM context cost
+    explode on contact searches. We drop entries whose ``value`` is
+    ``None`` / empty string while preserving the original shape (list of
+    objects or dict).
+    """
+    def _is_empty(v: Any) -> bool:
+        return v is None or (isinstance(v, str) and v.strip() == "")
+
+    if isinstance(extra, list):
+        compact: list[Any] = []
+        for entry in extra:
+            if isinstance(entry, dict):
+                val = entry.get("value")
+                if _is_empty(val):
+                    continue
+            compact.append(entry)
+        return compact
+    if isinstance(extra, dict):
+        return {k: v for k, v in extra.items() if not _is_empty(v)}
+    return extra
+
+
 def normalize_contact(item: Any) -> dict:
     """Flatten an E-goi contact into a tabular dict.
 
     The API nests base fields under ``base`` and extra fields under
     ``extra``. We expose the most relevant base fields top-level and
-    keep ``extra`` as a sub-object for ad-hoc inspection.
+    keep ``extra`` as a sub-object for ad-hoc inspection. Empty
+    ``extra`` entries are stripped to keep payloads compact.
     """
     if not isinstance(item, dict):
         return {}
@@ -206,7 +234,7 @@ def normalize_contact(item: Any) -> dict:
         "created": item.get("created") or base.get("created"),
         "updated": item.get("updated") or base.get("updated"),
         "tags": item.get("tags") or base.get("tags"),
-        "extra": item.get("extra"),
+        "extra": _compact_extra(item.get("extra")),
     }
 
 

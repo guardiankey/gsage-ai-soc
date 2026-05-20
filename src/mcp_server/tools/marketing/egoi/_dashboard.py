@@ -7,6 +7,7 @@ The orchestrator (``egoi_dashboard.py``) dispatches by view name.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional
 
@@ -23,10 +24,47 @@ DASHBOARD_TOP_N = 10
 DASHBOARD_MAX_ROWS = 200
 
 
+async def _hydrate_list_stats(
+    client: EgoiClient, lists: list[dict]
+) -> list[dict]:
+    """Fan out ``get_list`` per row to populate ``contact_stats``.
+
+    The ``/lists`` endpoint omits stats, so the dashboard needs an
+    extra call per list. Failures degrade silently (None values stay).
+    """
+    if not lists:
+        return lists
+
+    async def _one(row: dict) -> dict:
+        lid = row.get("list_id")
+        if not isinstance(lid, int):
+            try:
+                lid = int(lid)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return row
+        try:
+            detail = await client.get_list(lid)
+        except Exception:  # noqa: BLE001
+            return row
+        normalised = Q.normalize_list(detail) if isinstance(detail, dict) else {}
+        for key in (
+            "contacts_active",
+            "contacts_inactive",
+            "contacts_unconfirmed",
+            "contacts_removed",
+        ):
+            if normalised.get(key) is not None:
+                row[key] = normalised[key]
+        return row
+
+    return list(await asyncio.gather(*(_one(r) for r in lists)))
+
+
 async def view_overview(client: EgoiClient) -> dict:
     """High-level tenant overview: list count, contact totals, campaign count."""
     lists_payload = await client.get_all_lists(offset=0, limit=DASHBOARD_MAX_ROWS)
     lists = [Q.normalize_list(x) for x in Q.unwrap_items(lists_payload)]
+    lists = await _hydrate_list_stats(client, lists)
     contacts_active = sum(int(l.get("contacts_active") or 0) for l in lists)
     contacts_inactive = sum(int(l.get("contacts_inactive") or 0) for l in lists)
     contacts_unconfirmed = sum(int(l.get("contacts_unconfirmed") or 0) for l in lists)
@@ -56,6 +94,7 @@ async def view_top_lists(
     """Top lists ranked by active-contact count."""
     payload = await client.get_all_lists(offset=0, limit=DASHBOARD_MAX_ROWS)
     lists = [Q.normalize_list(x) for x in Q.unwrap_items(payload)]
+    lists = await _hydrate_list_stats(client, lists)
     ranked = sorted(
         lists, key=lambda r: int(r.get("contacts_active") or 0), reverse=True
     )

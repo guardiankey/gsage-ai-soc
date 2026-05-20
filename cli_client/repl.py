@@ -12,16 +12,18 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
 # Import readline for command history and arrow key navigation
 # On Windows, this may require pyreadline3 (pip install pyreadline3)
+readline: Any  # noqa: E305
 try:
-    import readline
+    import readline  # type: ignore[no-redef]
     READLINE_AVAILABLE = True
 except ImportError:
+    readline = None  # type: ignore[assignment]
     READLINE_AVAILABLE = False
 
 from cli_client.client import GSageAPIClient

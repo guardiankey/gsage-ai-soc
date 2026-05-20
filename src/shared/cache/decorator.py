@@ -52,13 +52,13 @@ T = TypeVar("T")
 class _CacheJSONEncoder(json.JSONEncoder):
     """Custom JSON encoder for cache serialization."""
 
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        if isinstance(obj, uuid.UUID):
-            return str(obj)
+    def default(self, o: Any) -> Any:
+        if isinstance(o, datetime):
+            return o.isoformat()
+        if isinstance(o, uuid.UUID):
+            return str(o)
         # Let the base class raise TypeError for other non-serializable types
-        return super().default(obj)
+        return super().default(o)
 
 
 def _serialize_for_cache(value: Any) -> str:

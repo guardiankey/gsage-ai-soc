@@ -6,7 +6,7 @@ Permission: ``egoi:read``
 from __future__ import annotations
 
 import logging
-from typing import ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.marketing.egoi import _query as Q
@@ -32,7 +32,7 @@ class EgoiContactSearchTool(BaseTool):
     """
 
     name: ClassVar[str] = "egoi_contact_search"
-    config_namespace: ClassVar[str] = "egoi"
+    config_namespace: ClassVar[Optional[str]] = "egoi"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "Search E-goi contacts. Use scope='global' to locate a contact "
@@ -43,7 +43,12 @@ class EgoiContactSearchTool(BaseTool):
     permissions: ClassVar[list[str]] = ["egoi:read"]
 
     rate_limit_per_minute: ClassVar[int] = 30
-    timeout_seconds: ClassVar[int] = 180
+    # Sync timeout doubles as the auto-fallback trigger when
+    # ``background_threshold_seconds`` is set. We keep it under the chat
+    # layer's tool timeout so the agent gets a 'background' status
+    # instead of a timeout error.
+    timeout_seconds: ClassVar[int] = 120
+    background_threshold_seconds: ClassVar[Optional[int]] = 120
     use_circuit_breaker: ClassVar[bool] = True
     requires_approval: ClassVar[bool] = False
 
@@ -59,7 +64,7 @@ class EgoiContactSearchTool(BaseTool):
     audit_field_mapping: ClassVar[dict] = {}
     audit_output: ClassVar[bool] = False
 
-    params_schema: ClassVar[dict] = {
+    params_schema: ClassVar[Optional[dict]] = {
         "type": "object",
         "required": ["scope"],
         "properties": {
@@ -118,6 +123,18 @@ class EgoiContactSearchTool(BaseTool):
         "additionalProperties": False,
     }
 
+    async def should_run_background(self, params: dict, config: dict) -> bool:
+        # E-goi contact pages are ~200 rows and the API sustains roughly
+        # 300-500 rows/sec. Dispatch immediately when the requested
+        # batch is large or a sizeable export was requested.
+        if _run.should_background_for_size(
+            params,
+            rows_threshold=5000,
+            export_rows_threshold=2000,
+        ):
+            return True
+        return await super().should_run_background(params, config)
+
     async def execute(
         self,
         agent_context: AgentContext,
@@ -136,7 +153,7 @@ class EgoiContactSearchTool(BaseTool):
                     "scope='global' requires 'contact' (email or phone)",
                 )
 
-            async def _fetch_global(client: EgoiClient) -> list[dict]:
+            async def _fetch_global(client: EgoiClient) -> tuple[list[dict], Optional[int]]:
                 payload = await client.search_contacts(contact=contact)
                 rows = [Q.normalize_contact(x) for x in Q.unwrap_items(payload)]
                 if not rows and isinstance(payload, dict):
@@ -144,7 +161,7 @@ class EgoiContactSearchTool(BaseTool):
                     rows = [Q.normalize_contact(payload)] if payload.get(
                         "contact_id"
                     ) else []
-                return rows[:max_rows]
+                return rows[:max_rows], Q.total_items(payload)
 
             return await _run.run_search(
                 self,
@@ -166,30 +183,37 @@ class EgoiContactSearchTool(BaseTool):
                     "VALIDATION_ERROR",
                     "scope='list' requires a positive integer 'list_id'",
                 )
-            segment_id = params.get("segment_id")
+            segment_id_raw = params.get("segment_id")
+            segment_id = (
+                segment_id_raw
+                if isinstance(segment_id_raw, int) and segment_id_raw > 0
+                else None
+            )
             status = (params.get("status") or "").strip() or None
 
-            async def _fetch_list(client: EgoiClient) -> list[dict]:
-                if segment_id:
+            async def _fetch_list(client: EgoiClient) -> tuple[list[dict], Optional[int]]:
+                if segment_id is not None:
+                    segment_id_value = segment_id
+
                     async def page(offset: int, limit: int):
                         return await client.get_all_contacts_by_segment(
-                            list_id=int(list_id),
-                            segment_id=int(segment_id),
+                            list_id=list_id,
+                            segment_id=segment_id_value,
                             offset=offset,
                             limit=limit,
                         )
                 else:
                     async def page(offset: int, limit: int):
-                        kwargs = {
-                            "list_id": int(list_id),
+                        kwargs: dict[str, Any] = {
+                            "list_id": list_id,
                             "offset": offset,
                             "limit": limit,
                         }
-                        if status:
+                        if status is not None:
                             kwargs["status"] = status
                         return await client.get_all_contacts(**kwargs)
 
-                rows, _ = await Q.iter_all_pages(
+                rows, server_total = await Q.iter_all_pages(
                     page,
                     max_rows=max_rows,
                     normaliser=Q.normalize_contact,
@@ -197,7 +221,7 @@ class EgoiContactSearchTool(BaseTool):
                 # Tag the list_id on every row for downstream clarity.
                 for r in rows:
                     r.setdefault("list_id", list_id)
-                return rows
+                return rows, server_total
 
             return await _run.run_search(
                 self,

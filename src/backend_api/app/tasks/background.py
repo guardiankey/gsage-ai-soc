@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from src.backend_api.app.celery_app import celery_app
 
@@ -224,7 +225,7 @@ async def _async_execute_background_tool(task_id: str) -> None:
                 from src.backend_api.app.tasks.agent_continuation import (
                     continue_after_bg_task_completed,
                 )
-                continue_after_bg_task_completed.delay(task_id)
+                cast(Any, continue_after_bg_task_completed).delay(task_id)
                 log.info("Background task %s: dispatched continuation task", task_id)
             except Exception as cont_exc:
                 log.warning(
@@ -250,7 +251,7 @@ def _dispatch_continuation(task_id: str) -> None:
         from src.backend_api.app.tasks.agent_continuation import (
             continue_after_bg_task_completed,
         )
-        continue_after_bg_task_completed.delay(task_id)
+        cast(Any, continue_after_bg_task_completed).delay(task_id)
         log.info("Background task %s: dispatched continuation task (failure path)", task_id)
     except Exception as exc:
         log.warning(

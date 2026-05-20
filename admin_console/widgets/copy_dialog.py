@@ -73,5 +73,5 @@ class CopyDialog(ModalScreen[None]):
         if event.button.id == "btn-close":
             self.dismiss(None)
 
-    def action_dismiss(self) -> None:
+    def action_dismiss(self, result: None = None) -> None:  # type: ignore[override]
         self.dismiss(None)

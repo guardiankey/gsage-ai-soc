@@ -6,7 +6,7 @@ Permission: ``egoi:read``
 from __future__ import annotations
 
 import logging
-from typing import ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.marketing.egoi import _query as Q
@@ -24,7 +24,7 @@ class EgoiCampaignGroupSearchTool(BaseTool):
     """
 
     name: ClassVar[str] = "egoi_campaign_group_search"
-    config_namespace: ClassVar[str] = "egoi"
+    config_namespace: ClassVar[Optional[str]] = "egoi"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "List E-goi campaign groups. Optional 'group_id' returns a "
@@ -34,7 +34,9 @@ class EgoiCampaignGroupSearchTool(BaseTool):
     permissions: ClassVar[list[str]] = ["egoi:read"]
 
     rate_limit_per_minute: ClassVar[int] = 30
-    timeout_seconds: ClassVar[int] = 60
+    # Auto-fallback to Celery if a sync execution exceeds ``timeout_seconds``.
+    timeout_seconds: ClassVar[int] = 90
+    background_threshold_seconds: ClassVar[Optional[int]] = 90
     use_circuit_breaker: ClassVar[bool] = True
     requires_approval: ClassVar[bool] = False
 
@@ -50,7 +52,7 @@ class EgoiCampaignGroupSearchTool(BaseTool):
     audit_field_mapping: ClassVar[dict] = {}
     audit_output: ClassVar[bool] = False
 
-    params_schema: ClassVar[dict] = {
+    params_schema: ClassVar[Optional[dict]] = {
         "type": "object",
         "properties": {
             "group_id": {
@@ -96,19 +98,19 @@ class EgoiCampaignGroupSearchTool(BaseTool):
         group_id = params.get("group_id")
         name = (params.get("name") or "").strip() or None
 
-        async def _fetch(client: EgoiClient) -> list[dict]:
+        async def _fetch(client: EgoiClient) -> tuple[list[dict], Optional[int]]:
             async def page(offset: int, limit: int):
-                kwargs = {"offset": offset, "limit": limit}
-                if group_id:
-                    kwargs["group_id"] = int(group_id)
-                if name:
+                kwargs: dict[str, Any] = {"offset": offset, "limit": limit}
+                if isinstance(group_id, int) and group_id > 0:
+                    kwargs["group_id"] = group_id
+                if name is not None:
                     kwargs["name"] = name
                 return await client.get_all_campaign_groups(**kwargs)
 
-            rows, _ = await Q.iter_all_pages(
+            rows, server_total = await Q.iter_all_pages(
                 page, max_rows=max_rows, normaliser=Q.normalize_campaign_group
             )
-            return rows
+            return rows, server_total
 
         return await _run.run_search(
             self,

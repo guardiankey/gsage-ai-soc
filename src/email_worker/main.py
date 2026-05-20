@@ -23,7 +23,7 @@ import logging
 import signal
 import sys
 import uuid
-from typing import Optional
+from typing import Any, Optional, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -331,7 +331,7 @@ class EmailWorker:
         # Dispatch Celery task (fire-and-forget; idempotency handled in task).
         dispatched = False
         try:
-            process_email_inbound.apply_async(
+            cast(Any, process_email_inbound).apply_async(
                 kwargs={
                     "message_id": parsed.message_id,
                     "org_id": str(account.org_id),

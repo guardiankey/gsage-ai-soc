@@ -5,8 +5,9 @@ Permission: ``egoi:read``
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.marketing.egoi import _query as Q
@@ -39,7 +40,11 @@ class EgoiListSearchTool(BaseTool):
     permissions: ClassVar[list[str]] = ["egoi:read"]
 
     rate_limit_per_minute: ClassVar[int] = 30
+    # Auto-fallback to Celery if a sync execution exceeds ``timeout_seconds``.
+    # ``include_stats=True`` triggers one extra API call per list which
+    # can dominate runtime on accounts with many lists.
     timeout_seconds: ClassVar[int] = 120
+    background_threshold_seconds: ClassVar[Optional[int]] = 120
     use_circuit_breaker: ClassVar[bool] = True
     requires_approval: ClassVar[bool] = False
 
@@ -72,6 +77,15 @@ class EgoiListSearchTool(BaseTool):
                 "maximum": Q.HARD_MAX_ROWS,
                 "default": Q.DEFAULT_MAX_ROWS,
             },
+            "include_stats": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Fetch contact_stats (active/inactive/unconfirmed/"
+                    "removed) per list. Requires one extra API call per "
+                    "list returned, so leave off for quick discovery."
+                ),
+            },
             "export_csv": {
                 "type": "boolean",
                 "default": False,
@@ -89,6 +103,26 @@ class EgoiListSearchTool(BaseTool):
         "additionalProperties": False,
     }
 
+    async def should_run_background(self, params: dict, config: dict) -> bool:
+        # ``include_stats`` adds one API call per list; if the caller
+        # asks for stats AND a sizeable batch, run in background to
+        # avoid blocking the chat layer. Otherwise apply the standard
+        # row-based heuristic.
+        include_stats = bool(params.get("include_stats"))
+        if include_stats and _run.should_background_for_size(
+            params,
+            rows_threshold=100,
+            export_rows_threshold=50,
+        ):
+            return True
+        if _run.should_background_for_size(
+            params,
+            rows_threshold=5000,
+            export_rows_threshold=2000,
+        ):
+            return True
+        return await super().should_run_background(params, config)
+
     async def execute(
         self,
         agent_context: AgentContext,
@@ -99,6 +133,7 @@ class EgoiListSearchTool(BaseTool):
         internal_filter = (params.get("internal_name") or "").strip().lower()
         public_filter = (params.get("public_name") or "").strip().lower()
         max_rows = Q.clamp_max_rows(params.get("max_rows"))
+        include_stats = bool(params.get("include_stats", False))
 
         def _match(row: dict) -> bool:
             if internal_filter and internal_filter not in (
@@ -111,14 +146,39 @@ class EgoiListSearchTool(BaseTool):
                 return False
             return True
 
-        async def _fetch(client: EgoiClient) -> list[dict]:
+        async def _fetch(client: EgoiClient) -> tuple[list[dict], Optional[int]]:
             async def page(offset: int, limit: int):
                 return await client.get_all_lists(offset=offset, limit=limit)
 
-            rows, _ = await Q.iter_all_pages(
+            rows, server_total = await Q.iter_all_pages(
                 page, max_rows=max_rows, normaliser=Q.normalize_list
             )
-            return [r for r in rows if _match(r)]
+            rows = [r for r in rows if _match(r)]
+
+            if include_stats and rows:
+                # The /lists endpoint omits contact_stats; fan out one
+                # /lists/{id} call per row to populate the counters.
+                async def _fetch_detail(list_id: Any) -> dict:
+                    try:
+                        detail = await client.get_list(int(list_id))
+                    except Exception:  # noqa: BLE001 — keep partial data
+                        return {}
+                    return Q.normalize_list(detail) if isinstance(detail, dict) else {}
+
+                details = await asyncio.gather(
+                    *(_fetch_detail(r.get("list_id")) for r in rows),
+                    return_exceptions=False,
+                )
+                for row, detail in zip(rows, details):
+                    for key in (
+                        "contacts_active",
+                        "contacts_inactive",
+                        "contacts_unconfirmed",
+                        "contacts_removed",
+                    ):
+                        if detail.get(key) is not None:
+                            row[key] = detail[key]
+            return rows, server_total
 
         return await _run.run_search(
             self,

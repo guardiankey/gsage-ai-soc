@@ -6,7 +6,7 @@ Permission: ``egoi:read``
 from __future__ import annotations
 
 import logging
-from typing import ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.marketing.egoi import _query as Q
@@ -27,7 +27,7 @@ class EgoiCampaignSearchTool(BaseTool):
     """
 
     name: ClassVar[str] = "egoi_campaign_search"
-    config_namespace: ClassVar[str] = "egoi"
+    config_namespace: ClassVar[Optional[str]] = "egoi"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
         "Search E-goi campaigns by channel, status, group, list and "
@@ -37,7 +37,9 @@ class EgoiCampaignSearchTool(BaseTool):
     permissions: ClassVar[list[str]] = ["egoi:read"]
 
     rate_limit_per_minute: ClassVar[int] = 30
+    # Auto-fallback to Celery if a sync execution exceeds ``timeout_seconds``.
     timeout_seconds: ClassVar[int] = 120
+    background_threshold_seconds: ClassVar[Optional[int]] = 120
     use_circuit_breaker: ClassVar[bool] = True
     requires_approval: ClassVar[bool] = False
 
@@ -53,7 +55,7 @@ class EgoiCampaignSearchTool(BaseTool):
     audit_field_mapping: ClassVar[dict] = {}
     audit_output: ClassVar[bool] = False
 
-    params_schema: ClassVar[dict] = {
+    params_schema: ClassVar[Optional[dict]] = {
         "type": "object",
         "properties": {
             "channel": {
@@ -102,6 +104,15 @@ class EgoiCampaignSearchTool(BaseTool):
         "additionalProperties": False,
     }
 
+    async def should_run_background(self, params: dict, config: dict) -> bool:
+        if _run.should_background_for_size(
+            params,
+            rows_threshold=5000,
+            export_rows_threshold=2000,
+        ):
+            return True
+        return await super().should_run_background(params, config)
+
     async def execute(
         self,
         agent_context: AgentContext,
@@ -110,26 +121,27 @@ class EgoiCampaignSearchTool(BaseTool):
         state: dict,
     ) -> ToolResult:
         max_rows = Q.clamp_max_rows(params.get("max_rows"))
-        filters = {
+        group_id = params.get("group_id")
+        filters: dict[str, str | int | None] = {
             "channel": (params.get("channel") or "").strip() or None,
             "status": (params.get("status") or "").strip() or None,
             "list_id": params.get("list_id"),
-            "group_id": params.get("group_id"),
+            "group_id": group_id if isinstance(group_id, int) and group_id > 0 else None,
             "internal_name": (params.get("internal_name") or "").strip() or None,
         }
 
-        async def _fetch(client: EgoiClient) -> list[dict]:
+        async def _fetch(client: EgoiClient) -> tuple[list[dict], Optional[int]]:
             async def page(offset: int, limit: int):
-                kwargs = {"offset": offset, "limit": limit}
+                kwargs: dict[str, Any] = {"offset": offset, "limit": limit}
                 for k, v in filters.items():
                     if v is not None:
                         kwargs[k] = v
                 return await client.get_all_campaigns(**kwargs)
 
-            rows, _ = await Q.iter_all_pages(
+            rows, server_total = await Q.iter_all_pages(
                 page, max_rows=max_rows, normaliser=Q.normalize_campaign
             )
-            return rows
+            return rows, server_total
 
         return await _run.run_search(
             self,
