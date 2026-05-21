@@ -66,6 +66,10 @@ async def handle_teams_turn(
     from botbuilder.schema import ConversationReference
 
     from src.teams_handler.mermaid_attach import extract_and_render_mermaid
+    from src.shared.services.response_filter import (
+        FilterContext,
+        apply_filters_to_text,
+    )
 
     from src.backend_api.app.core.tenant import TenantContext, permissions_for_role
     from src.backend_api.app.services.agent_factory import (
@@ -564,6 +568,10 @@ async def handle_teams_turn(
                         final_text = str(rc) or accumulated
                 try:
                     delivery_text = final_text or accumulated
+                    delivery_text = await apply_filters_to_text(
+                        delivery_text,
+                        FilterContext(org_id=org_id, interface="teams"),
+                    )
                     # Render any ```mermaid blocks → inline PNG attachments.
                     try:
                         delivery_text, mermaid_attachments, _ = (
@@ -646,6 +654,10 @@ async def handle_teams_turn(
 
                 max_len = settings.teams_max_message_length or _DEFAULT_MAX_LEN
                 if not _already_delivered:
+                    response_text = await apply_filters_to_text(
+                        response_text,
+                        FilterContext(org_id=org_id, interface="teams"),
+                    )
                     delivery_text = response_text
                     mermaid_attachments: list = []
                     try:

@@ -47,6 +47,11 @@ from src.backend_api.app.services.agent_factory import AGENT_REGISTRY, DEFAULT_A
 import logging
 
 from src.shared.database import get_db
+from src.shared.services.response_filter import (
+    FilterContext,
+    StreamFilter,
+    apply_filters_to_text,
+)
 from src.shared.models.approval_delegation import GSageApprovalDelegation
 from src.shared.models.background_task import GSageBackgroundTask, BackgroundTaskStatus
 from src.shared.models.organization import GSageOrganization
@@ -940,7 +945,10 @@ async def send_message(
         )
 
     # ── Normal completed run ──────────────────────────────────────────────
-    content = _extract_text(run_output.content)
+    content = await apply_filters_to_text(
+        _extract_text(run_output.content),
+        FilterContext(org_id=ctx.org_id, interface=ctx.interface, db=db),
+    )
     metrics = getattr(run_output, "metrics", None)
 
     return SendMessageResponse(
@@ -1045,7 +1053,10 @@ async def continue_run(
             pending_approvals=pending_approval_ids or None,
         )
 
-    content = _extract_text(run_output.content)
+    content = await apply_filters_to_text(
+        _extract_text(run_output.content),
+        FilterContext(org_id=ctx.org_id, interface=ctx.interface, db=db),
+    )
     metrics = getattr(run_output, "metrics", None)
 
     return SendMessageResponse(
@@ -1106,6 +1117,9 @@ async def _sse_stream(
     paused_run_id: Optional[str] = None
     content_started = False
     retries_left = _LLM_RETRY_ATTEMPTS
+    stream_filter = StreamFilter(
+        FilterContext(org_id=ctx.org_id, interface=ctx.interface, db=db)
+    )
 
     try:
         while True:
@@ -1117,14 +1131,18 @@ async def _sse_stream(
                         delta = _extract_text(getattr(chunk, "content", None))
                         if delta:
                             content_started = True
-                            yield _fmt_sse("content_delta", {"delta": delta})
+                            emit = await stream_filter.feed(delta)
+                            if emit:
+                                yield _fmt_sse("content_delta", {"delta": emit})
 
                     elif event_type == RunEvent.run_paused:
                         # Emit any remaining content from the paused chunk
                         paused_content = _extract_text(getattr(chunk, "content", None))
                         if paused_content:
                             content_started = True
-                            yield _fmt_sse("content_delta", {"delta": paused_content})
+                            emit = await stream_filter.feed(paused_content)
+                            if emit:
+                                yield _fmt_sse("content_delta", {"delta": emit})
 
                         paused_run_id = getattr(chunk, "run_id", None)
                         for req in getattr(chunk, "requirements", None) or []:
@@ -1237,6 +1255,12 @@ async def _sse_stream(
         if pending_approval_ids:
             end_metadata["pending_approvals"] = pending_approval_ids
             end_metadata["run_id"] = paused_run_id
+
+        # Flush any text held back by the response filter (e.g. trailing
+        # text that could have been an opening fence).
+        tail = await stream_filter.flush()
+        if tail:
+            yield _fmt_sse("content_delta", {"delta": tail})
 
         # Detect active (QUEUED/RUNNING) background tasks so the frontend
         # can start polling for new messages.

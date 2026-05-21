@@ -80,10 +80,13 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `reason` | `string` | ✓ | Human-readable justification recorded in the audit log. Required by the approval flow. |
   | `contact_id` | `—` | — | Target id for *_one actions. Modern E-goi lists use a 10-char hex hash; legacy lists may still use an integer id. |
   | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
-  | `tag_id` | `integer` | — | Tag id for attach_tag/detach_tag. |
+  | `tag` | `—` | — | Tag for attach_tag/detach_tag. Accepts the integer tag_id OR the tag name (case-insensitive). Names are resolved via GET /tags; an unknown name is rejected with a fuzzy suggestion. |
+  | `tag_id` | `integer` | — | DEPRECATED — use 'tag' (which also accepts names). Still honoured as a fallback for attach_tag/detach_tag. |
   | `contacts` | `array` | — | Inline contact objects for action='import_json'. Each object should follow the E-goi shape: {'base': {...}, 'extra': {...}}. |
-  | `file_id` | `string` | — | GSageFile id of the CSV for action='import_csv'. |
-  | `email_column` | `string` | — | CSV column that holds the email (action='import_csv'). |
+  | `file_id` | `string` | — | GSageFile id of the CSV. Used by action='import_csv' and by attach_tag/detach_tag bulk mode. |
+  | `email_column` | `string` | — | CSV column that holds the email. Used by action='import_csv' and by attach_tag/detach_tag bulk mode (mutually exclusive with contact_id_column). |
+  | `contact_id_column` | `string` | — | CSV column with contact ids (int OR 10-char hex hash). Used by attach_tag/detach_tag bulk mode (mutually exclusive with email_column). |
+  | `batch_size` | `integer` | — | Contacts per attach_tag/detach_tag API call when running in bulk-CSV mode. |
   | `field_mapping` | `object` | — | Map of CSV column -> E-goi field. Recognised base fields: email, first_name, last_name, cellphone, telephone, lang, birth_date, etc. Numeric strings are treated as extra-field ids. |
   | `mode` | `string` | — | Bulk-import merge strategy. |
   | `compare_field` | `string` | — | Field used to deduplicate bulk-import rows. |
@@ -114,10 +117,13 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `reason` | `string` | ✓ | Human-readable justification recorded in the audit log. Required by the approval flow. |
   | `contact_id` | `—` | — | Target id for *_one actions. Modern E-goi lists use a 10-char hex hash; legacy lists may still use an integer id. |
   | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
-  | `tag_id` | `integer` | — | Tag id for attach_tag/detach_tag. |
+  | `tag` | `—` | — | Tag for attach_tag/detach_tag. Accepts the integer tag_id OR the tag name (case-insensitive). Names are resolved via GET /tags; an unknown name is rejected with a fuzzy suggestion. |
+  | `tag_id` | `integer` | — | DEPRECATED — use 'tag' (which also accepts names). Still honoured as a fallback for attach_tag/detach_tag. |
   | `contacts` | `array` | — | Inline contact objects for action='import_json'. Each object should follow the E-goi shape: {'base': {...}, 'extra': {...}}. |
-  | `file_id` | `string` | — | GSageFile id of the CSV for action='import_csv'. |
-  | `email_column` | `string` | — | CSV column that holds the email (action='import_csv'). |
+  | `file_id` | `string` | — | GSageFile id of the CSV. Used by action='import_csv' and by attach_tag/detach_tag bulk mode. |
+  | `email_column` | `string` | — | CSV column that holds the email. Used by action='import_csv' and by attach_tag/detach_tag bulk mode (mutually exclusive with contact_id_column). |
+  | `contact_id_column` | `string` | — | CSV column with contact ids (int OR 10-char hex hash). Used by attach_tag/detach_tag bulk mode (mutually exclusive with email_column). |
+  | `batch_size` | `integer` | — | Contacts per attach_tag/detach_tag API call when running in bulk-CSV mode. |
   | `field_mapping` | `object` | — | Map of CSV column -> E-goi field. Recognised base fields: email, first_name, last_name, cellphone, telephone, lang, birth_date, etc. Numeric strings are treated as extra-field ids. |
   | `mode` | `string` | — | Bulk-import merge strategy. |
   | `compare_field` | `string` | — | Field used to deduplicate bulk-import rows. |
@@ -133,14 +139,24 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
   | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
-  | `tag_id` | `integer` | — | Tag id for attach_tag/detach_tag. |
+  | `tag` | `—` | — | Tag for attach_tag/detach_tag. Accepts the integer tag_id OR the tag name (case-insensitive). Names are resolved via GET /tags; an unknown name is rejected with a fuzzy suggestion. |
+  | `tag_id` | `integer` | — | DEPRECATED — use 'tag' (which also accepts names). Still honoured as a fallback for attach_tag/detach_tag. |
+  | `file_id` | `string` | — | GSageFile id of the CSV. Used by action='import_csv' and by attach_tag/detach_tag bulk mode. |
+  | `email_column` | `string` | — | CSV column that holds the email. Used by action='import_csv' and by attach_tag/detach_tag bulk mode (mutually exclusive with contact_id_column). |
+  | `contact_id_column` | `string` | — | CSV column with contact ids (int OR 10-char hex hash). Used by attach_tag/detach_tag bulk mode (mutually exclusive with email_column). |
+  | `batch_size` | `integer` | — | Contacts per attach_tag/detach_tag API call when running in bulk-CSV mode. |
 
 - **`detach_tag`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
   | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
-  | `tag_id` | `integer` | — | Tag id for attach_tag/detach_tag. |
+  | `tag` | `—` | — | Tag for attach_tag/detach_tag. Accepts the integer tag_id OR the tag name (case-insensitive). Names are resolved via GET /tags; an unknown name is rejected with a fuzzy suggestion. |
+  | `tag_id` | `integer` | — | DEPRECATED — use 'tag' (which also accepts names). Still honoured as a fallback for attach_tag/detach_tag. |
+  | `file_id` | `string` | — | GSageFile id of the CSV. Used by action='import_csv' and by attach_tag/detach_tag bulk mode. |
+  | `email_column` | `string` | — | CSV column that holds the email. Used by action='import_csv' and by attach_tag/detach_tag bulk mode (mutually exclusive with contact_id_column). |
+  | `contact_id_column` | `string` | — | CSV column with contact ids (int OR 10-char hex hash). Used by attach_tag/detach_tag bulk mode (mutually exclusive with email_column). |
+  | `batch_size` | `integer` | — | Contacts per attach_tag/detach_tag API call when running in bulk-CSV mode. |
 
 - **`import_json`** — _(no description)_
 
@@ -152,8 +168,8 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `file_id` | `string` | — | GSageFile id of the CSV for action='import_csv'. |
-  | `email_column` | `string` | — | CSV column that holds the email (action='import_csv'). |
+  | `file_id` | `string` | — | GSageFile id of the CSV. Used by action='import_csv' and by attach_tag/detach_tag bulk mode. |
+  | `email_column` | `string` | — | CSV column that holds the email. Used by action='import_csv' and by attach_tag/detach_tag bulk mode (mutually exclusive with contact_id_column). |
 
 
 ### `egoi_contact_quick_action`

@@ -496,6 +496,16 @@ async def _process_async(
             if not response_text.strip():
                 raise ValueError("Agent returned an empty response")
 
+            # -- 14b. Apply outbound response filters -------------------------
+            from src.shared.services.response_filter import (
+                FilterContext,
+                apply_filters_to_text,
+            )
+            response_text = await apply_filters_to_text(
+                response_text,
+                FilterContext(org_id=org_id, interface="email", db=session),
+            )
+
             # -- 15. Send SMTP reply ------------------------------------------
             outbound_msg_id = await send_reply(
                 account=account,

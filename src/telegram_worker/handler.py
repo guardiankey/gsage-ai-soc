@@ -30,6 +30,10 @@ from src.telegram_worker.formatting import (
     split_text as _split_text,
     DEFAULT_MAX_LEN as _DEFAULT_MAX_LEN,
 )
+from src.shared.services.response_filter import (
+    FilterContext,
+    apply_filters_to_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -390,6 +394,10 @@ async def handle_message(update: Any, context: Any) -> None:
                         )
 
                     max_len = settings.telegram_max_message_length or _DEFAULT_MAX_LEN
+                    response_text = await apply_filters_to_text(
+                        response_text,
+                        FilterContext(org_id=org_id, interface="telegram"),
+                    )
                     response_text = _markdown_to_telegram_html(response_text)
                     chunks = _split_text(response_text, max_len)
                     for chunk in chunks:
@@ -423,6 +431,11 @@ async def handle_message(update: Any, context: Any) -> None:
 
                 # ── 12. Reply (split into chunks) ──────────────────────────
                 max_len = settings.telegram_max_message_length or _DEFAULT_MAX_LEN
+
+                response_text = await apply_filters_to_text(
+                    response_text,
+                    FilterContext(org_id=org_id, interface="telegram"),
+                )
                 response_text = _markdown_to_telegram_html(response_text)
                 chunks = _split_text(response_text, max_len)
                 for chunk in chunks:
