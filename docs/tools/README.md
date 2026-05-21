@@ -118,7 +118,7 @@ framework (audience: developers).
 
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
-| `egoi` | 10 | `egoi:delete`, `egoi:read`, `egoi:write` | ✓ | ✓ | ✓ | [marketing/egoi.md](marketing/egoi.md) |
+| `egoi` | 11 | `egoi:delete`, `egoi:read`, `egoi:write` | ✓ | ✓ | ✓ | [marketing/egoi.md](marketing/egoi.md) |
 
 ## monitoring
 

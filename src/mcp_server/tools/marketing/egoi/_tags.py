@@ -5,32 +5,36 @@ The E-goi API references tags by integer ``tag_id`` everywhere — both in
 bodies. Humans (and LLM agents) think in tag *names*, so this module
 provides a small bidirectional cache:
 
-* ``get_tag_index(client)`` — paginates ``client.get_all_tags()`` once
-  and caches the result for ``_TTL_SECONDS`` per E-goi account.
+* ``get_tag_index(client, *, org_id)`` — paginates ``client.get_all_tags()``
+  once and caches the result for :data:`_TTL_SECONDS` per organisation via
+  the shared :func:`~src.shared.cache.decorator.cached` decorator
+  (DB-backed, scope ``org``). The session is pulled from
+  :data:`~src.mcp_server.tools.base._tool_session_ctx`; when no session is
+  available (e.g. unit tests), the loader runs without persisting a cache
+  entry.
 * ``resolve_tag_value(value, *, index)`` — accepts ``int`` (validated
   against the index) or ``str`` (case-insensitive name lookup) and
   returns the canonical ``int`` ``tag_id``. Raises :class:`ValueError`
   with a fuzzy hint (`difflib.get_close_matches`) when the name is
   unknown.
-* ``resolve_tags(values, *, client)`` — convenience wrapper that fetches
-  the index once and surfaces *all* invalid inputs in a single error.
-* ``invalidate(client)`` — drops the cache entry; intended hook for
-  future ``create_tag``/``update_tag`` actions.
-
-The cache is process-local. Thundering-herd is prevented with one
-:class:`asyncio.Lock` per cache key (api_key hash). Memory footprint
-is negligible (a few hundred small strings per account).
+* ``resolve_tags(values, *, client, org_id)`` — convenience wrapper that
+  fetches the index once and surfaces *all* invalid inputs in a single
+  error.
 """
 
 from __future__ import annotations
 
-import asyncio
 import difflib
 import hashlib
 import logging
-import time
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.mcp_server.tools.base import _tool_session_ctx
+from src.shared.cache.decorator import cached
 
 if TYPE_CHECKING:
     from src.mcp_server.tools.marketing.egoi._client import EgoiClient
@@ -39,9 +43,9 @@ log = logging.getLogger(__name__)
 
 
 # Refresh cached entries after this many seconds. Tags rarely change
-# during a single tool run; a 5-minute TTL keeps the system responsive
+# during a single tool run; a 10-minute TTL keeps the system responsive
 # to ad-hoc edits in the E-goi UI without hammering ``/tags``.
-_TTL_SECONDS = 300
+_TTL_SECONDS = 600
 
 # Page size used when paginating ``get_all_tags`` (the endpoint caps at
 # the standard E-goi ``limit`` ceiling of 1000).
@@ -50,6 +54,10 @@ _TAG_PAGE_SIZE = 1000
 # Number of suggestions surfaced when a tag name is not found.
 _FUZZY_SUGGESTIONS = 3
 
+# Logical-key prefix in ``gsage_tool_cache`` rows. Bumping the version
+# suffix forces a refresh across deployments.
+_CACHE_KEY_PREFIX = "egoi:tags:v1"
+
 
 @dataclass
 class TagIndex:
@@ -57,37 +65,23 @@ class TagIndex:
 
     by_id: dict[int, str] = field(default_factory=dict)
     by_name_lc: dict[str, int] = field(default_factory=dict)
-    expires_at: float = 0.0
-
-    def is_fresh(self, *, now: Optional[float] = None) -> bool:
-        return (now or time.monotonic()) < self.expires_at
 
     def names(self) -> list[str]:
         """Return all known tag names (original case) for fuzzy hints."""
         return list(self.by_id.values())
 
 
-# Module-level cache keyed by ``sha256(api_key)[:16]`` so we don't keep
-# the raw key in memory beyond the EgoiClient instance.
-_CACHE: dict[str, TagIndex] = {}
-_LOCKS: dict[str, asyncio.Lock] = {}
+def _api_key_hash(client: "EgoiClient") -> str:
+    """Stable, non-secret discriminator for the client's API key.
 
-
-def _cache_key(client: "EgoiClient") -> str:
+    Two distinct E-goi accounts can be configured under the same gSage
+    organisation (multi-config tools). Including a hash of the API key
+    in the logical cache key keeps their tag indices isolated.
+    """
     api_key = getattr(client, "_api_key", "") or ""
     if not api_key:
-        # Fall back to the object id so anonymous/test clients still get
-        # an isolated cache entry rather than colliding with each other.
-        return f"anon:{id(client):x}"
+        return "anon"
     return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
-
-
-def _get_lock(key: str) -> asyncio.Lock:
-    lock = _LOCKS.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _LOCKS[key] = lock
-    return lock
 
 
 def _extract_tags_from_payload(payload: Any) -> list[dict]:
@@ -109,10 +103,14 @@ def _total_items(payload: Any) -> Optional[int]:
     return None
 
 
-async def _load_tag_index(client: "EgoiClient") -> TagIndex:
-    """Paginate ``/tags`` and build a fresh :class:`TagIndex`."""
-    by_id: dict[int, str] = {}
-    by_name_lc: dict[str, int] = {}
+async def _load_tag_index_raw(client: "EgoiClient") -> dict[str, Any]:
+    """Paginate ``/tags`` and return a JSON-serialisable index payload.
+
+    Returns ``{"by_id": {str(tag_id): name, ...}}``. The string keys keep
+    the payload compatible with :func:`json.dumps` (the cache layer
+    serialises results); :func:`_to_tag_index` rehydrates ints.
+    """
+    by_id: dict[str, str] = {}
     offset = 0
     total: Optional[int] = None
     while True:
@@ -134,49 +132,69 @@ async def _load_tag_index(client: "EgoiClient") -> TagIndex:
             name = name_raw.strip()
             if not name:
                 continue
-            by_id[tag_id] = name
-            by_name_lc[name.lower()] = tag_id
+            by_id[str(tag_id)] = name
         offset += len(items)
         if len(items) < _TAG_PAGE_SIZE:
             break
         if total is not None and offset >= total:
             break
 
-    return TagIndex(
-        by_id=by_id,
-        by_name_lc=by_name_lc,
-        expires_at=time.monotonic() + _TTL_SECONDS,
-    )
+    return {"by_id": by_id}
 
 
-async def get_tag_index(client: "EgoiClient") -> TagIndex:
-    """Return a fresh-or-cached :class:`TagIndex` for *client*'s account."""
-    key = _cache_key(client)
-    cached = _CACHE.get(key)
-    if cached is not None and cached.is_fresh():
-        return cached
-    lock = _get_lock(key)
-    async with lock:
-        # Double-check after acquiring the lock — another coroutine may
-        # have populated the cache while we waited.
-        cached = _CACHE.get(key)
-        if cached is not None and cached.is_fresh():
-            return cached
-        index = await _load_tag_index(client)
-        _CACHE[key] = index
-        log.debug(
-            "egoi tags: refreshed cache (%d tags, key=%s)", len(index.by_id), key
-        )
-        return index
+def _to_tag_index(payload: dict[str, Any]) -> TagIndex:
+    """Rehydrate a cached payload (string keys) into a :class:`TagIndex`."""
+    raw_by_id = payload.get("by_id") or {}
+    by_id: dict[int, str] = {}
+    by_name_lc: dict[str, int] = {}
+    for k, v in raw_by_id.items():
+        try:
+            tid = int(k)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(v, str):
+            continue
+        by_id[tid] = v
+        by_name_lc[v.lower()] = tid
+    return TagIndex(by_id=by_id, by_name_lc=by_name_lc)
 
 
-def invalidate(client: "EgoiClient") -> None:
-    """Drop the cached :class:`TagIndex` for *client*'s account.
+@cached(
+    ttl=_TTL_SECONDS,
+    scope="org",
+    key_fn=lambda *, client, **_: f"{_CACHE_KEY_PREFIX}:{_api_key_hash(client)}",
+    logical_name="egoi_tags_index",
+)
+async def _fetch_tag_index_cached(
+    *,
+    client: "EgoiClient",
+    org_id: uuid.UUID,  # noqa: ARG001 — consumed by @cached (scope="org")
+    session: AsyncSession,  # noqa: ARG001 — consumed by @cached
+) -> dict[str, Any]:
+    """Cached wrapper around :func:`_load_tag_index_raw`."""
+    return await _load_tag_index_raw(client)
 
-    Intended hook for future tag-mutation actions (create/update/delete).
-    Safe to call when nothing is cached.
+
+async def get_tag_index(
+    client: "EgoiClient",
+    *,
+    org_id: Optional[uuid.UUID] = None,
+) -> TagIndex:
+    """Return a fresh-or-cached :class:`TagIndex` for *client*'s account.
+
+    Pass *org_id* to enable the shared DB-backed cache (scope ``org``).
+    When *org_id* is ``None`` or the calling code has no DB session
+    available, the index is fetched without persistence — useful for
+    unit tests and one-off scripts.
     """
-    _CACHE.pop(_cache_key(client), None)
+    session = _tool_session_ctx.get()
+    if org_id is not None and session is not None:
+        payload = await _fetch_tag_index_cached(
+            client=client, org_id=org_id, session=session
+        )
+    else:
+        payload = await _load_tag_index_raw(client)
+    return _to_tag_index(payload)
 
 
 def _format_unknown_tag_error(name: str, *, index: TagIndex) -> str:
@@ -227,7 +245,12 @@ def resolve_tag_value(value: Any, *, index: TagIndex) -> int:
     )
 
 
-async def resolve_tags(values: Any, *, client: "EgoiClient") -> list[int]:
+async def resolve_tags(
+    values: Any,
+    *,
+    client: "EgoiClient",
+    org_id: Optional[uuid.UUID] = None,
+) -> list[int]:
     """Resolve a list of tag references to canonical ids in one shot.
 
     All invalid entries are collected and reported in a single
@@ -238,7 +261,7 @@ async def resolve_tags(values: Any, *, client: "EgoiClient") -> list[int]:
         raise ValueError("'tags' must be a list of int|string")
     if not values:
         return []
-    index = await get_tag_index(client)
+    index = await get_tag_index(client, org_id=org_id)
     resolved: list[int] = []
     errors: list[str] = []
     for raw in values:

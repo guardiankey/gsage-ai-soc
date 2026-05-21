@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from typing import Any, ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
@@ -324,7 +325,9 @@ class EgoiContactManageTool(BaseTool):
             return {"results": results}
 
         if action in ("attach_tag", "detach_tag"):
-            tag_id = await self._resolve_tag_param(client, params, action)
+            tag_id = await self._resolve_tag_param(
+                client, params, action, org_id=agent_context.org_id
+            )
             file_id = (params.get("file_id") or "").strip()
             if file_id:
                 return await self._run_bulk_tag_csv(
@@ -355,6 +358,7 @@ class EgoiContactManageTool(BaseTool):
                 contacts=[c for c in contacts if isinstance(c, dict)],
                 mode=mode,
                 compare_field=compare_field,
+                org_id=agent_context.org_id,
             )
 
         if action == "import_csv":
@@ -381,6 +385,7 @@ class EgoiContactManageTool(BaseTool):
                 contacts=contacts,
                 mode=mode,
                 compare_field=compare_field,
+                org_id=agent_context.org_id,
             )
             result.update(
                 {"csv_file_id": file_id, "csv_rows_read": int(df.height)}
@@ -398,7 +403,7 @@ class EgoiContactManageTool(BaseTool):
 
     @staticmethod
     async def _resolve_tag_param(
-        client: EgoiClient, params: dict, action: str
+        client: EgoiClient, params: dict, action: str, *, org_id: uuid.UUID
     ) -> int:
         """Resolve the ``tag`` (preferred) or ``tag_id`` (legacy) param.
 
@@ -411,7 +416,7 @@ class EgoiContactManageTool(BaseTool):
             raw = params.get("tag_id")
         if raw is None:
             raise ValueError(f"'tag' (id or name) is required for {action}")
-        index = await _tags.get_tag_index(client)
+        index = await _tags.get_tag_index(client, org_id=org_id)
         return _tags.resolve_tag_value(raw, index=index)
 
     @staticmethod
@@ -580,6 +585,7 @@ class EgoiContactManageTool(BaseTool):
         contacts: list[dict],
         mode: str,
         compare_field: str,
+        org_id: uuid.UUID,
     ) -> dict:
         if not contacts:
             return {"contacts_total": 0, "chunks": [], "query_ids": []}
@@ -593,7 +599,7 @@ class EgoiContactManageTool(BaseTool):
             for c in contacts
         )
         if needs_tag_resolution:
-            index = await _tags.get_tag_index(client)
+            index = await _tags.get_tag_index(client, org_id=org_id)
             errors: list[str] = []
             for idx, contact in enumerate(contacts):
                 raw_tags = contact.get("tags")

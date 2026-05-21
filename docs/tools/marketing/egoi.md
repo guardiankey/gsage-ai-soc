@@ -21,6 +21,7 @@ gSage AI — E-goi campaign-group search tool.
 | `egoi_dashboard` | Aggregated E-goi dashboard with multiple views (overview, top_lists, recent_campaigns, delivery_funnel, engagement_trend). | `egoi:read` | — | — |
 | `egoi_list_manage` | Manage E-goi mailing lists. Currently supports action='create'. | `egoi:write` | — | — |
 | `egoi_list_search` | Search E-goi mailing lists. Returns one row per list with contact stats. Use this before any contact-level operation to discover the target ``list_id``. | `egoi:read` | — | — |
+| `egoi_taxonomy_search` | List E-goi tags or segments. Use this before any tag/segment-filtered contact operation to discover ids and names. Set kind='tags' for account-wide tags or kind='segments' (with list_id) for per-list segments. | `egoi:read` | — | — |
 
 ## Configuration
 
@@ -244,6 +245,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 | `egoi_dashboard` | `egoi:read` |
 | `egoi_list_manage` | `egoi:write` |
 | `egoi_list_search` | `egoi:read` |
+| `egoi_taxonomy_search` | `egoi:read` |
 
 ## Operational metadata
 
@@ -259,6 +261,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 | `egoi_dashboard` | `1.0.0` | 20 | 180 | ✓ | — | ✓ |
 | `egoi_list_manage` | `1.0.0` | 10 | 60 | ✓ | — | ✓ |
 | `egoi_list_search` | `1.0.0` | 30 | 120 | ✓ | >120s | ✓ |
+| `egoi_taxonomy_search` | `1.0.0` | 30 | 120 | ✓ | >120s | ✓ |
 
 ## Source files
 
@@ -272,3 +275,4 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 - [src/mcp_server/tools/marketing/egoi/egoi_dashboard.py](src/mcp_server/tools/marketing/egoi/egoi_dashboard.py)
 - [src/mcp_server/tools/marketing/egoi/egoi_list_manage.py](src/mcp_server/tools/marketing/egoi/egoi_list_manage.py)
 - [src/mcp_server/tools/marketing/egoi/egoi_list_search.py](src/mcp_server/tools/marketing/egoi/egoi_list_search.py)
+- [src/mcp_server/tools/marketing/egoi/egoi_taxonomy_search.py](src/mcp_server/tools/marketing/egoi/egoi_taxonomy_search.py)
