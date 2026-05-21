@@ -11,6 +11,7 @@ from typing import Any, ClassVar, Optional
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.marketing.egoi import _query as Q
 from src.mcp_server.tools.marketing.egoi import _run
+from src.mcp_server.tools.marketing.egoi import _tags
 from src.mcp_server.tools.marketing.egoi._client import EgoiClient
 from src.shared.security.context import AgentContext
 
@@ -118,6 +119,17 @@ class EgoiContactSearchTool(BaseTool):
                     "only supported export format for tabular results."
                 ),
             },
+            "resolve_tags": {
+                "type": "boolean",
+                "default": True,
+                "description": (
+                    "When true, each row's 'tags' field is enriched into "
+                    "[{tag_id, name}, ...] by resolving tag ids against "
+                    "GET /tags. Adds one cached lookup per execution. "
+                    "Set false for very large enumerations where the "
+                    "raw id list is acceptable."
+                ),
+            },
         },
         "additionalProperties": False,
     }
@@ -143,6 +155,7 @@ class EgoiContactSearchTool(BaseTool):
     ) -> ToolResult:
         scope = str(params.get("scope") or "").strip()
         max_rows = Q.clamp_max_rows(params.get("max_rows"))
+        resolve_tags_flag = bool(params.get("resolve_tags", True))
 
         if scope == "global":
             contact = (params.get("contact") or "").strip()
@@ -154,12 +167,20 @@ class EgoiContactSearchTool(BaseTool):
 
             async def _fetch_global(client: EgoiClient) -> tuple[list[dict], Optional[int]]:
                 payload = await client.search_contacts(contact=contact)
-                rows = [Q.normalize_contact(x) for x in Q.unwrap_items(payload)]
+                tag_index = (
+                    await _tags.get_tag_index(client) if resolve_tags_flag else None
+                )
+                rows = [
+                    Q.normalize_contact(x, tag_index=tag_index)
+                    for x in Q.unwrap_items(payload)
+                ]
                 if not rows and isinstance(payload, dict):
                     # search_contacts may return a single object
-                    rows = [Q.normalize_contact(payload)] if payload.get(
-                        "contact_id"
-                    ) else []
+                    rows = (
+                        [Q.normalize_contact(payload, tag_index=tag_index)]
+                        if payload.get("contact_id")
+                        else []
+                    )
                 return rows[:max_rows], Q.total_items(payload)
 
             return await _run.run_search(
@@ -190,6 +211,13 @@ class EgoiContactSearchTool(BaseTool):
             status = (params.get("status") or "").strip() or None
 
             async def _fetch_list(client: EgoiClient) -> tuple[list[dict], Optional[int]]:
+                tag_index = (
+                    await _tags.get_tag_index(client) if resolve_tags_flag else None
+                )
+
+                def _normalise(item: Any) -> dict:
+                    return Q.normalize_contact(item, tag_index=tag_index)
+
                 if segment_id is not None:
                     segment_id_value = segment_id
 
@@ -214,7 +242,7 @@ class EgoiContactSearchTool(BaseTool):
                 rows, server_total = await Q.iter_all_pages(
                     page,
                     max_rows=max_rows,
-                    normaliser=Q.normalize_contact,
+                    normaliser=_normalise,
                 )
                 # Tag the list_id on every row for downstream clarity.
                 for r in rows:
@@ -232,6 +260,15 @@ class EgoiContactSearchTool(BaseTool):
 
             if use_streaming:
                 async def _stream_list(client: EgoiClient):
+                    tag_index = (
+                        await _tags.get_tag_index(client)
+                        if resolve_tags_flag
+                        else None
+                    )
+
+                    def _normalise(item: Any) -> dict:
+                        return Q.normalize_contact(item, tag_index=tag_index)
+
                     if segment_id is not None:
                         segment_id_value = segment_id
 
@@ -256,7 +293,7 @@ class EgoiContactSearchTool(BaseTool):
                     async for row, total in Q.iter_all_pages_stream(
                         page,
                         max_rows=max_rows,
-                        normaliser=Q.normalize_contact,
+                        normaliser=_normalise,
                     ):
                         row.setdefault("list_id", list_id)
                         yield row, total

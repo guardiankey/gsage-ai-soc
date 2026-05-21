@@ -291,19 +291,33 @@ def _compact_extra(extra: Any) -> Any:
     return extra
 
 
-def normalize_contact(item: Any) -> dict:
+def normalize_contact(item: Any, *, tag_index: Any = None) -> dict:
     """Flatten an E-goi contact into a tabular dict.
 
     The API nests base fields under ``base`` and extra fields under
     ``extra``. We expose the most relevant base fields top-level and
     keep ``extra`` as a sub-object for ad-hoc inspection. Empty
     ``extra`` entries are stripped to keep payloads compact.
+
+    When *tag_index* is provided (a :class:`._tags.TagIndex`), the raw
+    ``tags`` field is enriched into ``[{"tag_id": int, "name": str}]``.
+    Without an index, the field is forwarded as-is for backwards
+    compatibility with code paths that don't need name resolution.
     """
     if not isinstance(item, dict):
         return {}
     base = item.get("base") or {}
     if not isinstance(base, dict):
         base = {}
+    raw_tags = item.get("tags") or base.get("tags")
+    if tag_index is not None:
+        # Local import to keep _query.py free of circular dependencies
+        # (._tags imports the EgoiClient type).
+        from src.mcp_server.tools.marketing.egoi import _tags as _tags_mod  # noqa: PLC0415
+
+        tags = _tags_mod.annotate_tags(raw_tags, index=tag_index)
+    else:
+        tags = raw_tags
     return {
         "contact_id": item.get("contact_id") or base.get("contact_id"),
         "list_id": item.get("list_id"),
@@ -317,7 +331,7 @@ def normalize_contact(item: Any) -> dict:
         "language": base.get("lang"),
         "created": item.get("created") or base.get("created"),
         "updated": item.get("updated") or base.get("updated"),
-        "tags": item.get("tags") or base.get("tags"),
+        "tags": tags,
         "extra": _compact_extra(item.get("extra")),
     }
 

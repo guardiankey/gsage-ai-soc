@@ -19,13 +19,14 @@ Permission: ``egoi:write``, ``egoi:delete``
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.core.csv.csv_loader import CSVAccessError, load_csv
-from src.mcp_server.tools.marketing.egoi import _csv_import, _query as Q
+from src.mcp_server.tools.marketing.egoi import _csv_import, _query as Q, _tags
 from src.mcp_server.tools.marketing.egoi._client import EgoiClient, EgoiError
 from src.shared.security.context import AgentContext
 
@@ -82,9 +83,11 @@ class EgoiContactManageTool(BaseTool):
         "list_id": "list_id",
         "contact_id": "contact_id",
         "contact_ids": "contact_ids",
+        "tag": "tag",
         "tag_id": "tag_id",
         "file_id": "file_id",
         "email_column": "email_column",
+        "contact_id_column": "contact_id_column",
         "field_mapping": "field_mapping",
         "reason": "reason",
     }
@@ -123,10 +126,25 @@ class EgoiContactManageTool(BaseTool):
                     "integer or 10-char hex hash."
                 ),
             },
+            "tag": {
+                "oneOf": [
+                    {"type": "integer", "minimum": 1},
+                    {"type": "string", "minLength": 1},
+                ],
+                "description": (
+                    "Tag for attach_tag/detach_tag. Accepts the integer "
+                    "tag_id OR the tag name (case-insensitive). Names "
+                    "are resolved via GET /tags; an unknown name is "
+                    "rejected with a fuzzy suggestion."
+                ),
+            },
             "tag_id": {
                 "type": "integer",
                 "minimum": 1,
-                "description": "Tag id for attach_tag/detach_tag.",
+                "description": (
+                    "DEPRECATED — use 'tag' (which also accepts names). "
+                    "Still honoured as a fallback for attach_tag/detach_tag."
+                ),
             },
             "contacts": {
                 "type": "array",
@@ -140,11 +158,36 @@ class EgoiContactManageTool(BaseTool):
             },
             "file_id": {
                 "type": "string",
-                "description": "GSageFile id of the CSV for action='import_csv'.",
+                "description": (
+                    "GSageFile id of the CSV. Used by action='import_csv' "
+                    "and by attach_tag/detach_tag bulk mode."
+                ),
             },
             "email_column": {
                 "type": "string",
-                "description": "CSV column that holds the email (action='import_csv').",
+                "description": (
+                    "CSV column that holds the email. Used by "
+                    "action='import_csv' and by attach_tag/detach_tag "
+                    "bulk mode (mutually exclusive with contact_id_column)."
+                ),
+            },
+            "contact_id_column": {
+                "type": "string",
+                "description": (
+                    "CSV column with contact ids (int OR 10-char hex hash). "
+                    "Used by attach_tag/detach_tag bulk mode (mutually "
+                    "exclusive with email_column)."
+                ),
+            },
+            "batch_size": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5000,
+                "default": 1000,
+                "description": (
+                    "Contacts per attach_tag/detach_tag API call when "
+                    "running in bulk-CSV mode."
+                ),
             },
             "field_mapping": {
                 "type": "object",
@@ -281,11 +324,19 @@ class EgoiContactManageTool(BaseTool):
             return {"results": results}
 
         if action in ("attach_tag", "detach_tag"):
+            tag_id = await self._resolve_tag_param(client, params, action)
+            file_id = (params.get("file_id") or "").strip()
+            if file_id:
+                return await self._run_bulk_tag_csv(
+                    client,
+                    agent_context,
+                    action=action,
+                    list_id=list_id,
+                    tag_id=tag_id,
+                    params=params,
+                )
             ids = self._require_ids(params)
-            tag_id = params.get("tag_id")
-            if not isinstance(tag_id, int) or tag_id <= 0:
-                raise ValueError(f"'tag_id' is required for {action}")
-            body = {"tag_id": int(tag_id), "contacts": ids}
+            body = {"tag_id": tag_id, "contacts": ids}
             if action == "attach_tag":
                 payload = await client.action_attach_tag(list_id=list_id, body=body)
             else:
@@ -346,6 +397,182 @@ class EgoiContactManageTool(BaseTool):
         return Q.normalize_contact_ids(ids)
 
     @staticmethod
+    async def _resolve_tag_param(
+        client: EgoiClient, params: dict, action: str
+    ) -> int:
+        """Resolve the ``tag`` (preferred) or ``tag_id`` (legacy) param.
+
+        Accepts an integer id or a tag name (case-insensitive). Names are
+        looked up against the cached :class:`._tags.TagIndex`; unknown
+        names raise :class:`ValueError` with a fuzzy hint.
+        """
+        raw = params.get("tag")
+        if raw is None:
+            raw = params.get("tag_id")
+        if raw is None:
+            raise ValueError(f"'tag' (id or name) is required for {action}")
+        index = await _tags.get_tag_index(client)
+        return _tags.resolve_tag_value(raw, index=index)
+
+    @staticmethod
+    async def _resolve_emails_to_ids(
+        client: EgoiClient, emails: list[str]
+    ) -> tuple[dict[str, Any], list[dict]]:
+        """Look up contact ids for a batch of emails (case-insensitive).
+
+        Uses ``GET /contacts-search`` per email with a small concurrency
+        cap to stay within E-goi's rate limits. Returns ``(resolved,
+        errors)`` where *resolved* is ``{email_lc: contact_id}`` and
+        *errors* lists emails that didn't match (or failed) so the
+        caller can surface them in the result payload.
+        """
+        if not emails:
+            return {}, []
+        sem = asyncio.Semaphore(8)
+        resolved: dict[str, Any] = {}
+        errors: list[dict] = []
+
+        async def _lookup(email: str) -> None:
+            async with sem:
+                try:
+                    payload = await client.search_contacts(contact=email)
+                except EgoiError as exc:
+                    errors.append(
+                        {"email": email, "reason": f"search failed: {exc}"}
+                    )
+                    return
+            cid: Any = None
+            if isinstance(payload, dict):
+                items = payload.get("items")
+                if isinstance(items, list) and items:
+                    first = items[0]
+                    if isinstance(first, dict):
+                        base = first.get("base") or {}
+                        cid = first.get("contact_id") or (
+                            base.get("contact_id") if isinstance(base, dict) else None
+                        )
+                if cid is None:
+                    base = payload.get("base") or {}
+                    cid = payload.get("contact_id") or (
+                        base.get("contact_id") if isinstance(base, dict) else None
+                    )
+            if cid is None:
+                errors.append({"email": email, "reason": "not found"})
+                return
+            try:
+                resolved[email] = Q.normalize_contact_id(cid)
+            except ValueError as exc:
+                errors.append({"email": email, "reason": str(exc)})
+
+        await asyncio.gather(*(_lookup(e) for e in emails))
+        return resolved, errors
+
+    async def _run_bulk_tag_csv(
+        self,
+        client: EgoiClient,
+        agent_context: AgentContext,
+        *,
+        action: str,
+        list_id: int,
+        tag_id: int,
+        params: dict,
+    ) -> dict:
+        """attach_tag/detach_tag bulk-mode using a CSV of contact refs."""
+        file_id = (params.get("file_id") or "").strip()
+        contact_id_column_raw = (params.get("contact_id_column") or "").strip()
+        email_column_raw = (params.get("email_column") or "").strip()
+        if bool(contact_id_column_raw) == bool(email_column_raw):
+            raise ValueError(
+                "attach_tag/detach_tag bulk mode requires exactly one of "
+                "'contact_id_column' or 'email_column'"
+            )
+        batch_size_raw = params.get("batch_size") or 1000
+        try:
+            batch_size = max(1, min(5000, int(batch_size_raw)))
+        except (TypeError, ValueError):
+            batch_size = 1000
+
+        df, _csv_meta = await load_csv(self, agent_context, file_id)
+        refs, parse_errors = _csv_import.parse_csv_to_contact_refs(
+            df,
+            contact_id_column=contact_id_column_raw or None,
+            email_column=email_column_raw or None,
+        )
+
+        # Partition refs into already-resolved ids and pending emails.
+        direct_ids: list[Any] = []
+        emails: list[str] = []
+        for ref in refs:
+            if "contact_id" in ref:
+                direct_ids.append(ref["contact_id"])
+            else:
+                emails.append(ref["email"])
+
+        resolved_emails, lookup_errors = await self._resolve_emails_to_ids(
+            client, emails
+        )
+        all_ids: list[Any] = list(direct_ids)
+        for email in emails:
+            cid = resolved_emails.get(email)
+            if cid is not None:
+                all_ids.append(cid)
+
+        # De-duplicate while preserving order.
+        seen: set[Any] = set()
+        unique_ids: list[Any] = []
+        for cid in all_ids:
+            key = cid if not isinstance(cid, str) else cid.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_ids.append(cid)
+
+        batches_meta: list[dict] = []
+        succeeded = 0
+        failed_batches: list[dict] = []
+        for i in range(0, len(unique_ids), batch_size):
+            chunk = unique_ids[i : i + batch_size]
+            body = {"tag_id": tag_id, "contacts": chunk}
+            try:
+                if action == "attach_tag":
+                    response = await client.action_attach_tag(
+                        list_id=list_id, body=body
+                    )
+                else:
+                    response = await client.action_detach_tag(
+                        list_id=list_id, body=body
+                    )
+                succeeded += len(chunk)
+                batches_meta.append(
+                    {"batch_index": len(batches_meta), "contacts": len(chunk),
+                     "ok": True, "response": response}
+                )
+            except EgoiError as exc:
+                failed_batches.append(
+                    {"batch_index": len(batches_meta), "contacts": len(chunk),
+                     "ok": False, "error": str(exc)}
+                )
+                batches_meta.append(failed_batches[-1])
+
+        errors_summary: list[dict] = []
+        for err in parse_errors:
+            errors_summary.append({"source": "csv_parse", **err})
+        for err in lookup_errors:
+            errors_summary.append({"source": "email_lookup", **err})
+        for err in failed_batches:
+            errors_summary.append({"source": "api_call", **err})
+
+        return {
+            "tag_id": tag_id,
+            "contacts_total": len(unique_ids),
+            "contacts_succeeded": succeeded,
+            "errors": errors_summary,
+            "csv_file_id": file_id,
+            "csv_rows_read": int(df.height),
+            "batches": batches_meta,
+        }
+
+    @staticmethod
     async def _run_bulk_import(
         client: EgoiClient,
         *,
@@ -356,6 +583,37 @@ class EgoiContactManageTool(BaseTool):
     ) -> dict:
         if not contacts:
             return {"contacts_total": 0, "chunks": [], "query_ids": []}
+        # Pre-resolve any string tags (names) into integer ids. Touching
+        # the index is a single cached call shared across all contacts.
+        needs_tag_resolution = any(
+            isinstance(c.get("tags"), list)
+            and any(
+                not isinstance(t, int) or isinstance(t, bool) for t in c["tags"]
+            )
+            for c in contacts
+        )
+        if needs_tag_resolution:
+            index = await _tags.get_tag_index(client)
+            errors: list[str] = []
+            for idx, contact in enumerate(contacts):
+                raw_tags = contact.get("tags")
+                if not isinstance(raw_tags, list) or not raw_tags:
+                    continue
+                resolved: list[int] = []
+                for value in raw_tags:
+                    try:
+                        resolved.append(_tags.resolve_tag_value(value, index=index))
+                    except ValueError as exc:
+                        errors.append(f"row {idx}: {exc}")
+                contact["tags"] = resolved
+            if errors:
+                head = errors[:5]
+                more = (
+                    f" (+{len(errors) - 5} more)" if len(errors) > 5 else ""
+                )
+                raise ValueError(
+                    "tag resolution failed: " + "; ".join(head) + more
+                )
         chunks_meta: list[dict] = []
         query_ids: list[str] = []
         for idx, payload in enumerate(

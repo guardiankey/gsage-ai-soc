@@ -75,14 +75,9 @@ class EgoiCampaignGroupSearchTool(BaseTool):
                 "type": "boolean",
                 "default": False,
                 "description": (
-                    "Persist all rows as a CSV file artifact. PREFER CSV "
-                    "over JSON for tabular results."
+                    "Persist all rows as a CSV file artifact. CSV is the "
+                    "only supported export format for tabular results."
                 ),
-            },
-            "export_json": {
-                "type": "boolean",
-                "default": False,
-                "description": "Persist all rows as JSON (only when explicitly asked).",
             },
         },
         "additionalProperties": False,
@@ -120,6 +115,5 @@ class EgoiCampaignGroupSearchTool(BaseTool):
             fetcher=_fetch,
             filename_prefix="egoi_campaign_group_search",
             export_csv=bool(params.get("export_csv", False)),
-            export_json=bool(params.get("export_json", False)),
             operation_label="egoi campaign_group_search",
         )
