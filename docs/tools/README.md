@@ -164,4 +164,4 @@ framework (audience: developers).
 
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
-| `openvas` | 10 | `openvas:read`, `openvas:write` | ✓ | ✓ | ✓ | [soc/vulnerability/openvas.md](soc/vulnerability/openvas.md) |
+| `openvas` | 10 | `openvas:read`, `openvas:write` | — | ✓ | ✓ | [soc/vulnerability/openvas.md](soc/vulnerability/openvas.md) |
