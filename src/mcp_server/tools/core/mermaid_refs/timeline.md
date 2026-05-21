@@ -42,7 +42,7 @@ timeline
 
 ## Pitfalls
 - **Do NOT use `:` in time period labels** — it is the delimiter and will break parsing
-  - Bad: `12:00 PM : Event` → Good: `1200h : Event`
+  - Bad: `12:00 PM : Event` → Good: `1200h : Event` or `12h00m : Event`
 - Events are free text; they render as bubbles on the timeline
 - Sections group entries visually with a colored band
 - No numeric or date validation — purely decorative chronology

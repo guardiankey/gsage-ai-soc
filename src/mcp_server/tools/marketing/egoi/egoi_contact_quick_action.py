@@ -91,18 +91,22 @@ class EgoiContactQuickActionTool(BaseTool):
             "action": {"type": "string", "enum": list(_QUICK_ACTIONS)},
             "list_id": {"type": "integer", "minimum": 1},
             "contact_id": {
-                "type": "integer",
-                "minimum": 1,
-                "description": "Target contact id for *_one / unsubscribe actions.",
+                **Q.CONTACT_ID_SCHEMA,
+                "description": (
+                    "Target contact id for *_one / unsubscribe actions. "
+                    "Modern E-goi lists use a 10-char hex hash; legacy "
+                    "lists may still use an integer id."
+                ),
             },
             "contact_ids": {
                 "type": "array",
-                "items": {"type": "integer", "minimum": 1},
+                "items": Q.CONTACT_ID_SCHEMA,
                 "minItems": 1,
                 "maxItems": Q.QUICK_ACTION_MAX_ITEMS,
                 "description": (
                     "Contact ids for activate/deactivate/attach_tag/"
-                    f"detach_tag (max {Q.QUICK_ACTION_MAX_ITEMS})."
+                    f"detach_tag (max {Q.QUICK_ACTION_MAX_ITEMS}). "
+                    "Each item is an integer or 10-char hex hash."
                 ),
             },
             "tag_id": {
@@ -185,25 +189,21 @@ class EgoiContactQuickActionTool(BaseTool):
             return {"contact": Q.normalize_contact(payload) if isinstance(payload, dict) else {}}
 
         if action == "update_one":
-            contact_id = params.get("contact_id")
-            if not isinstance(contact_id, int) or contact_id <= 0:
-                raise ValueError("'contact_id' is required for update_one")
+            contact_id = Q.normalize_contact_id(params.get("contact_id"))
             if not isinstance(contact, dict) or not contact:
                 raise ValueError("'contact' fields are required for update_one")
             payload = await client.patch_contact(
                 list_id=list_id,
-                contact_id=int(contact_id),
+                contact_id=contact_id,
                 body={"base": dict(contact)},
             )
             return {"contact": Q.normalize_contact(payload) if isinstance(payload, dict) else {}}
 
         if action == "unsubscribe":
-            contact_id = params.get("contact_id")
-            if not isinstance(contact_id, int) or contact_id <= 0:
-                raise ValueError("'contact_id' is required for unsubscribe")
+            contact_id = Q.normalize_contact_id(params.get("contact_id"))
             payload = await client.action_unsubscribe_contact(
                 list_id=list_id,
-                body={"contact_id": int(contact_id)},
+                body={"contact_id": contact_id},
             )
             return {"result": payload}
 
@@ -215,7 +215,7 @@ class EgoiContactQuickActionTool(BaseTool):
                 f"contact_ids length {len(ids)} exceeds quick-action cap "
                 f"({Q.QUICK_ACTION_MAX_ITEMS}). Use egoi_contact_manage."
             )
-        clean_ids = [int(x) for x in ids]
+        clean_ids = Q.normalize_contact_ids(ids)
 
         if action == "activate":
             payload = await client.action_activate_contacts(

@@ -36,6 +36,13 @@
 #                        mcp_server, frontend, curator, dev-full.
 #   --no-latest          Skip the extra `:latest` tag.
 #   --push               Push images to the registry after build.
+#   --no-buildx          Use legacy `docker build` (default uses buildx with
+#                        cache mounts, parallel stages and registry cache).
+#   --cache-registry <R> When using buildx, also publish a registry-backed
+#                        layer cache at <R>/gsage-buildcache:<short>. Useful
+#                        in CI to share heavy layers (texlive, chromium)
+#                        across machines. Without this flag the script falls
+#                        back to inline cache embedded in the published image.
 #   -h | --help          Show this help.
 #
 # Authentication:
@@ -55,6 +62,13 @@ TAG=""
 TARGETS_ARG=""
 PUSH=0
 NO_LATEST=0
+# Use buildx by default (gives cache mounts, registry cache, parallel stages).
+# Override with --no-buildx for environments where buildx is unavailable.
+USE_BUILDX=1
+# When set (and using buildx), publish/consume a registry cache image
+# `<registry>/gsage-buildcache:<short>` to share layers across machines/CI.
+# Empty = inline cache only (cache embedded in the image manifest, no extra image).
+CACHE_REGISTRY=""
 
 # All runtime targets published by default (dev-full is opt-in).
 DEFAULT_TARGETS=(backend_api worker_tools mcp_server frontend curator)
@@ -106,7 +120,7 @@ image_build_context() {
 }
 
 usage() {
-    sed -n '1,42p' "$0" | sed -n 's/^# \{0,1\}//p'
+    sed -n '1,52p' "$0" | sed -n 's/^# \{0,1\}//p'
     exit "${1:-0}"
 }
 
@@ -118,6 +132,8 @@ while [[ $# -gt 0 ]]; do
         --target)   TARGETS_ARG="${2:-}"; shift 2 ;;
         --push)     PUSH=1; shift ;;
         --no-latest) NO_LATEST=1; shift ;;
+        --no-buildx) USE_BUILDX=0; shift ;;
+        --cache-registry) CACHE_REGISTRY="${2:-}"; shift 2 ;;
         -h|--help)  usage 0 ;;
         *) echo "Unknown argument: $1" >&2; usage 1 ;;
     esac
@@ -136,6 +152,28 @@ fi
 
 # strip trailing slash on registry
 REGISTRY="${REGISTRY%/}"
+[[ -n "$CACHE_REGISTRY" ]] && CACHE_REGISTRY="${CACHE_REGISTRY%/}"
+
+# ── Ensure buildx builder exists (when enabled) ────────────────────────────
+if [[ $USE_BUILDX -eq 1 ]]; then
+    if ! docker buildx version >/dev/null 2>&1; then
+        echo "WARNING: docker buildx not available, falling back to legacy build" >&2
+        USE_BUILDX=0
+    else
+        # Prefer existing 'gsage' builder; create with docker-container driver if absent.
+        if ! docker buildx inspect gsage >/dev/null 2>&1; then
+            echo "  Creating buildx builder 'gsage' (docker-container driver) …"
+            docker buildx create --name gsage --driver docker-container --use >/dev/null
+        else
+            docker buildx use gsage >/dev/null
+        fi
+        # Boot the builder so the first build doesn't pay the cold-start cost.
+        docker buildx inspect --bootstrap >/dev/null
+    fi
+fi
+# Force BuildKit even on the legacy code path so cache mounts (--mount=type=cache)
+# in the Dockerfiles are honored.
+export DOCKER_BUILDKIT=1
 
 # Build list of targets to process.
 if [[ -z "$TARGETS_ARG" ]]; then
@@ -203,11 +241,35 @@ for short in "${SELECTED[@]}"; do
     [[ "$target" != "-" ]] && build_args+=(--target "$target")
     build_args+=(-t "$full_tag")
     [[ $NO_LATEST -eq 0 ]] && build_args+=(-t "$latest_tag")
+
+    if [[ $USE_BUILDX -eq 1 ]]; then
+        # buildx: enable inline cache + optional registry cache for cross-machine reuse.
+        build_args=(buildx "${build_args[@]}")
+        build_args+=(--build-arg BUILDKIT_INLINE_CACHE=1)
+        if [[ -n "$CACHE_REGISTRY" ]]; then
+            cache_ref="$CACHE_REGISTRY/gsage-buildcache:$short"
+            build_args+=(--cache-from "type=registry,ref=$cache_ref")
+            build_args+=(--cache-to   "type=registry,ref=$cache_ref,mode=max")
+        else
+            # Inline cache: layers are embedded in the image manifest itself.
+            # Effective only when --push is used (cache lives in the registry image).
+            build_args+=(--cache-to "type=inline,mode=max")
+            # Reuse layers from previously published image of this short name.
+            build_args+=(--cache-from "type=registry,ref=$latest_tag")
+        fi
+        # buildx: push and load are mutually exclusive. Push directly to skip the
+        # local daemon round-trip (faster I/O); otherwise load into local docker.
+        if [[ $PUSH -eq 1 ]]; then
+            build_args+=(--push)
+        else
+            build_args+=(--load)
+        fi
+    fi
     build_args+=("$ctx_dir")
 
     docker "${build_args[@]}"
 
-    if [[ $PUSH -eq 1 ]]; then
+    if [[ $PUSH -eq 1 && $USE_BUILDX -eq 0 ]]; then
         echo ""
         echo "  Pushing $full_tag …"
         if ! docker push "$full_tag"; then

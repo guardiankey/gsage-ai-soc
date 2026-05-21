@@ -78,8 +78,8 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `list_id` | `integer` | ✓ | — |
   | `reason` | `string` | ✓ | Human-readable justification recorded in the audit log. Required by the approval flow. |
-  | `contact_id` | `integer` | — | Target id for *_one actions. |
-  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. |
+  | `contact_id` | `—` | — | Target id for *_one actions. Modern E-goi lists use a 10-char hex hash; legacy lists may still use an integer id. |
+  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
   | `tag_id` | `integer` | — | Tag id for attach_tag/detach_tag. |
   | `contacts` | `array` | — | Inline contact objects for action='import_json'. Each object should follow the E-goi shape: {'base': {...}, 'extra': {...}}. |
   | `file_id` | `string` | — | GSageFile id of the CSV for action='import_csv'. |
@@ -92,19 +92,19 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. |
+  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
 
 - **`activate`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. |
+  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
 
 - **`deactivate`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. |
+  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
 
 - **`unsubscribe`** — _(no description)_
 
@@ -112,8 +112,8 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `list_id` | `integer` | ✓ | — |
   | `reason` | `string` | ✓ | Human-readable justification recorded in the audit log. Required by the approval flow. |
-  | `contact_id` | `integer` | — | Target id for *_one actions. |
-  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. |
+  | `contact_id` | `—` | — | Target id for *_one actions. Modern E-goi lists use a 10-char hex hash; legacy lists may still use an integer id. |
+  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
   | `tag_id` | `integer` | — | Tag id for attach_tag/detach_tag. |
   | `contacts` | `array` | — | Inline contact objects for action='import_json'. Each object should follow the E-goi shape: {'base': {...}, 'extra': {...}}. |
   | `file_id` | `string` | — | GSageFile id of the CSV for action='import_csv'. |
@@ -126,20 +126,20 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. |
+  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
 
 - **`attach_tag`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. |
+  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
   | `tag_id` | `integer` | — | Tag id for attach_tag/detach_tag. |
 
 - **`detach_tag`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. |
+  | `contact_ids` | `array` | — | Contact ids for bulk activate/deactivate/forget/delete_many/attach_tag/detach_tag. Each item is an integer or 10-char hex hash. |
   | `tag_id` | `integer` | — | Tag id for attach_tag/detach_tag. |
 
 - **`import_json`** — _(no description)_
@@ -174,32 +174,32 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_ids` | `array` | — | Contact ids for activate/deactivate/attach_tag/detach_tag (max 10). |
+  | `contact_ids` | `array` | — | Contact ids for activate/deactivate/attach_tag/detach_tag (max 10). Each item is an integer or 10-char hex hash. |
 
 - **`deactivate`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_ids` | `array` | — | Contact ids for activate/deactivate/attach_tag/detach_tag (max 10). |
+  | `contact_ids` | `array` | — | Contact ids for activate/deactivate/attach_tag/detach_tag (max 10). Each item is an integer or 10-char hex hash. |
 
 - **`unsubscribe`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_id` | `integer` | — | Target contact id for *_one / unsubscribe actions. |
+  | `contact_id` | `—` | — | Target contact id for *_one / unsubscribe actions. Modern E-goi lists use a 10-char hex hash; legacy lists may still use an integer id. |
 
 - **`attach_tag`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_ids` | `array` | — | Contact ids for activate/deactivate/attach_tag/detach_tag (max 10). |
+  | `contact_ids` | `array` | — | Contact ids for activate/deactivate/attach_tag/detach_tag (max 10). Each item is an integer or 10-char hex hash. |
   | `tag_id` | `integer` | — | Tag id for attach_tag/detach_tag. |
 
 - **`detach_tag`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `contact_ids` | `array` | — | Contact ids for activate/deactivate/attach_tag/detach_tag (max 10). |
+  | `contact_ids` | `array` | — | Contact ids for activate/deactivate/attach_tag/detach_tag (max 10). Each item is an integer or 10-char hex hash. |
   | `tag_id` | `integer` | — | Tag id for attach_tag/detach_tag. |
 
 
@@ -233,16 +233,16 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
 | Tool | Version | Rate limit/min | Timeout (s) | Circuit breaker | Background | Multi-config |
 | --- | --- | ---: | ---: | :---: | :---: | :---: |
-| `egoi_campaign_group_search` | `1.0.0` | 30 | 60 | ✓ | — | ✓ |
+| `egoi_campaign_group_search` | `1.0.0` | 30 | 90 | ✓ | >90s | ✓ |
 | `egoi_campaign_report` | `1.0.0` | 30 | 120 | ✓ | — | ✓ |
-| `egoi_campaign_search` | `1.0.0` | 30 | 120 | ✓ | — | ✓ |
+| `egoi_campaign_search` | `1.0.0` | 30 | 120 | ✓ | >120s | ✓ |
 | `egoi_contact_get` | `1.0.0` | 60 | 60 | ✓ | — | ✓ |
 | `egoi_contact_manage` | `1.0.0` | 5 | 900 | ✓ | always | ✓ |
 | `egoi_contact_quick_action` | `1.0.0` | 15 | 120 | ✓ | — | ✓ |
-| `egoi_contact_search` | `1.0.0` | 30 | 180 | ✓ | — | ✓ |
+| `egoi_contact_search` | `1.0.0` | 30 | 120 | ✓ | >120s | ✓ |
 | `egoi_dashboard` | `1.0.0` | 20 | 180 | ✓ | — | ✓ |
 | `egoi_list_manage` | `1.0.0` | 10 | 60 | ✓ | — | ✓ |
-| `egoi_list_search` | `1.0.0` | 30 | 120 | ✓ | — | ✓ |
+| `egoi_list_search` | `1.0.0` | 30 | 120 | ✓ | >120s | ✓ |
 
 ## Source files
 

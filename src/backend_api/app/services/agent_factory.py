@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
@@ -364,6 +365,8 @@ _MERMAID_PROMPT = (
     "Use `return_image=true` ONLY when the user asks for a downloadable image "
     "or the channel can't render Mermaid (email, Telegram, CLI). Web renders "
     "natively — don't request PNGs there.\n"
+    "ATTENTION: never create diagrams without following the workflow above. Syntax errors are common."
+    "in timeline diagrams, do not use ':' in time, use this format 10h30m instead of 10:30."
     "Fragile types — read the reference's ❌ anti-examples BEFORE drafting:\n"
     "  • block-beta: no labels on composite groups; no [(DB)] shapes inside "
     "    composite groups; no \\n in labels; keep it flat when in doubt.\n"
@@ -667,6 +670,32 @@ def _render_identity_block(
     return "\n".join(lines)
 
 
+def _render_datetime_block() -> str:
+    """Render a compact current date/time block for the agent.
+
+    Provides the current local datetime (with timezone offset) and the
+    corresponding UTC instant in ISO-8601, plus the weekday so the LLM can
+    reason about "today/tomorrow/last week" without guessing.  Resolved at
+    agent-build time on every request, so the value is always fresh for
+    ephemeral agents.
+    """
+    from datetime import timezone as _tz
+
+    local = datetime.now().astimezone()
+    utc = local.astimezone(_tz.utc)
+    tz_name = local.tzname() or "local"
+    return (
+        "# Current date and time\n"
+        f"- Local: {local.strftime('%Y-%m-%d %H:%M:%S %z')} ({tz_name}, "
+        f"{local.strftime('%A')})\n"
+        f"- UTC (ISO-8601): {utc.strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
+        "Use this whenever the user refers to relative times "
+        "(\"today\", \"yesterday\", \"last 24h\", \"hoje\", \"ontem\", "
+        "\"última semana\", etc.). Do not ask the user for the current "
+        "date/time; rely on the values above."
+    )
+
+
 def _resolve_system_prompt(
     org: Optional["GSageOrganization"] = None,
     user: Optional["GSageUser"] = None,
@@ -697,6 +726,9 @@ def _resolve_system_prompt(
     identity_block = _render_identity_block(org=org, user=user)
     if identity_block:
         base = f"{base}\n\n{identity_block}"
+
+    # -- 1c. Current date/time (resolved fresh on every build_agent call)
+    base = f"{base}\n\n{_render_datetime_block()}"
 
     # -- 2. Org additions
     org_extra = (org.system_prompt or "").strip() if org else ""

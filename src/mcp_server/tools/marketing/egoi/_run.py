@@ -10,11 +10,22 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Optional,
+)
 
 from src.mcp_server.tools.marketing.egoi import _query as Q
 from src.mcp_server.tools.marketing.egoi._client import EgoiClient, EgoiError
-from src.mcp_server.tools.result_export import build_agent_payload, summarize
+from src.mcp_server.tools.result_export import (
+    build_agent_payload,
+    run_streaming_export,
+    summarize,
+)
 
 if TYPE_CHECKING:
     from src.mcp_server.tools.base import BaseTool, ToolResult
@@ -29,6 +40,13 @@ log = logging.getLogger(__name__)
 # responses) which may exceed ``len(rows)`` when ``max_rows`` capped the
 # fetch. Return ``None`` when the endpoint does not report a total.
 Fetcher = Callable[[EgoiClient], Awaitable[tuple[list[dict], Optional[int]]]]
+
+# Streamer: like Fetcher but yields rows one-by-one to allow the runner
+# to persist them incrementally (CSV-on-disk) instead of materialising
+# the whole list. Each yield is ``(row_dict, server_total_or_None)``.
+Streamer = Callable[
+    [EgoiClient], AsyncIterator[tuple[dict, Optional[int]]]
+]
 
 
 def should_background_for_size(
@@ -58,7 +76,7 @@ def should_background_for_size(
     if max_rows >= rows_threshold:
         return True
     if export_rows_threshold is not None and max_rows >= export_rows_threshold:
-        if bool(params.get("export_csv")) or bool(params.get("export_json")):
+        if bool(params.get("export_csv")):
             return True
     return False
 
@@ -71,7 +89,6 @@ async def run_search(
     fetcher: Fetcher,
     filename_prefix: str,
     export_csv: bool = False,
-    export_json: bool = False,
     summary_group_by: Optional[list[str]] = None,
     summary_top_n: int = 10,
     extra_data: Optional[dict] = None,
@@ -93,8 +110,8 @@ async def run_search(
         the list of *already-normalised* dict rows. Pagination, filter
         building and normalisation are the fetcher's responsibility.
     filename_prefix :
-        Prefix used for the CSV/JSON artifacts persisted on overflow.
-    export_csv, export_json :
+        Prefix used for the CSV artifact persisted on overflow.
+    export_csv :
         Forwarded to :func:`build_agent_payload`. CSV is forced anyway
         when the result set exceeds the inline preview cap.
     summary_group_by :
@@ -131,7 +148,7 @@ async def run_search(
         tool,
         rows=rows,
         export_csv=export_csv,
-        export_json=export_json,
+        export_json=False,
         filename_prefix=filename_prefix,
         agent_context=agent_context,
         preview_rows=Q.AGENT_PREVIEW_ROWS_EGOI,
@@ -164,3 +181,57 @@ async def run_search(
     if extra_data:
         payload.update(extra_data)
     return tool._success(payload, execution_time_ms=elapsed)  # type: ignore[attr-defined]
+
+
+# ── Streaming variant (memory-bounded export for huge result sets) ─────────
+
+
+async def run_search_streaming(
+    tool: "BaseTool",
+    *,
+    agent_context: "AgentContext",
+    config: dict,
+    streamer: Streamer,
+    filename_prefix: str,
+    csv_columns: list[str],
+    preview_rows: int = Q.AGENT_PREVIEW_ROWS_EGOI,
+    summary_group_by: Optional[list[str]] = None,
+    summary_top_n: int = 10,
+    summary_sample_size: int = 20,
+    extra_data: Optional[dict] = None,
+    operation_label: str = "egoi search (stream)",
+) -> "ToolResult":
+    """E-goi adapter around :func:`result_export.run_streaming_export`.
+
+    Opens the SDK client, instantiates the caller-supplied async streamer
+    (which yields ``(row, server_total)`` pairs as it paginates the
+    upstream API), and translates :class:`EgoiError` into the canonical
+    retryable failure code. The actual CSV-on-disk machinery — tempfile
+    directory, incremental summary, single-buffer upload — lives in the
+    generic helper so other vendors (Trellix, OpenVAS, …) can reuse it.
+    """
+    t0 = time.monotonic()
+    try:
+        async with Q.build_client(config) as client:
+            row_iter = streamer(client)
+            return await run_streaming_export(
+                tool,
+                agent_context=agent_context,
+                streamer=row_iter,
+                filename_prefix=filename_prefix,
+                csv_columns=csv_columns,
+                preview_rows=preview_rows,
+                summary_group_by=summary_group_by,
+                summary_top_n=summary_top_n,
+                summary_sample_size=summary_sample_size,
+                extra_data=extra_data,
+                operation_label=operation_label,
+            )
+    except EgoiError as exc:
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return tool._failure(  # type: ignore[attr-defined]
+            exc.code,
+            str(exc),
+            retryable=Q.is_retryable_error(exc),
+            execution_time_ms=elapsed,
+        )

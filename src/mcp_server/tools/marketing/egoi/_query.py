@@ -8,7 +8,7 @@ and the shared tool config schema. All helpers operate on the JSON-decoded
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable, Iterable, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Iterable, Optional
 
 from src.mcp_server.tools.marketing.egoi._client import EgoiClient, EgoiError
 
@@ -22,8 +22,10 @@ DEFAULT_MAX_ROWS = 200
 HARD_MAX_ROWS = 500_000  # CSV-overflow ceiling (user-configured policy)
 
 # Page size used when paginating with offset/limit. The API caps at 1000
-# but smaller pages keep memory predictable and let us short-circuit.
-DEFAULT_PAGE_SIZE = 200
+# (per https://developers.e-goi.com — Get all contacts: limit [1..1000]).
+# Larger pages drastically reduce request count for big lists; keep
+# below the cap so we still have headroom for occasional smaller pages.
+DEFAULT_PAGE_SIZE = 1000
 MAX_PAGE_SIZE = 1000
 
 # Rows shown inline to the LLM. Above this we auto-emit CSV.
@@ -45,6 +47,48 @@ EGOI_RETRYABLE_STATUS_CODES: frozenset[int] = frozenset(
 
 def is_retryable_error(exc: EgoiError) -> bool:
     return exc.status_code in EGOI_RETRYABLE_STATUS_CODES
+
+
+# JSON-Schema fragment accepted as a single contact id. Modern E-goi
+# accounts return a 10-char hexadecimal hash; legacy lists may still
+# expose a numeric id. Both forms are forwarded to the SDK as-is.
+CONTACT_ID_SCHEMA: dict = {
+    "oneOf": [
+        {"type": "integer", "minimum": 1},
+        {"type": "string", "minLength": 1, "maxLength": 64},
+    ],
+}
+
+
+def normalize_contact_id(value: Any) -> Any:
+    """Validate and return a contact id usable by the E-goi SDK.
+
+    Accepts a positive integer or a non-empty string (the typical
+    10-char hex hash). Returns the value unchanged on success and
+    raises :class:`ValueError` otherwise.
+    """
+    if isinstance(value, bool):
+        raise ValueError("contact_id must be int or string, not bool")
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError("contact_id integer must be positive")
+        return value
+    if isinstance(value, str):
+        v = value.strip()
+        if not v:
+            raise ValueError("contact_id string must be non-empty")
+        return v
+    raise ValueError(
+        f"contact_id must be int or string; got {type(value).__name__}"
+    )
+
+
+def normalize_contact_ids(values: Any) -> list[Any]:
+    """Normalise a list of contact ids (each int or non-empty string)."""
+    if not isinstance(values, list) or not values:
+        raise ValueError("'contact_ids' must be a non-empty array")
+    return [normalize_contact_id(v) for v in values]
+
 
 
 def clamp_max_rows(value: Optional[int]) -> int:
@@ -145,6 +189,46 @@ async def iter_all_pages(
             break
         offset += page_limit
     return collected, server_total
+
+
+async def iter_all_pages_stream(
+    fetcher: PageFetcher,
+    *,
+    max_rows: int,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    normaliser: Optional[Callable[[dict], dict]] = None,
+) -> AsyncIterator[tuple[dict, Optional[int]]]:
+    """Stream rows one-by-one across paginated fetches.
+
+    Identical pagination semantics as :func:`iter_all_pages` but yields
+    ``(row, server_total)`` tuples instead of returning the full list,
+    so callers can persist rows incrementally (e.g. straight to a CSV
+    file on disk) without holding the whole dataset in memory. The
+    ``server_total`` value is the same on every yield (resolved on the
+    first page) so consumers can use the last seen value.
+    """
+    page_size = clamp_page_size(page_size)
+    max_rows = max(1, int(max_rows or DEFAULT_MAX_ROWS))
+    yielded = 0
+    offset = 0
+    server_total: Optional[int] = None
+    while yielded < max_rows:
+        remaining = max_rows - yielded
+        page_limit = min(page_size, remaining)
+        payload = await fetcher(offset, page_limit)
+        if server_total is None:
+            server_total = total_items(payload)
+        page_items = unwrap_items(payload)
+        if not page_items:
+            break
+        for item in page_items:
+            yield (normaliser(item) if normaliser else item), server_total
+            yielded += 1
+            if yielded >= max_rows:
+                break
+        if len(page_items) < page_limit:
+            break
+        offset += page_limit
 
 
 # ── Normalisers ────────────────────────────────────────────────────────────

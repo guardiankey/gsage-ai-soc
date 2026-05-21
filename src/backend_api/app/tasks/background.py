@@ -164,9 +164,16 @@ async def _async_execute_background_tool(task_id: str) -> None:
             )
             _tenant_token = _tenant_var.set(tenant_snapshot)
             try:
+                # Per-tool background timeout when explicitly set; otherwise
+                # use the legacy heuristic (sync timeout × 3) for compatibility.
+                bg_timeout = (
+                    tool.background_timeout_seconds
+                    if tool.background_timeout_seconds is not None
+                    else tool.timeout_seconds * 3
+                )
                 tool_result = await asyncio.wait_for(
                     tool.execute(agent_context, dict(task.tool_params), effective_config, state),
-                    timeout=tool.timeout_seconds * 3,  # generous timeout in worker
+                    timeout=bg_timeout,
                 )
             finally:
                 _tool_session_ctx.reset(_ctx_token)

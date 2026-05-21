@@ -40,6 +40,7 @@ class EgoiCampaignSearchTool(BaseTool):
     # Auto-fallback to Celery if a sync execution exceeds ``timeout_seconds``.
     timeout_seconds: ClassVar[int] = 120
     background_threshold_seconds: ClassVar[Optional[int]] = 120
+    background_timeout_seconds: ClassVar[Optional[int]] = 1800
     use_circuit_breaker: ClassVar[bool] = True
     requires_approval: ClassVar[bool] = False
 
@@ -91,14 +92,9 @@ class EgoiCampaignSearchTool(BaseTool):
                 "type": "boolean",
                 "default": False,
                 "description": (
-                    "Persist all rows as a CSV file artifact. PREFER CSV "
-                    "over JSON for tabular results."
+                    "Persist all rows as a CSV file artifact. CSV is the "
+                    "only supported export format for tabular results."
                 ),
-            },
-            "export_json": {
-                "type": "boolean",
-                "default": False,
-                "description": "Persist all rows as JSON (only when explicitly asked).",
             },
         },
         "additionalProperties": False,
@@ -150,7 +146,6 @@ class EgoiCampaignSearchTool(BaseTool):
             fetcher=_fetch,
             filename_prefix="egoi_campaign_search",
             export_csv=bool(params.get("export_csv", False)),
-            export_json=bool(params.get("export_json", False)),
             summary_group_by=["status", "type"],
             extra_data={"filters": {k: v for k, v in filters.items() if v is not None}},
             operation_label="egoi campaign_search",

@@ -99,6 +99,10 @@ def _make_celery() -> Celery:
                 "schedule": 60.0,  # every 60 seconds
                 "options": {"queue": "elasticsearch"},
             },
+            "reap-orphan-background-tasks": {
+                "task": "src.backend_api.app.tasks.maintenance.reap_orphan_background_tasks",
+                "schedule": 300.0,  # every 5 minutes
+            },
         },
     )
     return app

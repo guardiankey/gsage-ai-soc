@@ -92,13 +92,23 @@ import csv
 import io
 import json
 import logging
+import os
+import tempfile
 import time
 from collections import Counter
-from typing import TYPE_CHECKING, Any, Iterable, Optional
+from typing import TYPE_CHECKING, Any, AsyncIterator, Iterable, Optional
 
 if TYPE_CHECKING:
-    from src.mcp_server.tools.base import BaseTool
+    from src.mcp_server.tools.base import BaseTool, ToolResult
     from src.shared.security.context import AgentContext
+
+# A streaming row source: an async iterator yielding ``(row, server_total)``
+# tuples one row at a time. ``server_total`` is the upstream-reported total
+# row count (may be None when the API does not expose it). Generic across
+# vendors — the egoi/openvas/trellix adapters wrap their paginators in this
+# shape so :func:`run_streaming_export` can persist the rows without ever
+# materialising the full list in memory.
+RowStreamer = AsyncIterator[tuple[dict, Optional[int]]]
 
 log = logging.getLogger(__name__)
 
@@ -252,43 +262,16 @@ async def maybe_export_artifacts(
         return artifacts
 
     ts = int(time.time())
-    safe_prefix = "".join(
-        c if c.isalnum() or c in "._-" else "_" for c in filename_prefix
-    )[:80]
-
-    async def _store(data: bytes, filename: str, content_type: str) -> Optional[dict]:
-        # Reuse the in-flight tool-execution session when available so the
-        # file row is committed in the same transaction as the ToolResult.
-        from src.mcp_server.tools.base import _tool_session_ctx  # noqa: PLC0415
-
-        ctx_session = _tool_session_ctx.get()
-        if ctx_session is not None:
-            return await tool._store_file(  # pyright: ignore[reportPrivateUsage]
-                data=data,
-                filename=filename,
-                content_type=content_type,
-                agent_context=agent_context,
-                session=ctx_session,
-                description=f"{tool.name} export",
-            )
-        from src.shared.database import _get_session_maker  # noqa: PLC0415
-
-        async with _get_session_maker()() as db_session:
-            return await tool._store_file(  # pyright: ignore[reportPrivateUsage]
-                data=data,
-                filename=filename,
-                content_type=content_type,
-                agent_context=agent_context,
-                session=db_session,
-                description=f"{tool.name} export",
-            )
+    safe_prefix = _safe_filename_prefix(filename_prefix)
 
     if export_csv:
         try:
-            stored = await _store(
-                export_to_csv(rows),
-                f"{safe_prefix}_{ts}.csv",
-                "text/csv",
+            stored = await store_export_artifact(
+                tool=tool,
+                agent_context=agent_context,
+                data=export_to_csv(rows),
+                filename=f"{safe_prefix}_{ts}.csv",
+                content_type="text/csv",
             )
             artifacts["csv_file"] = stored
             if stored is None:
@@ -306,10 +289,12 @@ async def maybe_export_artifacts(
 
     if export_json:
         try:
-            stored = await _store(
-                export_to_json(rows),
-                f"{safe_prefix}_{ts}.json",
-                "application/json",
+            stored = await store_export_artifact(
+                tool=tool,
+                agent_context=agent_context,
+                data=export_to_json(rows),
+                filename=f"{safe_prefix}_{ts}.json",
+                content_type="application/json",
             )
             artifacts["json_file"] = stored
             if stored is None:
@@ -389,3 +374,257 @@ async def build_agent_payload(
         "rows_overflow": rows_overflow,
         "agent_hint": agent_hint,
     }
+
+
+# ── Streaming helpers (memory-bounded export for huge result sets) ─────────
+
+
+def _safe_filename_prefix(prefix: str) -> str:
+    """Sanitise a user-supplied prefix into a filesystem-safe stem."""
+    return "".join(
+        c if c.isalnum() or c in "._-" else "_" for c in prefix
+    )[:80]
+
+
+async def store_export_artifact(
+    *,
+    tool: "BaseTool",
+    agent_context: "AgentContext",
+    data: bytes,
+    filename: str,
+    content_type: str,
+) -> Optional[dict]:
+    """Persist *data* via :meth:`BaseTool._store_file` reusing the in-flight
+    tool-execution session when available.
+
+    Falls back to a fresh :class:`AsyncSession` when the tool runs outside
+    the ``BaseTool.run`` orchestration (e.g. ad-hoc scripts). Returns the
+    file-info dict produced by ``_store_file`` (``file_id``, ``filename``,
+    ``content_type``, ``size_bytes``, ``download_path``, ``expires_at``)
+    or ``None`` on storage failure.
+    """
+    from src.mcp_server.tools.base import _tool_session_ctx  # noqa: PLC0415
+
+    ctx_session = _tool_session_ctx.get()
+    if ctx_session is not None:
+        return await tool._store_file(  # type: ignore[attr-defined]
+            data=data,
+            filename=filename,
+            content_type=content_type,
+            agent_context=agent_context,
+            session=ctx_session,
+            description=f"{tool.name} export",
+        )
+    from src.shared.database import _get_session_maker  # noqa: PLC0415
+
+    async with _get_session_maker()() as db_session:
+        return await tool._store_file(  # type: ignore[attr-defined]
+            data=data,
+            filename=filename,
+            content_type=content_type,
+            agent_context=agent_context,
+            session=db_session,
+            description=f"{tool.name} export",
+        )
+
+
+class IncrementalSummary:
+    """Streaming-friendly counterpart of :func:`summarize`.
+
+    Mirrors the output shape (``row_count`` / ``distinct`` / ``top`` /
+    ``sample``) but accumulates statistics one row at a time, so the
+    full row list never needs to be held in memory. Designed for tools
+    that paginate huge result sets and persist them straight to disk.
+    """
+
+    def __init__(
+        self,
+        *,
+        group_by: Optional[Iterable[str]] = None,
+        top_n: int = 10,
+        sample_size: int = 20,
+    ) -> None:
+        self._keys = [str(k) for k in (group_by or []) if k]
+        self._top_n = max(1, int(top_n))
+        self._sample_size = max(0, int(sample_size))
+        self._counters: dict[str, Counter] = {k: Counter() for k in self._keys}
+        self._sample: list[dict] = []
+        self._row_count = 0
+
+    def add(self, row: dict) -> None:
+        self._row_count += 1
+        if len(self._sample) < self._sample_size:
+            self._sample.append(row)
+        for k in self._keys:
+            v = row.get(k)
+            if v in (None, ""):
+                continue
+            self._counters[k][_hashable(v)] += 1
+
+    def finalize(self) -> dict:
+        if self._row_count == 0:
+            return {"row_count": 0, "distinct": {}, "top": {}, "sample": []}
+        distinct = {k: len(self._counters[k]) for k in self._keys}
+        top = {
+            k: [
+                {"value": val, "count": cnt}
+                for val, cnt in self._counters[k].most_common(self._top_n)
+            ]
+            for k in self._keys
+        }
+        return {
+            "row_count": self._row_count,
+            "distinct": distinct,
+            "top": top,
+            "sample": self._sample,
+        }
+
+
+async def run_streaming_export(
+    tool: "BaseTool",
+    *,
+    agent_context: "AgentContext",
+    streamer: RowStreamer,
+    filename_prefix: str,
+    csv_columns: list[str],
+    preview_rows: int = AGENT_PREVIEW_ROWS,
+    summary_group_by: Optional[list[str]] = None,
+    summary_top_n: int = 10,
+    summary_sample_size: int = 20,
+    extra_data: Optional[dict] = None,
+    operation_label: str = "streaming export",
+) -> "ToolResult":
+    """Persist a paginated row stream as a CSV artifact with constant memory.
+
+    Designed for vendor-agnostic, very large enumerations (tens to hundreds
+    of thousands of rows) that would otherwise OOM the worker. Behaviour:
+
+    * Iterates the caller-provided async generator, writing each row
+      directly to a CSV file inside a per-execution
+      :class:`tempfile.TemporaryDirectory`.
+    * Keeps only the first ``preview_rows`` rows in memory (for the agent
+      preview) plus an :class:`IncrementalSummary` (Counters + small sample).
+    * After the stream completes, reads the temp CSV back as bytes and
+      uploads it via :func:`store_export_artifact` (single short-lived
+      buffer); the temp directory is removed automatically.
+
+    The CSV column order is fixed by ``csv_columns`` (callers should pass
+    the canonical schema of their normaliser); any extra keys produced
+    later are silently dropped from the file (they still appear in the
+    in-memory preview rows). Vendors typically wrap this helper in a thin
+    runner that opens their SDK client and translates vendor-specific
+    errors into ``tool._failure(...)`` codes.
+
+    Returns a ``ToolResult`` ready to be returned from ``execute``.
+    """
+    t0 = time.monotonic()
+    preview: list[dict] = []
+    incsum = IncrementalSummary(
+        group_by=summary_group_by,
+        top_n=summary_top_n,
+        sample_size=summary_sample_size,
+    )
+    server_total: Optional[int] = None
+    rows_fetched = 0
+
+    safe_prefix = _safe_filename_prefix(filename_prefix)
+    ts = int(time.time())
+    csv_filename = f"{safe_prefix}_{ts}.csv"
+    artifacts: dict[str, Any] = {
+        "csv_file": None,
+        "json_file": None,
+        "csv_error": None,
+        "json_error": None,
+    }
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="gsage-export-") as tmpdir:
+            tmp_path = os.path.join(tmpdir, csv_filename)
+            # newline="" is the documented requirement for csv.DictWriter
+            # to avoid spurious blank lines on Windows; harmless on Linux.
+            with open(tmp_path, "w", encoding="utf-8", newline="") as fh:
+                writer = csv.DictWriter(
+                    fh, fieldnames=csv_columns, extrasaction="ignore"
+                )
+                writer.writeheader()
+                async for row, total in streamer:
+                    if server_total is None and isinstance(total, int):
+                        server_total = total
+                    rows_fetched += 1
+                    if len(preview) < preview_rows:
+                        preview.append(row)
+                    incsum.add(row)
+                    writer.writerow(
+                        {k: _csv_value(row.get(k)) for k in csv_columns}
+                    )
+
+            csv_size = os.path.getsize(tmp_path)
+            if rows_fetched > 0:
+                with open(tmp_path, "rb") as fh:
+                    csv_bytes = fh.read()
+                stored = await store_export_artifact(
+                    tool=tool,
+                    agent_context=agent_context,
+                    data=csv_bytes,
+                    filename=csv_filename,
+                    content_type="text/csv",
+                )
+                artifacts["csv_file"] = stored
+                if stored is None:
+                    artifacts["csv_error"] = (
+                        "file storage returned no record (see backend logs "
+                        "for the underlying cause)"
+                    )
+            log.info(
+                "%s: streamed %d rows (server_total=%s, csv=%d bytes)",
+                operation_label, rows_fetched, server_total, csv_size,
+            )
+    except Exception as exc:  # noqa: BLE001
+        # Vendor-specific error translation is the caller's job (a thin
+        # wrapper around this helper). Anything that escapes the streamer
+        # is logged here and surfaced as INTERNAL_ERROR so the worker
+        # never dies silently.
+        log.exception("%s: unexpected error during streaming export", operation_label)
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return tool._failure(  # type: ignore[attr-defined]
+            "INTERNAL_ERROR", str(exc), execution_time_ms=elapsed
+        )
+
+    overflow = rows_fetched > preview_rows
+    if isinstance(server_total, int) and server_total > rows_fetched:
+        overflow = True
+
+    csv_info = artifacts.get("csv_file") or {}
+    download_path = csv_info.get("download_path") if isinstance(csv_info, dict) else None
+    file_id = csv_info.get("file_id") if isinstance(csv_info, dict) else None
+    agent_hint: Optional[str] = None
+    if overflow or rows_fetched > preview_rows:
+        agent_hint = (
+            f"Result has {rows_fetched} rows; only the first "
+            f"{preview_rows} are inlined in 'rows'. The full result has "
+            "been saved as a CSV artifact — present the download link "
+            "to the user instead of trying to enumerate every row in chat."
+        )
+        if download_path:
+            agent_hint += f" download_path={download_path}"
+        elif file_id:
+            agent_hint += f" file_id={file_id}"
+
+    elapsed = int((time.monotonic() - t0) * 1000)
+    payload: dict[str, Any] = {
+        "rows_total": (
+            int(server_total) if isinstance(server_total, int) else rows_fetched
+        ),
+        "rows_fetched": rows_fetched,
+        "server_total_items": (
+            int(server_total) if isinstance(server_total, int) else None
+        ),
+        "rows_overflow": overflow,
+        "rows": preview,
+        "summary": incsum.finalize(),
+        "artifacts": artifacts,
+        "agent_hint": agent_hint,
+    }
+    if extra_data:
+        payload.update(extra_data)
+    return tool._success(payload, execution_time_ms=elapsed)  # type: ignore[attr-defined]

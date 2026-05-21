@@ -33,14 +33,20 @@
 FROM python:3.12-slim AS builder
 
 # unixodbc-dev: required to compile pyodbc (dep of aioodbc / SQL Server support)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Cache mounts: keep apt + pip caches across rebuilds (BuildKit only).
+# `rm -f docker-clean` is required so apt actually keeps downloaded .deb files
+# in /var/cache/apt; the python:slim base image installs a hook that purges them.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc python3-dev libffi-dev libssl-dev libpq-dev \
-        unixodbc-dev git \
-    && rm -rf /var/lib/apt/lists/*
+        unixodbc-dev git
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    pip install --prefix=/install -r requirements.txt
 
 # =============================================================================
 # Stage 2 — base: minimal runtime with Python deps and appuser
@@ -61,9 +67,11 @@ COPY --from=builder /install /usr/local
 
 # Runtime ODBC library + curl for healthchecks + non-root user.
 # unixodbc: required by pyodbc at runtime.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update && apt-get install -y --no-install-recommends \
         curl unixodbc \
-    && rm -rf /var/lib/apt/lists/* \
     && groupadd -r appuser && useradd -r -g appuser -s /sbin/nologin appuser \
     && mkdir -p /data/ingest \
     && chown -R appuser:appuser /data
@@ -104,32 +112,38 @@ CMD ["gunicorn", "-k", "src.backend_api.app.gunicorn_worker.AsyncioUvicornWorker
      "src.backend_api.app.main:app", "--bind", "0.0.0.0:8000"]
 
 # =============================================================================
+# Stage 2b — base-mermaid: shared chromium + node20 + mermaid-cli layer.
+#
+# Built ONCE and reused by runtime-api, runtime-mermaid and runtime-tools.
+# Eliminates ~3x duplication of these heavy installs in sibling stages.
+# =============================================================================
+FROM base AS base-mermaid
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && DEBIAN_FRONTEND=noninteractive apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gnupg ca-certificates chromium fonts-liberation fonts-noto-color-emoji \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs
+
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --omit=dev \
+        @mermaid-js/mermaid-cli@11.4.2
+
+ENV PUPPETEER_SKIP_DOWNLOAD=1 \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# =============================================================================
 # Stage 3a-bis — runtime-api: backend_api with mermaid-cli for Teams handler
 #
 # The Teams channel cannot render Mermaid blocks natively, so the backend
 # pre-processes agent responses, renders ```mermaid blocks via mmdc and
-# attaches the PNG inline as a Bot Framework attachment. This stage adds
-# chromium + node20 + @mermaid-js/mermaid-cli on top of runtime-minimal's
-# layout. The Mermaid renderer module is shared with the mcp_server
-# (src/shared/services/mermaid_renderer.py).
+# attaches the PNG inline as a Bot Framework attachment. The Mermaid renderer
+# module is shared with the mcp_server (src/shared/services/mermaid_renderer.py).
 # =============================================================================
-FROM base AS runtime-api
-
-# chromium + nodejs 20 + mermaid-cli (same setup as runtime-mermaid).
-# PUPPETEER_SKIP_DOWNLOAD=1 reuses the system chromium instead of letting
-# Puppeteer download its own bundled copy.
-RUN DEBIAN_FRONTEND=noninteractive apt-get update \
-    && apt-get install -y --no-install-recommends \
-        gnupg ca-certificates chromium fonts-liberation fonts-noto-color-emoji \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --omit=dev \
-        @mermaid-js/mermaid-cli@11.4.2 \
-    && npm cache clean --force \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
-
-ENV PUPPETEER_SKIP_DOWNLOAD=1 \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+FROM base-mermaid AS runtime-api
 
 # Application source — copied LAST (see runtime-minimal note).
 COPY src/ /app/src/
@@ -152,30 +166,21 @@ CMD ["gunicorn", "-k", "src.backend_api.app.gunicorn_worker.AsyncioUvicornWorker
 #                           inside generate_document via the diagram.lua
 #                           Lua filter shipped in the pandoc_gsage bundle)
 # =============================================================================
-FROM base AS runtime-tools
+FROM base-mermaid AS runtime-tools
 
 # tshark: non-interactive install (disable setuid prompt for wireshark-common).
-# chromium + nodejs + mermaid-cli: required by the diagram.lua filter (mermaid
-# engine) used by generate_document. Same flags as runtime-mermaid: skip the
-# bundled Puppeteer Chromium download and reuse the system one.
 # graphviz: required by the diagram.lua filter (dot engine).
-RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
+# chromium + nodejs + mermaid-cli already provided by base-mermaid.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo "wireshark-common wireshark-common/install-setuid boolean false" \
         | debconf-set-selections \
     && DEBIAN_FRONTEND=noninteractive apt-get update \
     && apt-get install -y --no-install-recommends \
-        gnupg nmap tshark whatweb pandoc graphviz \
-        ca-certificates chromium fonts-liberation fonts-noto-color-emoji \
+        nmap tshark whatweb pandoc graphviz \
         texlive-latex-base texlive-latex-recommended texlive-latex-extra \
-        texlive-base texlive-fonts-recommended texlive-fonts-extra lmodern fonts-dejavu \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --omit=dev \
-        @mermaid-js/mermaid-cli@11.4.2 \
-    && npm cache clean --force \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
-
-ENV PUPPETEER_SKIP_DOWNLOAD=1 \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+        texlive-base texlive-fonts-recommended texlive-fonts-extra lmodern fonts-dejavu
 
 # Application source — copied LAST (see runtime-minimal note).
 COPY src/ /app/src/
@@ -191,28 +196,18 @@ CMD ["celery", "-A", "src.backend_api.app.celery_app", "worker", \
 # =============================================================================
 # Stage 3c — runtime-mermaid: mcp_server (mermaid_validate tool)
 # =============================================================================
-FROM base AS runtime-mermaid
+FROM base-mermaid AS runtime-mermaid
 
-# nodejs 20 + @mermaid-js/mermaid-cli + headless chromium.
-# Puppeteer is configured via PUPPETEER_SKIP_DOWNLOAD=1 to reuse the system
-# chromium rather than downloading its own bundled copy.
-# tshark is also included here because mcp_server tools may run network
-# analysis directly (e.g. pcap_analyzer) without delegating to celery.
-RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
+# tshark is added here because mcp_server tools may run network analysis
+# directly (e.g. pcap_analyzer) without delegating to celery.
+# chromium + nodejs + mermaid-cli already provided by base-mermaid.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo "wireshark-common wireshark-common/install-setuid boolean false" \
         | debconf-set-selections \
     && DEBIAN_FRONTEND=noninteractive apt-get update \
-    && apt-get install -y --no-install-recommends \
-        gnupg tshark \
-        ca-certificates chromium fonts-liberation fonts-noto-color-emoji \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --omit=dev \
-        @mermaid-js/mermaid-cli@11.4.2 \
-    && npm cache clean --force \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
-
-ENV PUPPETEER_SKIP_DOWNLOAD=1 \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    && apt-get install -y --no-install-recommends tshark
 
 # Application source — copied LAST (see runtime-minimal note).
 COPY src/ /app/src/
@@ -232,30 +227,23 @@ CMD ["uvicorn", "src.mcp_server.main:app", "--host", "0.0.0.0", "--port", "8001"
 # C extensions for packages not pinned as wheels). Runs as root to allow the
 # compose command `pip install --quiet -r requirements.txt` at startup.
 # =============================================================================
-FROM base AS dev
+FROM base-mermaid AS dev
 
 # Keep the builder toolchain so container-time `pip install` can compile
 # wheels if a new dependency is added without an image rebuild.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential gcc python3-dev libffi-dev libssl-dev libpq-dev \
-        unixodbc-dev git gnupg nmap pandoc graphviz \
-        texlive-latex-base texlive-latex-recommended texlive-latex-extra \
-        texlive-base texlive-fonts-recommended texlive-fonts-extra lmodern fonts-dejavu \
+# chromium + nodejs + mermaid-cli already provided by base-mermaid.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
     && echo "wireshark-common wireshark-common/install-setuid boolean false" \
         | debconf-set-selections \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        tshark whatweb \
+    && DEBIAN_FRONTEND=noninteractive apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates chromium fonts-liberation fonts-noto-color-emoji \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --omit=dev \
-        @mermaid-js/mermaid-cli@11.4.2 \
-    && npm cache clean --force \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
-
-ENV PUPPETEER_SKIP_DOWNLOAD=1 \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+        build-essential gcc python3-dev libffi-dev libssl-dev libpq-dev \
+        unixodbc-dev git nmap pandoc graphviz \
+        texlive-latex-base texlive-latex-recommended texlive-latex-extra \
+        texlive-base texlive-fonts-recommended texlive-fonts-extra lmodern fonts-dejavu \
+        tshark whatweb
 
 # Dev runs as root: source code is bind-mounted and the compose command
 # performs `pip install -r requirements.txt` at startup.

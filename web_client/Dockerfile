@@ -1,9 +1,11 @@
+# syntax=docker/dockerfile:1.6
 # Stage 1: build
 FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci
 
 COPY . .
 RUN npm run build

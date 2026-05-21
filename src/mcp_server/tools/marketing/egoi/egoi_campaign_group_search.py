@@ -37,6 +37,7 @@ class EgoiCampaignGroupSearchTool(BaseTool):
     # Auto-fallback to Celery if a sync execution exceeds ``timeout_seconds``.
     timeout_seconds: ClassVar[int] = 90
     background_threshold_seconds: ClassVar[Optional[int]] = 90
+    background_timeout_seconds: ClassVar[Optional[int]] = 1800
     use_circuit_breaker: ClassVar[bool] = True
     requires_approval: ClassVar[bool] = False
 

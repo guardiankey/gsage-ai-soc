@@ -234,8 +234,13 @@ class BaseTool(ABC):
     # to the Celery worker without attempting synchronous execution.
     # When background_threshold_seconds is set, a synchronous timeout triggers
     # a re-dispatch to Celery instead of returning an error.
+    # When background_timeout_seconds is set, the Celery worker uses it as the
+    # asyncio.wait_for timeout for tool.execute(); otherwise it falls back to
+    # ``timeout_seconds * 3``.  Use this for tools that paginate large datasets
+    # (e.g. E-goi list enumeration) where the sync-style heuristic is too tight.
     always_background: ClassVar[bool] = False
     background_threshold_seconds: ClassVar[Optional[int]] = None
+    background_timeout_seconds: ClassVar[Optional[int]] = None
 
     # ── Multi-config profiles ────────────────────────────────────────────────
     # When True, multiple config rows (each with a distinct profile_id) can

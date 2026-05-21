@@ -364,7 +364,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
 
   celery-worker-email:
     # build:

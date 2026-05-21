@@ -1,0 +1,66 @@
+# ── Top-level noise ────────────────────────────────────────────────────────
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+*.md
+!README.md
+!LICENSE.md
+PROMPT_EXAMPLES.md
+
+# ── Python ─────────────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ── Node / web_client (built separately) ──────────────────────────────────
+node_modules/
+**/node_modules/
+web_client/node_modules/
+web_client/dist/
+*.log
+npm-debug.log*
+
+# ── Local dev / data ──────────────────────────────────────────────────────
+docs-local/
+external_code/
+limbo/
+hashes/
+test_egoi_bool.py
+
+# ── Heavy data assets not needed for image build ──────────────────────────
+dbs/geoip/
+dbs/ip2location/
+**/*.mmdb
+**/*.bin
+
+# ── Tests ─────────────────────────────────────────────────────────────────
+tests/
+
+# ── Misc ──────────────────────────────────────────────────────────────────
+*.swp
+*.swo
+.DS_Store
+docker-compose.override.yml
+.env
+.env.local
+.env.*.local
+
+# ── Installer artifacts (large bundles) ───────────────────────────────────
+installer/bundle/
+installer/compose/
+
+# ── Knowledge base regen output (regenerated during publish) ──────────────
+# (intentionally NOT excluded: knowledge_base/default/gsage/ is populated by
+#  publish-images.sh before the build runs and copied INTO the image)

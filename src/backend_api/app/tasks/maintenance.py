@@ -13,6 +13,12 @@ prune_es_trace_indices
 purge_expired_files
     Deletes expired tool-generated file objects from MinIO and marks the corresponding
     DB records with ``purged_at``.  Runs every hour via Celery Beat.
+
+reap_orphan_background_tasks
+    Marks as FAILED any background task that has been in RUNNING state for
+    longer than the per-tool background timeout (or a global cap when the
+    tool can't be resolved).  Catches tasks orphaned by celery-tools worker
+    crashes / restarts.  Runs every 5 minutes via Celery Beat.
 """
 
 from __future__ import annotations
@@ -194,4 +200,134 @@ def purge_expired_files() -> dict:
     except Exception as exc:
         log.error("purge_expired_files failed: %s", exc, exc_info=True)
         return {"purged": 0, "status": "error", "detail": str(exc)}
+
+
+# Hard upper bound for any single background task, used as fallback when the
+# tool cannot be resolved (e.g. tool was removed from the registry) or when
+# ``started_at`` is missing.  Comfortably above the longest known
+# ``background_timeout_seconds`` (1800 s for E-goi paging tools).
+_ORPHAN_REAP_FALLBACK_SECONDS = 7200  # 2 hours
+# Extra slack added to the resolved per-tool timeout before declaring a task
+# orphaned.  Covers clock drift and the time spent in result/audit persistence
+# AFTER ``execute()`` returns.
+_ORPHAN_REAP_GRACE_SECONDS = 120
+
+
+@celery_app.task(name="src.backend_api.app.tasks.maintenance.reap_orphan_background_tasks")
+def reap_orphan_background_tasks() -> dict:
+    """Mark stuck RUNNING background tasks as FAILED.
+
+    A task is considered orphaned when its elapsed time since ``started_at``
+    exceeds the per-tool ``background_timeout_seconds`` (or
+    ``timeout_seconds * 3`` legacy heuristic) plus a grace period.  Tasks
+    without ``started_at`` are reaped using the fallback cap measured from
+    ``created_at``.
+
+    Typical cause: the celery-tools worker was restarted / crashed mid-run,
+    leaving the DB row in RUNNING state forever.  Without this reaper the
+    chat would never receive a ``[BACKGROUND_TASKS_COMPLETED]`` notification
+    for that task, and the agent would keep telling the user it is "still
+    running".
+    """
+    import asyncio
+
+    async def _run() -> dict:
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import (
+            AsyncSession,
+            async_sessionmaker,
+            create_async_engine,
+        )
+
+        from src.shared.config.settings import get_settings
+        from src.shared.models.background_task import (
+            BackgroundTaskStatus,
+            GSageBackgroundTask,
+        )
+
+        # Lazy registry build so that maintenance imports stay light when
+        # the worker is the backend (no MCP tools installed) — fall back to
+        # the global cap if the registry can't be loaded.
+        try:
+            from src.mcp_server.registry.registry import build_registry  # noqa: PLC0415
+
+            tool_registry = build_registry()
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "reap_orphan_background_tasks: tool registry unavailable, "
+                "using fallback cap of %ss", _ORPHAN_REAP_FALLBACK_SECONDS,
+            )
+            tool_registry = None
+
+        settings = get_settings()
+        engine = create_async_engine(settings.database_url, echo=False)
+        async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        now = datetime.now(timezone.utc)
+        reaped = 0
+
+        async with async_session() as session:
+            stmt = select(GSageBackgroundTask).where(
+                GSageBackgroundTask.status == BackgroundTaskStatus.RUNNING,
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+
+            for row in rows:
+                # Resolve per-tool timeout when possible.
+                tool = (
+                    tool_registry.get_tool(row.tool_name)
+                    if tool_registry is not None
+                    else None
+                )
+                if tool is not None:
+                    bg_timeout = (
+                        tool.background_timeout_seconds
+                        if tool.background_timeout_seconds is not None
+                        else tool.timeout_seconds * 3
+                    )
+                else:
+                    bg_timeout = _ORPHAN_REAP_FALLBACK_SECONDS
+
+                deadline_seconds = bg_timeout + _ORPHAN_REAP_GRACE_SECONDS
+                # Use started_at when available, else fall back to created_at
+                # (covers tasks that crashed before flipping to RUNNING but
+                # somehow ended up with that status).
+                anchor = row.started_at or row.created_at
+                if anchor is None:
+                    continue
+                elapsed = (now - anchor).total_seconds()
+                if elapsed < deadline_seconds:
+                    continue
+
+                row.status = BackgroundTaskStatus.FAILED
+                row.error_message = (
+                    f"[ORPHAN_REAPED] Task stuck in RUNNING for {int(elapsed)}s "
+                    f"(deadline {deadline_seconds}s). Likely caused by a worker "
+                    f"restart or crash."
+                )[:2000]
+                row.completed_at = now
+                reaped += 1
+                log.warning(
+                    "reap_orphan_background_tasks: reaped task %s (tool=%s "
+                    "elapsed=%ds deadline=%ds)",
+                    row.id, row.tool_name, int(elapsed), deadline_seconds,
+                )
+
+            if reaped:
+                await session.commit()
+
+        await engine.dispose()
+        return {"reaped": reaped, "scanned": len(rows)}
+
+    try:
+        result = asyncio.run(_run())
+        if result["reaped"]:
+            log.info(
+                "reap_orphan_background_tasks: reaped %d / %d running tasks",
+                result["reaped"], result["scanned"],
+            )
+        return {"status": "ok", **result}
+    except Exception as exc:
+        log.error("reap_orphan_background_tasks failed: %s", exc, exc_info=True)
+        return {"status": "error", "reaped": 0, "detail": str(exc)}
 

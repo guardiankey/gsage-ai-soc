@@ -49,6 +49,10 @@ class EgoiContactSearchTool(BaseTool):
     # instead of a timeout error.
     timeout_seconds: ClassVar[int] = 120
     background_threshold_seconds: ClassVar[Optional[int]] = 120
+    # Large lists (50k+ contacts) need plenty of room when paging at 200/page
+    # with occasional RemoteDisconnected retries.  30 min keeps us safely below
+    # Celery's hard task limit while covering realistic tenant volumes.
+    background_timeout_seconds: ClassVar[Optional[int]] = 1800
     use_circuit_breaker: ClassVar[bool] = True
     requires_approval: ClassVar[bool] = False
 
@@ -110,14 +114,9 @@ class EgoiContactSearchTool(BaseTool):
                 "type": "boolean",
                 "default": False,
                 "description": (
-                    "Persist all rows as a CSV file artifact. PREFER CSV "
-                    "over JSON for tabular results."
+                    "Persist all rows as a CSV file artifact. CSV is the "
+                    "only supported export format for tabular results."
                 ),
-            },
-            "export_json": {
-                "type": "boolean",
-                "default": False,
-                "description": "Persist all rows as JSON (only when explicitly asked).",
             },
         },
         "additionalProperties": False,
@@ -170,7 +169,6 @@ class EgoiContactSearchTool(BaseTool):
                 fetcher=_fetch_global,
                 filename_prefix="egoi_contact_search_global",
                 export_csv=bool(params.get("export_csv", False)),
-                export_json=bool(params.get("export_json", False)),
                 summary_group_by=["status", "language"],
                 extra_data={"scope": "global", "contact": contact},
                 operation_label="egoi contact_search global",
@@ -223,14 +221,85 @@ class EgoiContactSearchTool(BaseTool):
                     r.setdefault("list_id", list_id)
                 return rows, server_total
 
+            export_csv_flag = bool(params.get("export_csv", False))
+
+            # Streaming path: very large enumerations would OOM the worker
+            # if we accumulated every row + materialised the full CSV in
+            # memory. Above STREAM_THRESHOLD, persist rows to a tempfile
+            # CSV one page at a time.
+            STREAM_THRESHOLD = 5000
+            use_streaming = export_csv_flag and max_rows >= STREAM_THRESHOLD
+
+            if use_streaming:
+                async def _stream_list(client: EgoiClient):
+                    if segment_id is not None:
+                        segment_id_value = segment_id
+
+                        async def page(offset: int, limit: int):
+                            return await client.get_all_contacts_by_segment(
+                                list_id=list_id,
+                                segment_id=segment_id_value,
+                                offset=offset,
+                                limit=limit,
+                            )
+                    else:
+                        async def page(offset: int, limit: int):
+                            kwargs: dict[str, Any] = {
+                                "list_id": list_id,
+                                "offset": offset,
+                                "limit": limit,
+                            }
+                            if status is not None:
+                                kwargs["status"] = status
+                            return await client.get_all_contacts(**kwargs)
+
+                    async for row, total in Q.iter_all_pages_stream(
+                        page,
+                        max_rows=max_rows,
+                        normaliser=Q.normalize_contact,
+                    ):
+                        row.setdefault("list_id", list_id)
+                        yield row, total
+
+                return await _run.run_search_streaming(
+                    self,
+                    agent_context=agent_context,
+                    config=config,
+                    streamer=_stream_list,
+                    filename_prefix="egoi_contact_search_list",
+                    csv_columns=[
+                        "contact_id",
+                        "list_id",
+                        "status",
+                        "email",
+                        "first_name",
+                        "last_name",
+                        "cellphone",
+                        "telephone",
+                        "birth_date",
+                        "language",
+                        "created",
+                        "updated",
+                        "tags",
+                        "extra",
+                    ],
+                    summary_group_by=["status", "language"],
+                    extra_data={
+                        "scope": "list",
+                        "list_id": list_id,
+                        "segment_id": segment_id,
+                        "status": status,
+                    },
+                    operation_label="egoi contact_search list (stream)",
+                )
+
             return await _run.run_search(
                 self,
                 agent_context=agent_context,
                 config=config,
                 fetcher=_fetch_list,
                 filename_prefix="egoi_contact_search_list",
-                export_csv=bool(params.get("export_csv", False)),
-                export_json=bool(params.get("export_json", False)),
+                export_csv=export_csv_flag,
                 summary_group_by=["status", "language"],
                 extra_data={
                     "scope": "list",

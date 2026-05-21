@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.mcp_server.tools.core.csv.csv_loader import CSVAccessError, load_csv
@@ -105,18 +105,22 @@ class EgoiContactManageTool(BaseTool):
                 ),
             },
             "contact_id": {
-                "type": "integer",
-                "minimum": 1,
-                "description": "Target id for *_one actions.",
+                **Q.CONTACT_ID_SCHEMA,
+                "description": (
+                    "Target id for *_one actions. Modern E-goi lists "
+                    "use a 10-char hex hash; legacy lists may still use "
+                    "an integer id."
+                ),
             },
             "contact_ids": {
                 "type": "array",
-                "items": {"type": "integer", "minimum": 1},
+                "items": Q.CONTACT_ID_SCHEMA,
                 "minItems": 1,
                 "maxItems": Q.HARD_MAX_ROWS,
                 "description": (
                     "Contact ids for bulk activate/deactivate/forget/"
-                    "delete_many/attach_tag/detach_tag."
+                    "delete_many/attach_tag/detach_tag. Each item is an "
+                    "integer or 10-char hex hash."
                 ),
             },
             "tag_id": {
@@ -229,12 +233,10 @@ class EgoiContactManageTool(BaseTool):
         params: dict,
     ) -> dict:
         if action == "delete_one":
-            contact_id = params.get("contact_id")
-            if not isinstance(contact_id, int) or contact_id <= 0:
-                raise ValueError("'contact_id' is required for delete_one")
+            contact_id = Q.normalize_contact_id(params.get("contact_id"))
             # Forget single contact = E-goi's GDPR-erase semantics
             payload = await client.action_forget_contacts(
-                list_id=list_id, body={"contacts": [int(contact_id)]}
+                list_id=list_id, body={"contacts": [contact_id]}
             )
             return {"deleted_contact_id": contact_id, "result": payload}
 
@@ -269,7 +271,7 @@ class EgoiContactManageTool(BaseTool):
             for cid in ids:
                 try:
                     res = await client.action_unsubscribe_contact(
-                        list_id=list_id, body={"contact_id": int(cid)}
+                        list_id=list_id, body={"contact_id": cid}
                     )
                     results.append({"contact_id": cid, "ok": True, "response": res})
                 except EgoiError as exc:
@@ -339,11 +341,9 @@ class EgoiContactManageTool(BaseTool):
     # ── Helpers ────────────────────────────────────────────────────────
 
     @staticmethod
-    def _require_ids(params: dict) -> list[int]:
-        ids = params.get("contact_ids") or []
-        if not isinstance(ids, list) or not ids:
-            raise ValueError("'contact_ids' is required")
-        return [int(x) for x in ids]
+    def _require_ids(params: dict) -> list[Any]:
+        ids = params.get("contact_ids")
+        return Q.normalize_contact_ids(ids)
 
     @staticmethod
     async def _run_bulk_import(
