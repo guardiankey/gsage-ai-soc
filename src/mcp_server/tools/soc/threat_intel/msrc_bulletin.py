@@ -14,17 +14,22 @@ import redis.asyncio as redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
+from src.mcp_server.tools.result_export import build_agent_payload, summarize
 from src.shared.cache.decorator import cached
 from src.shared.elasticsearch.client import ElasticsearchClient
 from src.shared.security.context import AgentContext
 
 logger = logging.getLogger(__name__)
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+# ── Constants ────────────────────────────────────────────────────────────
 MSRC_CVRF_BASE = "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf"
 _CACHE_TTL_CURRENT_SECONDS: int = 12 * 3600       # 12 h for current month
 _CACHE_TTL_ARCHIVE_SECONDS: int = 7 * 24 * 3600   # 7 days for past months
 _MAX_RESULTS_HARD_LIMIT: int = 50
+# Defensive cap on rows materialised into the CSV artifact, mirroring the
+# pattern used by GLPI/cisa_kev. Monthly bulletins rarely exceed ~150
+# entries, so this is mostly a safety net for multi-month queries.
+_CSV_FETCH_LIMIT: int = 10_000
 _TOOL_NAME: str = "msrc_bulletin"
 _CVE_SEARCH_MONTHS: int = 3  # number of months searched when cve_id given without month
 
@@ -313,6 +318,53 @@ def _sort_entries(entries: list[dict]) -> list[dict]:
     )
 
 
+# ── Enrichment (cross-reference with CISA KEV) ──────────────────────────
+async def _enrich_with_kev_crossref(
+    rows: list[dict],
+    *,
+    session: AsyncSession,
+) -> list[dict]:
+    """Annotate MSRC rows with ``in_cisa_kev`` (bool) and ``kev_due_date``.
+
+    Issues a single (cached) call to :func:`cisa_kev._get_kev_feed` and
+    builds a CVE→entry index. Failures degrade gracefully: rows are left
+    with ``in_cisa_kev=None`` and ``kev_due_date=None``.
+    """
+    # Late import to avoid a circular dependency with cisa_kev.
+    from src.mcp_server.tools.soc.threat_intel.cisa_kev import (  # noqa: PLC0415
+        _get_kev_feed,
+    )
+
+    try:
+        feed = await _get_kev_feed(session=session)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "msrc_bulletin: CISA KEV cross-ref fetch failed: %s", exc
+        )
+        for row in rows:
+            row.setdefault("in_cisa_kev", None)
+            row.setdefault("kev_due_date", None)
+        return rows
+
+    kev_index: dict[str, dict] = {}
+    for v in feed.get("vulnerabilities", []):
+        cve = (v.get("cveID") or "").upper()
+        if cve:
+            kev_index[cve] = v
+
+    for row in rows:
+        cve = (row.get("cve_id") or "").upper()
+        kev_entry = kev_index.get(cve)
+        if kev_entry is not None:
+            row["in_cisa_kev"] = True
+            row["kev_due_date"] = kev_entry.get("dueDate")
+        else:
+            row["in_cisa_kev"] = False
+            row["kev_due_date"] = None
+
+    return rows
+
+
 # ── Tool class ────────────────────────────────────────────────────────────────
 
 class MsrcBulletinTool(BaseTool):
@@ -330,6 +382,21 @@ class MsrcBulletinTool(BaseTool):
       - "RCE patches for Windows this month?" → product="Windows",
         impact="Remote Code Execution"
       - "Show me March 2026 patches" → month="2026-Mar"
+
+    Bulk / CSV output:
+      - ``max_results`` controls **only** how many rows are inlined in the
+        response (preview); it does **not** cap the CSV.
+      - Set ``export_csv=true`` to receive every filtered row as a CSV
+        artifact (up to a defensive 10 000-row cap). The same artifact is
+        also produced automatically whenever the filtered set exceeds the
+        inline preview cap, so the agent always has a downloadable file
+        for large result sets.
+      - When the CSV is produced, rows are enriched with ``in_cisa_kev``
+        and ``kev_due_date`` (single cached call to the CISA KEV feed).
+      - After receiving the artifact (``artifacts.csv_file.file_id``), the
+        agent should use the ``csv_query`` / ``csv_describe`` / ``csv_edit``
+        / ``csv_join`` tools to analyse the full dataset instead of asking
+        for more rows inline.
     """
 
     name: ClassVar[str] = "msrc_bulletin"
@@ -399,8 +466,48 @@ class MsrcBulletinTool(BaseTool):
             },
             "max_results": {
                 "type": "integer",
-                "description": "Maximum entries to return (default: 20, max: 50).",
+                "description": (
+                    "Maximum number of rows shipped inline in the response "
+                    "(default: 20, max: 50). This does NOT cap the CSV "
+                    "artifact: when ``export_csv=true`` (or when the "
+                    "filtered set exceeds the inline preview), every "
+                    "filtered row is written to the CSV up to a defensive "
+                    "10 000-row hard limit."
+                ),
                 "default": 20,
+                "minimum": 1,
+                "maximum": 50,
+            },
+            "export_csv": {
+                "type": "boolean",
+                "description": (
+                    "If true, persist the full filtered result set as a CSV "
+                    "artifact (returned in ``artifacts.csv_file``). The CSV "
+                    "includes ``in_cisa_kev`` and ``kev_due_date`` columns "
+                    "(cross-reference with the CISA KEV catalogue). Use "
+                    "the csv_query / csv_describe / csv_edit / csv_join "
+                    "tools to analyse the file. The CSV is also produced "
+                    "automatically whenever the filtered set is larger "
+                    "than the inline preview, regardless of this flag."
+                ),
+                "default": False,
+            },
+            "group_by": {
+                "type": "array",
+                "description": (
+                    "Optional list of result columns to aggregate in the "
+                    "``summary.top`` block (e.g. ['severity', 'impact']). "
+                    "Defaults to ['severity', 'impact']."
+                ),
+                "items": {"type": "string"},
+            },
+            "top_n": {
+                "type": "integer",
+                "description": (
+                    "Number of top values per ``group_by`` column shown in "
+                    "``summary.top`` (default: 10)."
+                ),
+                "default": 10,
                 "minimum": 1,
                 "maximum": 50,
             },
@@ -459,6 +566,9 @@ class MsrcBulletinTool(BaseTool):
         max_results: int = min(
             int(params.get("max_results", 20)), _MAX_RESULTS_HARD_LIMIT
         )
+        export_csv: bool = bool(params.get("export_csv", False))
+        group_by_param = params.get("group_by") or None
+        top_n: int = int(params.get("top_n", 10))
 
         # ── Retrieve DB session from ContextVar ───────────────────────────────
         session = _msrc_session_ctx.get()
@@ -537,7 +647,26 @@ class MsrcBulletinTool(BaseTool):
         )
         filtered = _sort_entries(filtered)
         filtered_count = len(filtered)
-        returned = filtered[:max_results]
+
+        # Defensive cap on what we materialise into the CSV / formatted rows.
+        truncated_for_csv = filtered_count > _CSV_FETCH_LIMIT
+        formatted_rows = filtered[:_CSV_FETCH_LIMIT]
+
+        # Decide whether a CSV artifact will be produced.
+        will_generate_csv = export_csv or filtered_count > max_results
+
+        # Enrichment (cross-reference with CISA KEV) only when the dataset
+        # is going to be shipped as a CSV — keeps small inline queries fast.
+        if will_generate_csv and formatted_rows:
+            try:
+                formatted_rows = await _enrich_with_kev_crossref(
+                    formatted_rows, session=session
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "msrc_bulletin: CISA KEV cross-ref enrichment failed: %s",
+                    exc,
+                )
 
         # ── Build filters summary ─────────────────────────────────────────────
         filters_applied: dict = {}
@@ -555,6 +684,34 @@ class MsrcBulletinTool(BaseTool):
             filters_applied["exploited_only"] = True
         if impact:
             filters_applied["impact"] = impact
+        if export_csv:
+            filters_applied["export_csv"] = True
+
+        # ── Build agent payload (preview + optional CSV artifact) ────────────
+        agent_payload = await build_agent_payload(
+            tool=self,
+            rows=formatted_rows,
+            export_csv=export_csv,
+            export_json=False,
+            filename_prefix=f"{self.name}_search",
+            agent_context=agent_context,
+            preview_rows=max_results,
+        )
+
+        # ── Top-N summary over the full (post-enrichment) result ─────────────
+        summary_group_by = group_by_param or ["severity", "impact"]
+        agg_summary = summarize(
+            formatted_rows,
+            group_by=summary_group_by,
+            top_n=top_n,
+            sample_size=0,
+        )
+        exploited_count = sum(
+            1 for r in formatted_rows if r.get("exploited") is True
+        )
+        in_cisa_kev_count = sum(
+            1 for r in formatted_rows if r.get("in_cisa_kev") is True
+        )
 
         return self._success(
             data={
@@ -562,9 +719,19 @@ class MsrcBulletinTool(BaseTool):
                     "months_queried": months_fetched,
                     "total_in_bulletin": total_in_bulletin,
                     "filtered_count": filtered_count,
-                    "returned_count": len(returned),
+                    "returned_count": len(agent_payload["rows_preview"]),
+                    "csv_truncated": truncated_for_csv,
+                    "csv_row_limit": _CSV_FETCH_LIMIT,
                     "filters_applied": filters_applied,
+                    "exploited_count": exploited_count,
+                    "in_cisa_kev_count": in_cisa_kev_count,
+                    "aggregations": agg_summary,
                 },
-                "vulnerabilities": returned,
+                "rows_total": agent_payload["rows_total"],
+                "rows_overflow": agent_payload["rows_overflow"],
+                "rows_preview_limit": max_results,
+                "artifacts": agent_payload["artifacts"],
+                "agent_hint": agent_payload["agent_hint"],
+                "vulnerabilities": agent_payload["rows_preview"],
             }
         )

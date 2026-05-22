@@ -294,11 +294,39 @@ async def continue_after_bg_task(
         f"{instruction}\n[/BACKGROUND_TASKS_COMPLETED]\n\n---\n",
     )
 
+    # Concurrency control: only one ``agent.arun()`` may run at a time per
+    # Agno session.  If the user is currently interacting (SSE stream holds
+    # the lock), we DO NOT block — we leave ``notified=False`` so the next
+    # user turn (see ``stream_message``/``send_message``) picks up the
+    # pending results via ``get_pending_bg_notifications`` and injects them
+    # naturally into that turn's context.  This avoids overwriting the
+    # in-flight run's history snapshot.
+    from src.backend_api.app.services.agno_session_lock import (  # noqa: PLC0415
+        publish_conversation_updated,
+        try_acquire,
+        release,
+    )
+
+    lock_token = await try_acquire(
+        tenant_session.agno_session_id,
+        owner="bg_continuation",
+    )
+    if lock_token is None:
+        log.info(
+            "continue_after_bg_task: task=%s session=%s — Agno session busy; "
+            "deferring to next user turn (results remain notified=False)",
+            task_id, tenant_session.id,
+        )
+        raise ContinuationSkipped(
+            f"Agno session {tenant_session.agno_session_id} busy — deferred"
+        )
+
     # Run agent (MCP cleanup runs in finally to avoid cancel busy-loop).
     try:
         run_output = await agent.arun(prompt)
     finally:
         await _safe_mcp_cleanup(agent)
+        await release(tenant_session.agno_session_id, lock_token)
 
     # Agno swallows provider errors and returns RunOutput with status=RunStatus.error.
     # The error run is already persisted in the Agno session, so the chat history

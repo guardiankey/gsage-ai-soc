@@ -332,6 +332,14 @@ _LLM_UNAVAILABLE_MSG = (
     "or contact your administrator."
 )
 
+# Surfaced when another run (e.g. a background-tool continuation) is
+# currently active on the same Agno session and we cannot acquire the
+# per-session lock in time.  The user is asked to retry shortly.
+_LLM_SESSION_BUSY_MSG = (
+    "Another response is still being generated for this conversation. "
+    "Please wait a moment and try again."
+)
+
 
 def _is_transient_llm_error(text: str) -> bool:
     """Return True for transient provider errors that are safe to retry."""
@@ -890,10 +898,28 @@ async def send_message(
     )
 
     try:
-        run_output = await _run_with_retry(
-            lambda: agent.arun(effective_message),
-            context=f"send_message conv={conv_id}",
+        from src.backend_api.app.services.agno_session_lock import (  # noqa: PLC0415
+            LockAcquireError,
+            acquire as _acquire_session_lock,
+            publish_conversation_updated,
         )
+        try:
+            async with _acquire_session_lock(
+                session.agno_session_id, owner="sync:send_message"
+            ):
+                run_output = await _run_with_retry(
+                    lambda: agent.arun(effective_message),
+                    context=f"send_message conv={conv_id}",
+                )
+        except LockAcquireError as exc:
+            log.warning(
+                "send_message: session %s busy: %s",
+                session.agno_session_id, exc,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_LLM_SESSION_BUSY_MSG,
+            )
     finally:
         await _cleanup_agent_mcp(agent)
 
@@ -1121,7 +1147,39 @@ async def _sse_stream(
         FilterContext(org_id=ctx.org_id, interface=ctx.interface, db=db)
     )
 
+    # Serialize runs against the same Agno session so a concurrent
+    # background-tool continuation cannot race this run and overwrite the
+    # persisted history snapshot.  Bounded wait — the user gets a clear
+    # "busy" message if another run is mid-flight on the same session.
+    from src.backend_api.app.services.agno_session_lock import (  # noqa: PLC0415
+        LockAcquireError,
+        acquire as _acquire_session_lock,
+        publish_conversation_updated,
+    )
+
     try:
+        _lock_cm = _acquire_session_lock(
+            agno_session_id, owner="sse:stream_message"
+        )
+        _lock_held = False
+        try:
+            await _lock_cm.__aenter__()
+            _lock_held = True
+        except LockAcquireError as exc:
+            log.warning(
+                "SSE: could not acquire session lock for %s: %s",
+                agno_session_id, exc,
+            )
+            yield _fmt_sse(
+                "content_delta",
+                {"delta": _LLM_SESSION_BUSY_MSG},
+            )
+            yield _fmt_sse(
+                "message_end",
+                {"id": msg_id, "metadata": {}, "status": "busy"},
+            )
+            return
+
         while True:
             try:
                 async for chunk in agent.arun(message, stream=True):
@@ -1281,7 +1339,21 @@ async def _sse_stream(
         if pending_bg_tasks:
             await _mark_bg_tasks_notified([t.id for t in pending_bg_tasks], db)
 
+        # Notify other clients viewing this conversation (other tabs/devices)
+        # so they refetch immediately instead of waiting for the 5s polling
+        # cycle.  Best-effort; failures are swallowed inside the helper.
+        if gsage_session_id is not None:
+            await publish_conversation_updated(
+                gsage_session_id, reason="assistant_message"
+            )
+
     finally:
+        # Release the session lock if it was acquired (no-op on failure path).
+        if _lock_held:  # type: ignore[possibly-unbound]
+            try:
+                await _lock_cm.__aexit__(None, None, None)  # type: ignore[possibly-unbound]
+            except Exception:
+                pass
         await _cleanup_agent_mcp(agent)
 
 
@@ -1368,6 +1440,75 @@ async def stream_message(
             pending_bg_tasks=pending_bg_tasks,
             gsage_session_id=session.id,
         ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# 10. Conversation update events (SSE)
+# ---------------------------------------------------------------------------
+#
+# Long-lived SSE channel that pushes a small ``messages_updated`` event
+# every time a new assistant/tool message is appended to the conversation
+# from OUTSIDE the user's current request — most importantly when a
+# background-tool continuation completes in a Celery worker.  The frontend
+# uses this to trigger an immediate refetch of the message list instead of
+# waiting for the 5 s polling cycle.
+
+
+async def _conv_events_stream(
+    conv_id: uuid.UUID,
+) -> AsyncIterator[str]:
+    """SSE generator subscribing to Redis pub/sub updates for *conv_id*."""
+    from src.backend_api.app.services.agno_session_lock import (  # noqa: PLC0415
+        subscribe_conversation_updates,
+    )
+
+    # Initial hello so the client connection completes promptly.
+    yield _fmt_sse("connected", {"conv_id": str(conv_id)})
+
+    try:
+        async for reason in subscribe_conversation_updates(conv_id):
+            if not reason:
+                # Keep-alive emitted by the subscriber on idle ticks.
+                # SSE comments (lines beginning with ``:``) are ignored
+                # by EventSource and keep proxies from closing the
+                # connection.
+                yield ": keep-alive\n\n"
+                continue
+            yield _fmt_sse("messages_updated", {"reason": reason})
+    except asyncio.CancelledError:
+        log.debug("conv_events_stream: client disconnected conv=%s", conv_id)
+        return
+
+
+@stream_router.get(
+    "/orgs/{org_id}/chat/conversations/{conv_id}/events",
+    summary="Subscribe to conversation update events (SSE)",
+    response_class=StreamingResponse,
+)
+async def conversation_events(
+    org_id: uuid.UUID,
+    conv_id: uuid.UUID,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> StreamingResponse:
+    """SSE endpoint that emits ``messages_updated`` events for *conv_id*.
+
+    The frontend uses these events to refetch the message list immediately
+    when a background-tool continuation appends a new assistant message
+    (instead of polling every 5 s).
+    """
+    ctx.require_permission("agents:run")
+    # Validate ownership — same check as the message endpoints.
+    await _get_conv_or_404(conv_id, ctx, db)
+
+    return StreamingResponse(
+        _conv_events_stream(conv_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

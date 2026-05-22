@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { listMessages, type Message, type MessageListResult } from '@/api/chat'
+import { listMessages, subscribeConversationEvents, type Message, type MessageListResult } from '@/api/chat'
 import { useAuth } from '@/contexts/AuthContext'
 import { MessageBubble } from './MessageBubble'
 import { StreamingMessage } from './StreamingMessage'
@@ -44,6 +44,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
 ) {
   const { t } = useTranslation()
   const { orgId } = useAuth()
+  const queryClient = useQueryClient()
   const bottomRef = useRef<HTMLDivElement>(null)
   const [prevMsgCount, setPrevMsgCount] = useState(0)
 
@@ -58,6 +59,21 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
   })
 
   const messages = data?.messages
+
+  // Subscribe to server-pushed conversation update events (SSE) so we
+  // refetch the message list immediately when a background-tool
+  // continuation appends a new assistant message — instead of waiting
+  // for the 5 s polling cycle.  The 5 s polling remains as a fallback
+  // if the SSE connection drops or the network is restrictive.
+  useEffect(() => {
+    if (!orgId || !conversationId) return
+    const stop = subscribeConversationEvents(orgId, conversationId, () => {
+      queryClient.invalidateQueries({
+        queryKey: ['messages', orgId, conversationId],
+      })
+    })
+    return stop
+  }, [orgId, conversationId, queryClient])
 
   // Propagate server-side pending-approvals flag to parent so the approval
   // banner and input-disable state are restored after navigation.

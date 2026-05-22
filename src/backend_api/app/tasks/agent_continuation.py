@@ -237,11 +237,20 @@ async def _async_continue_bg_task(task_id: str) -> None:
                 ContinuationSkipped,
                 continue_after_bg_task,
             )
+            from src.backend_api.app.services.agno_session_lock import (
+                publish_conversation_updated,
+            )
             from src.backend_api.app.services.channel_sender import deliver_response
 
             tenant_session, response_text = await continue_after_bg_task(task_id, db)
             if response_text:
                 await deliver_response(tenant_session, response_text, db)
+
+            # Notify SSE subscribers (web clients viewing the conversation) so
+            # they refetch immediately instead of waiting for the 5s poll.
+            await publish_conversation_updated(
+                tenant_session.id, reason="bg_task_completed"
+            )
 
             log.info(
                 "continue_after_bg_task_completed: delivered task=%s session=%s source=%s",

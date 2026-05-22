@@ -208,6 +208,54 @@ export function streamMessage(
   })
 }
 
+/**
+ * Subscribe to conversation update events via SSE.
+ *
+ * The backend emits a ``messages_updated`` event whenever a new
+ * assistant/tool message is appended to the conversation from outside the
+ * caller's own request — most importantly when a background-tool
+ * continuation finishes in a Celery worker.  Consumers should react by
+ * refetching the message list immediately, avoiding the 5 s polling delay.
+ *
+ * Returns a function that, when called, closes the subscription.
+ */
+export function subscribeConversationEvents(
+  orgId: string,
+  convId: string,
+  onUpdate: (reason: string) => void
+): () => void {
+  const token = getAccessToken()
+  const deptId = getDeptId()
+  const controller = new AbortController()
+  fetchEventSource(`${SSE_URL}/v1/orgs/${orgId}/chat/conversations/${convId}/events`, {
+    method: 'GET',
+    headers: {
+      Authorization: token ? `Bearer ${token}` : '',
+      ...(deptId ? { 'X-Department-Id': deptId } : {}),
+    },
+    signal: controller.signal,
+    openWhenHidden: true,
+    onmessage(ev) {
+      if (ev.event === 'messages_updated') {
+        try {
+          const parsed = JSON.parse(ev.data || '{}')
+          onUpdate(parsed.reason ?? 'updated')
+        } catch {
+          onUpdate('updated')
+        }
+      }
+      // Ignore ``connected`` and any other event types.
+    },
+    onerror(err) {
+      // Let fetch-event-source retry with backoff by NOT re-throwing.
+      // The controller's abort() (called from cleanup) is the canonical
+      // way to stop the stream.
+      console.warn('conversation events SSE error:', err)
+    },
+  })
+  return () => controller.abort()
+}
+
 export interface UploadedAttachment {
   id: string
   filename: string
