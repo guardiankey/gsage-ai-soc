@@ -88,7 +88,9 @@
     "mermaidLoading": "Rendering diagram…",
     "mermaidCopyCode": "Copy diagram source",
     "mermaidDownloadSvg": "Download as SVG",
-    "mermaidStreamingHint": "Diagram will render when message is complete"
+    "mermaidStreamingHint": "Diagram will render when message is complete",
+    "mermaidCopySuccess": "Diagram source copied to clipboard",
+    "mermaidCopyError": "Failed to copy diagram source"
   },
   "knowledge": {
     "title": "Knowledge Base",

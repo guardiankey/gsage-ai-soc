@@ -9,6 +9,28 @@ type Props = ComponentPropsWithoutRef<'pre'> &
   }
 
 /**
+ * Recursively flatten any React node tree into its plain-text content.
+ *
+ * react-markdown v9 normally passes a single string as the children of a
+ * fenced ``<code>`` element, but some configurations (rehype plugins,
+ * whitespace splitting) deliver an array of strings or even nested
+ * elements. ``String()`` on such inputs produces garbage like
+ * ``"line1,line2"`` or ``"[object Object]"`` — corrupting the copy-to-
+ * clipboard payload while still rendering "well enough" for mermaid.
+ */
+function flattenChildrenToString(node: unknown): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string') return node
+  if (typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(flattenChildrenToString).join('')
+  if (React.isValidElement(node)) {
+    const children = (node.props as { children?: unknown }).children
+    return flattenChildrenToString(children)
+  }
+  return ''
+}
+
+/**
  * Custom `pre` renderer for react-markdown.
  *
  * Intercepts fenced ```mermaid blocks and renders them as interactive
@@ -33,7 +55,7 @@ export function MarkdownCode({
   const childClass = child?.props?.className ?? ''
 
   if (childClass.includes('language-mermaid')) {
-    const code = String(child?.props?.children ?? '').replace(/\n$/, '')
+    const code = flattenChildrenToString(child?.props?.children).replace(/\n$/, '')
 
     if (streamingMode) {
       return (

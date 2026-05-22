@@ -13,6 +13,40 @@ type RenderState = 'loading' | 'rendered' | 'error'
 
 let _diagramCounter = 0
 
+/**
+ * Copy ``text`` to the system clipboard, with a graceful fallback for
+ * environments where ``navigator.clipboard`` is unavailable — most
+ * notably non-secure contexts (HTTP outside of localhost). Returns
+ * ``true`` on success, ``false`` otherwise.
+ */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch (err) {
+      console.warn('clipboard.writeText failed, falling back:', err)
+    }
+  }
+  // Legacy fallback: hidden textarea + execCommand('copy').
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.top = '-1000px'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch (err) {
+    console.error('clipboard fallback failed:', err)
+    return false
+  }
+}
+
 export function MermaidDiagram({ code }: Props) {
   const { t } = useTranslation()
   const { theme } = useTheme()
@@ -62,9 +96,14 @@ export function MermaidDiagram({ code }: Props) {
   }, [code, theme])
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(code)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    const ok = await copyTextToClipboard(code)
+    if (ok) {
+      setCopied(true)
+      toast.success(t('chat.mermaidCopySuccess'))
+      setTimeout(() => setCopied(false), 2000)
+    } else {
+      toast.error(t('chat.mermaidCopyError'))
+    }
   }
 
   const handleDownload = () => {

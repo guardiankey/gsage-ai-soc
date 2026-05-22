@@ -88,7 +88,9 @@
     "mermaidLoading": "Rendering del diagramma…",
     "mermaidCopyCode": "Copia codice sorgente del diagramma",
     "mermaidDownloadSvg": "Scarica come SVG",
-    "mermaidStreamingHint": "Il diagramma verrà visualizzato al termine del messaggio"
+    "mermaidStreamingHint": "Il diagramma verrà visualizzato al termine del messaggio",
+    "mermaidCopySuccess": "Codice del diagramma copiato negli appunti",
+    "mermaidCopyError": "Impossibile copiare il codice del diagramma"
   },
   "knowledge": {
     "title": "Base di Conoscenza",

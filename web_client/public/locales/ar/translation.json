@@ -88,7 +88,9 @@
     "mermaidLoading": "جاري رسم المخطط…",
     "mermaidCopyCode": "نسخ مصدر المخطط",
     "mermaidDownloadSvg": "تنزيل كـ SVG",
-    "mermaidStreamingHint": "سيتم عرض المخطط عند اكتمال الرسالة"
+    "mermaidStreamingHint": "سيتم عرض المخطط عند اكتمال الرسالة",
+    "mermaidCopySuccess": "تم نسخ مصدر المخطط إلى الحافظة",
+    "mermaidCopyError": "فشل نسخ مصدر المخطط"
   },
   "knowledge": {
     "title": "قاعدة المعرفة",

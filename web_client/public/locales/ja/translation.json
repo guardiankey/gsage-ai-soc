@@ -86,7 +86,9 @@
     "mermaidLoading": "ダイアグラムをレンダリング中…",
     "mermaidCopyCode": "ダイアグラムのソースをコピー",
     "mermaidDownloadSvg": "SVGとしてダウンロード",
-    "mermaidStreamingHint": "メッセージ完了後にダイアグラムが表示されます"
+    "mermaidStreamingHint": "メッセージ完了後にダイアグラムが表示されます",
+    "mermaidCopySuccess": "ダイアグラムのソースをクリップボードにコピーしました",
+    "mermaidCopyError": "ダイアグラムのソースのコピーに失敗しました"
   },
   "knowledge": {
     "title": "ナレッジベース",
