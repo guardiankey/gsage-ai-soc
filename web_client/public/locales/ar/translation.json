@@ -90,7 +90,8 @@
     "mermaidDownloadSvg": "تنزيل كـ SVG",
     "mermaidStreamingHint": "سيتم عرض المخطط عند اكتمال الرسالة",
     "mermaidCopySuccess": "تم نسخ مصدر المخطط إلى الحافظة",
-    "mermaidCopyError": "فشل نسخ مصدر المخطط"
+    "mermaidCopyError": "فشل نسخ مصدر المخطط",
+    "messageCopyError": "فشل نسخ الرسالة"
   },
   "knowledge": {
     "title": "قاعدة المعرفة",
@@ -242,7 +243,8 @@
     "deleteDesc": "سيتم إلغاء هذا المفتاح نهائياً. لا يمكن التراجع عن هذا الإجراء.",
     "copyNow": "انسخ مفتاحك الآن — لن يُعرض مرة أخرى",
     "copyWarning": "احتفظ بهذا المفتاح في مكان آمن. لن تتمكن من رؤيته مجدداً.",
-    "created": "تاريخ الإنشاء"
+    "created": "تاريخ الإنشاء",
+    "copyError": "فشل نسخ مفتاح API"
   },
   "kbDownload": {
     "preparing": "جاري تجهيز التنزيل..."
@@ -381,7 +383,8 @@
       "copyBackup": "نسخ الرموز",
       "downloadBackup": "تنزيل الرموز",
       "backupCodesCopied": "تم نسخ رموز النسخ الاحتياطي",
-      "done": "تم"
+      "done": "تم",
+      "copyError": "فشل النسخ"
     },
     "profile": {
       "title": "المصادقة الثنائية (2FA)",

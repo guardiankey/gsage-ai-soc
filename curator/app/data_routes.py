@@ -90,6 +90,7 @@ async def list_root(session: AsyncSession = Depends(get_db)) -> HTMLResponse:
         select(Collection, func.coalesce(count_sq.c.item_count, 0).label("item_count"))
         .outerjoin(count_sq, Collection.id == count_sq.c.collection_id)
         .where(Collection.active.is_(True))
+        .where(Collection.published.is_(True))
         .order_by(Collection.slug)
     )
     result = await session.execute(stmt)
@@ -146,6 +147,9 @@ async def list_collection(slug: str, session: AsyncSession = Depends(get_db)) ->
         raise HTTPException(status_code=404, detail=f"Collection '{slug}' not found")
 
     col, item_count = row
+    if not col.published:
+        # Hide unpublished collections from public HTTP exposure.
+        raise HTTPException(status_code=404, detail=f"Collection '{slug}' not found")
 
     # Collection info card
     subtype_display = f" / {col.subtype}" if col.subtype else ""
@@ -226,7 +230,8 @@ async def _load_collection_or_404(slug: str, session: AsyncSession) -> Collectio
     _guard_path(slug)
     result = await session.execute(select(Collection).where(Collection.slug == slug))
     col = result.scalar_one_or_none()
-    if col is None:
+    if col is None or not col.published:
+        # Hide unpublished collections from public HTTP exposure.
         raise HTTPException(status_code=404, detail=f"Collection '{slug}' not found")
     return col
 
@@ -493,10 +498,19 @@ async def get_monthly_diff(
 
 
 @router.get("/{slug}/{filename}")
-async def get_file(slug: str, filename: str) -> FileResponse:
+async def get_file(
+    slug: str, filename: str, session: AsyncSession = Depends(get_db)
+) -> FileResponse:
     """Download a specific file from a collection directory."""
     _guard_path(slug)
     _guard_path(filename)
+
+    # Block public access to unpublished collections (404 to avoid leaking existence).
+    col = (
+        await session.execute(select(Collection).where(Collection.slug == slug))
+    ).scalar_one_or_none()
+    if col is None or not col.published:
+        raise HTTPException(status_code=404, detail=f"File '{filename}' not found in collection '{slug}'")
 
     file_path = _data_root() / slug / filename
     if not file_path.is_file():

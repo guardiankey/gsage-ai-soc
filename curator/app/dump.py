@@ -147,6 +147,14 @@ async def _do_dump(collection_id: int) -> None:
             collection.status = "idle"
             await session.commit()
             return
+        if not collection.published:
+            log.info(
+                "dump: collection %s is unpublished, skipping (private to admin API)",
+                collection_id,
+            )
+            collection.status = "idle"
+            await session.commit()
+            return
 
         # Mark as processing and record the start time (to detect new items)
         dump_started_at = datetime.now(tz=timezone.utc)

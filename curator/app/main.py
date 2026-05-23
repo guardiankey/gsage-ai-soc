@@ -166,6 +166,10 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_curator_items_re_added_at "
             "ON curator_items (re_added_at)"
         ))
+        await conn.execute(text(
+            "ALTER TABLE curator_collections "
+            "ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT TRUE"
+        ))
     log.info("startup: database tables created (if not exist)")
 
     # Seed default collections

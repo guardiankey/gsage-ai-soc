@@ -18,6 +18,13 @@ class CollectionCreate(BaseModel):
     type: str
     subtype: str | None = Field(None, max_length=20)
     active: bool = True
+    published: bool = Field(
+        True,
+        description=(
+            "If False, the collection is hidden from public /data/ HTTP "
+            "endpoints and its dump is skipped. Remains usable via admin API."
+        ),
+    )
 
     @field_validator("type")
     @classmethod
@@ -31,6 +38,7 @@ class CollectionUpdate(BaseModel):
     short_description: str | None = Field(None, max_length=100)
     description: str | None = None
     active: bool | None = None
+    published: bool | None = None
 
 
 class CollectionOut(BaseModel):
@@ -45,6 +53,7 @@ class CollectionOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     active: bool
+    published: bool
     status: str
     item_count: int = 0
 

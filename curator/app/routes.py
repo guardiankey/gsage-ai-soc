@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,6 +71,10 @@ async def _get_collection_or_404(collection_id: int, session: AsyncSession) -> C
 async def list_collections(
     db: AsyncSession = Depends(get_db),
     active_only: bool = Query(False, description="If true, return only active collections"),
+    published_only: bool = Query(
+        False,
+        description="If true, return only published collections (HTTP-exposed)",
+    ),
 ) -> list[CollectionOut]:
     count_sq = (
         select(Item.collection_id, func.count(Item.id).label("item_count"))
@@ -84,6 +88,8 @@ async def list_collections(
     )
     if active_only:
         stmt = stmt.where(Collection.active.is_(True))
+    if published_only:
+        stmt = stmt.where(Collection.published.is_(True))
     result = await db.execute(stmt)
     rows = result.all()
     return [
@@ -111,6 +117,7 @@ async def create_collection(
         type=payload.type,
         subtype=payload.subtype,
         active=payload.active,
+        published=payload.published,
         status="idle",
     )
     db.add(c)
@@ -136,6 +143,8 @@ async def update_collection(
         c.description = payload.description
     if payload.active is not None:
         c.active = payload.active
+    if payload.published is not None:
+        c.published = payload.published
 
     c.touch()
     await db.commit()
@@ -291,20 +300,92 @@ async def view_item(
     db: AsyncSession = Depends(get_db),
     value: str | None = Query(None, description="Filter by exact value (or CIDR)"),
     type: str | None = Query(None, description="Filter by item type (blocklist/allowlist/suspected)"),
+    created_from: str | None = Query(
+        None,
+        description="Filter items created at or after this date. Accepts ISO 8601 (with TZ) or YYYY-MM-DD (interpreted as UTC).",
+    ),
+    created_to: str | None = Query(
+        None,
+        description="Filter items created at or before this date. Same format as created_from.",
+    ),
+    expire_from: str | None = Query(
+        None,
+        description="Filter items whose expire_at is on or after this date. Items with NULL expire_at are excluded unless never_expires=true is also set.",
+    ),
+    expire_to: str | None = Query(
+        None,
+        description="Filter items whose expire_at is on or before this date. Items with NULL expire_at are excluded unless never_expires=true is also set.",
+    ),
+    created_within_days: int | None = Query(
+        None,
+        ge=1,
+        description="Shortcut: keep items created within the last N days (relative to now, UTC). Mutually exclusive with created_from/to (ANDed if both supplied).",
+    ),
+    expires_within_days: int | None = Query(
+        None,
+        ge=1,
+        description="Shortcut: keep items that will expire within the next N days (from now, UTC). Excludes never-expiring entries.",
+    ),
+    never_expires: bool | None = Query(
+        None,
+        description="If true, return only items with NULL expire_at. If false, exclude them. If omitted, no filter.",
+    ),
+    expired_only: bool = Query(
+        False,
+        description="If true, return only items whose expire_at is in the past (already expired but not yet pruned).",
+    ),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
 ) -> PaginatedItems:
     await _get_collection_or_404(collection_id, db)
 
+    # ── Parse date inputs ─────────────────────────────────────────────────────
+    created_from_dt = _parse_date_filter("created_from", created_from)
+    created_to_dt = _parse_date_filter("created_to", created_to)
+    expire_from_dt = _parse_date_filter("expire_from", expire_from)
+    expire_to_dt = _parse_date_filter("expire_to", expire_to)
+
+    now = datetime.now(timezone.utc)
+    if created_within_days is not None:
+        rel_from = now - timedelta(days=created_within_days)
+        created_from_dt = max(created_from_dt, rel_from) if created_from_dt else rel_from
+    if expires_within_days is not None:
+        rel_to = now + timedelta(days=expires_within_days)
+        expire_to_dt = min(expire_to_dt, rel_to) if expire_to_dt else rel_to
+        # "expires within N days" implies the item DOES expire — force
+        # never_expires=false unless caller explicitly overrode.
+        if never_expires is None:
+            never_expires = False
+
     base = select(Item).where(Item.collection_id == collection_id)
     count_base = select(func.count()).select_from(Item).where(Item.collection_id == collection_id)
 
-    if value:
-        base = base.where((Item.value == value) | (func.host(Item.cidr) == value))
-        count_base = count_base.where((Item.value == value) | (func.host(Item.cidr) == value))
-    if type:
-        base = base.where(Item.type == type)
-        count_base = count_base.where(Item.type == type)
+    def _apply(stmt):
+        if value:
+            stmt = stmt.where((Item.value == value) | (func.host(Item.cidr) == value))
+        if type:
+            stmt = stmt.where(Item.type == type)
+        if created_from_dt is not None:
+            stmt = stmt.where(Item.created_at >= created_from_dt)
+        if created_to_dt is not None:
+            stmt = stmt.where(Item.created_at <= created_to_dt)
+        # Expire filters: by default a from/to range only matches items that
+        # actually have an expire_at. ``never_expires=True`` flips that to
+        # NULL-only; ``never_expires=False`` excludes NULLs but keeps range.
+        if expired_only:
+            stmt = stmt.where(Item.expire_at.isnot(None)).where(Item.expire_at < now)
+        if expire_from_dt is not None:
+            stmt = stmt.where(Item.expire_at.isnot(None)).where(Item.expire_at >= expire_from_dt)
+        if expire_to_dt is not None:
+            stmt = stmt.where(Item.expire_at.isnot(None)).where(Item.expire_at <= expire_to_dt)
+        if never_expires is True:
+            stmt = stmt.where(Item.expire_at.is_(None))
+        elif never_expires is False:
+            stmt = stmt.where(Item.expire_at.isnot(None))
+        return stmt
+
+    base = _apply(base)
+    count_base = _apply(count_base)
 
     total = (await db.execute(count_base)).scalar_one()
     items = (
@@ -317,3 +398,37 @@ async def view_item(
         per_page=per_page,
         items=[ItemOut.model_validate(it) for it in items],
     )
+
+
+def _parse_date_filter(field: str, raw: Optional[str]) -> Optional[datetime]:
+    """Parse a date string accepting either ISO 8601 (with TZ) or ``YYYY-MM-DD``.
+
+    ``YYYY-MM-DD`` is interpreted at 00:00:00 UTC. Naive ISO 8601 inputs are
+    coerced to UTC. Returns ``None`` for empty input. Raises ``HTTPException``
+    400 on invalid input so the client gets a clear error.
+    """
+    if not raw:
+        return None
+    s = raw.strip()
+    # Bare date — normalise to UTC midnight.
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        try:
+            d = datetime.strptime(s, "%Y-%m-%d")
+            return d.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass  # fall through to ISO 8601 attempt
+    # ISO 8601. Python <3.11 doesn't accept trailing 'Z' — patch it.
+    iso = s.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Invalid {field}={raw!r}: expected ISO 8601 "
+                "(e.g. 2025-01-15T00:00:00Z) or YYYY-MM-DD."
+            ),
+        ) from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt

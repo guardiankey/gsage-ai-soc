@@ -90,7 +90,8 @@
     "mermaidDownloadSvg": "Télécharger en SVG",
     "mermaidStreamingHint": "Le diagramme sera rendu à la fin du message",
     "mermaidCopySuccess": "Code du diagramme copié dans le presse-papiers",
-    "mermaidCopyError": "Échec de la copie du code du diagramme"
+    "mermaidCopyError": "Échec de la copie du code du diagramme",
+    "messageCopyError": "Échec de la copie du message"
   },
   "knowledge": {
     "title": "Base de Connaissances",
@@ -242,7 +243,8 @@
     "deleteDesc": "Cette clé API sera révoquée définitivement. Cette action est irréversible.",
     "copyNow": "Copiez votre clé maintenant — elle ne sera plus affichée",
     "copyWarning": "Conservez cette clé en lieu sûr. Vous ne pourrez plus la voir.",
-    "created": "Créé"
+    "created": "Créé",
+    "copyError": "Échec de la copie de la clé API"
   },
   "kbDownload": {
     "preparing": "Préparation de votre téléchargement..."
@@ -381,7 +383,8 @@
       "copyBackup": "Copier les codes",
       "downloadBackup": "Télécharger les codes",
       "backupCodesCopied": "Codes de récupération copiés",
-      "done": "Terminé"
+      "done": "Terminé",
+      "copyError": "Échec de la copie"
     },
     "profile": {
       "title": "Authentification à Deux Facteurs (2FA)",

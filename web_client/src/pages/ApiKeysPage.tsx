@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Separator } from '@/components/ui/separator'
+import { copyTextToClipboard } from '@/lib/clipboard'
 import {
   listMyApiKeys,
   createMyApiKey,
@@ -299,9 +300,13 @@ function CreateKeyDialog({
 
   const handleCopy = async () => {
     if (!newKey) return
-    await navigator.clipboard.writeText(newKey)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    const ok = await copyTextToClipboard(newKey)
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } else {
+      toast.error(t('apiKeys.copyError'))
+    }
   }
 
   return (

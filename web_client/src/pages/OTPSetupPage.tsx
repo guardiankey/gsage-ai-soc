@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { otpSetup, otpConfirm } from '@/api/auth'
 import type { OTPSetupResponse } from '@/api/auth'
 import { extractApiError } from '@/api/client'
+import { copyTextToClipboard } from '@/lib/clipboard'
 import { toast } from 'sonner'
 
 type Step = 'setup' | 'confirm' | 'backup'
@@ -57,15 +58,23 @@ export function OTPSetupPage() {
 
   const copySecret = async () => {
     if (!setupData) return
-    await navigator.clipboard.writeText(setupData.secret)
-    setSecretCopied(true)
-    toast.success(t('otp.setup.secretCopied'))
-    setTimeout(() => setSecretCopied(false), 2000)
+    const ok = await copyTextToClipboard(setupData.secret)
+    if (ok) {
+      setSecretCopied(true)
+      toast.success(t('otp.setup.secretCopied'))
+      setTimeout(() => setSecretCopied(false), 2000)
+    } else {
+      toast.error(t('otp.setup.copyError'))
+    }
   }
 
   const copyBackupCodes = async () => {
-    await navigator.clipboard.writeText(backupCodes.join('\n'))
-    toast.success(t('otp.setup.backupCodesCopied'))
+    const ok = await copyTextToClipboard(backupCodes.join('\n'))
+    if (ok) {
+      toast.success(t('otp.setup.backupCodesCopied'))
+    } else {
+      toast.error(t('otp.setup.copyError'))
+    }
   }
 
   const downloadBackupCodes = () => {

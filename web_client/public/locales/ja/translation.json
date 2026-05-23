@@ -67,8 +67,10 @@
     "welcomeTitle": "gSage AIへようこそ",
     "welcomeSubtitle": "セキュリティ環境について何でも質問してください",
     "approvalRequired": "この実行は続行する前に承認待ちです。",
-    "viewApprovals": "承認を見る",    "errorBadge": "失敗",
-    "taskEndedUnexpectedly": "エージェントのタスクが予期せず終了しました。もう一度お試しください。",    "createConvError": "会話の作成に失敗しました",
+    "viewApprovals": "承認を見る",
+    "errorBadge": "失敗",
+    "taskEndedUnexpectedly": "エージェントのタスクが予期せず終了しました。もう一度お試しください。",
+    "createConvError": "会話の作成に失敗しました",
     "newConvDesc": "新しい会話にオプションのタイトルを入力してください。",
     "renameConvDesc": "この会話の新しいタイトルを入力してください。",
     "attachFile": "ファイルを添付",
@@ -88,7 +90,8 @@
     "mermaidDownloadSvg": "SVGとしてダウンロード",
     "mermaidStreamingHint": "メッセージ完了後にダイアグラムが表示されます",
     "mermaidCopySuccess": "ダイアグラムのソースをクリップボードにコピーしました",
-    "mermaidCopyError": "ダイアグラムのソースのコピーに失敗しました"
+    "mermaidCopyError": "ダイアグラムのソースのコピーに失敗しました",
+    "messageCopyError": "メッセージのコピーに失敗しました"
   },
   "knowledge": {
     "title": "ナレッジベース",
@@ -240,7 +243,8 @@
     "deleteDesc": "このAPIキーは永久に失効されます。この操作は元に戻せません。",
     "copyNow": "今すぐキーをコピーしてください — 再表示されません",
     "copyWarning": "このキーを安全な場所に保管してください。再度確認することはできません。",
-    "created": "作成日"
+    "created": "作成日",
+    "copyError": "APIキーのコピーに失敗しました"
   },
   "kbDownload": {
     "preparing": "ダウンロードを準備しています..."
@@ -379,7 +383,8 @@
       "copyBackup": "コードをコピー",
       "downloadBackup": "コードをダウンロード",
       "backupCodesCopied": "バックアップコードがコピーされました",
-      "done": "完了"
+      "done": "完了",
+      "copyError": "コピーに失敗しました"
     },
     "profile": {
       "title": "二要素認証（2FA）",

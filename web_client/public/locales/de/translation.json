@@ -90,7 +90,8 @@
     "mermaidDownloadSvg": "Als SVG herunterladen",
     "mermaidStreamingHint": "Das Diagramm wird nach Abschluss der Nachricht gerendert",
     "mermaidCopySuccess": "Diagrammquelle in die Zwischenablage kopiert",
-    "mermaidCopyError": "Diagrammquelle konnte nicht kopiert werden"
+    "mermaidCopyError": "Diagrammquelle konnte nicht kopiert werden",
+    "messageCopyError": "Nachricht konnte nicht kopiert werden"
   },
   "knowledge": {
     "title": "Wissensdatenbank",
@@ -242,7 +243,8 @@
     "deleteDesc": "Dieser API-Schlüssel wird dauerhaft widerrufen. Diese Aktion kann nicht rückgängig gemacht werden.",
     "copyNow": "Kopiere deinen Schlüssel jetzt — er wird nicht erneut angezeigt",
     "copyWarning": "Bewahre diesen Schlüssel sicher auf. Du wirst ihn nicht erneut sehen können.",
-    "created": "Erstellt"
+    "created": "Erstellt",
+    "copyError": "API-Schlüssel konnte nicht kopiert werden"
   },
   "kbDownload": {
     "preparing": "Download wird vorbereitet..."
@@ -381,7 +383,8 @@
       "copyBackup": "Codes kopieren",
       "downloadBackup": "Codes herunterladen",
       "backupCodesCopied": "Backup-Codes kopiert",
-      "done": "Fertig"
+      "done": "Fertig",
+      "copyError": "Kopieren fehlgeschlagen"
     },
     "profile": {
       "title": "Zwei-Faktor-Authentifizierung (2FA)",

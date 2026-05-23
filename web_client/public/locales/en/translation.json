@@ -90,7 +90,8 @@
     "mermaidDownloadSvg": "Download as SVG",
     "mermaidStreamingHint": "Diagram will render when message is complete",
     "mermaidCopySuccess": "Diagram source copied to clipboard",
-    "mermaidCopyError": "Failed to copy diagram source"
+    "mermaidCopyError": "Failed to copy diagram source",
+    "messageCopyError": "Failed to copy message"
   },
   "knowledge": {
     "title": "Knowledge Base",
@@ -242,7 +243,8 @@
     "deleteDesc": "This API key will be permanently revoked. This action cannot be undone.",
     "copyNow": "Copy your key now — it will not be shown again",
     "copyWarning": "Store this key securely. You won't be able to see it again.",
-    "created": "Created"
+    "created": "Created",
+    "copyError": "Failed to copy API key"
   },
   "kbDownload": {
     "preparing": "Preparing your download..."
@@ -381,7 +383,8 @@
       "copyBackup": "Copy codes",
       "downloadBackup": "Download codes",
       "backupCodesCopied": "Backup codes copied",
-      "done": "Done"
+      "done": "Done",
+      "copyError": "Failed to copy"
     },
     "profile": {
       "title": "Two-Factor Authentication (2FA)",

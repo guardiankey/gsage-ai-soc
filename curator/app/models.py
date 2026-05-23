@@ -90,6 +90,14 @@ class Collection(Base):
         onupdate=func.now(),
     )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # When False, the collection is hidden from the public /data/ HTTP endpoints
+    # and its dump is skipped. The collection remains fully usable through the
+    # authenticated admin API (/a/...), so the agent/tools can keep populating
+    # it privately. Orthogonal to `active`: an unpublished collection can still
+    # be active (queryable internally) but not exposed to HTTP consumers.
+    published: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="idle")
 
     items: Mapped[list[Item]] = relationship(

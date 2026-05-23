@@ -62,6 +62,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
   | `active_only` | `boolean` | — | Used with list_collections. If true, return only active collections (default: false). |
+  | `published_only` | `boolean` | — | Used with list_collections. If true, return only published collections (those exposed via the public /data/ HTTP endpoints; default: false). When omitted or false, both published and private collections are returned (the 'published' flag is included in each collection object so the agent can tell them apart). |
 
 - **`view_items`** — query items inside a specific collection (requires collection_id)
 
@@ -70,6 +71,16 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `collection_id` | `integer` | — | Collection ID. Required for view_items. |
   | `value` | `string` | — | Used with view_items. Filter by exact value (IP address, domain, hash, etc.). |
   | `item_type` | `string` | — | Used with view_items. Filter by item type: blocklist, allowlist, or suspected. |
+  | `created_from` | `string` | — | Used with view_items. Lower bound (inclusive) for the item's created_at. Accepts ISO 8601 with TZ or YYYY-MM-DD (interpreted as UTC). |
+  | `created_to` | `string` | — | Used with view_items. Upper bound (inclusive) for the item's created_at. Same format as created_from. |
+  | `expire_from` | `string` | — | Used with view_items. Lower bound (inclusive) for the item's expire_at. Excludes never-expiring items unless never_expires=true is also set. |
+  | `expire_to` | `string` | — | Used with view_items. Upper bound (inclusive) for the item's expire_at. Excludes never-expiring items unless never_expires=true is also set. |
+  | `created_within_days` | `integer` | — | Used with view_items. Shortcut: keep only items created within the last N days from now (UTC). ANDed with created_from/to if both supplied. |
+  | `expires_within_days` | `integer` | — | Used with view_items. Shortcut: keep items that will expire within the next N days. Implicitly excludes never-expiring entries. |
+  | `never_expires` | `boolean` | — | Used with view_items. If true, return only items with no expiry (permanent). If false, exclude them. If omitted, no filter on this dimension. |
+  | `expired_only` | `boolean` | — | Used with view_items. If true, return only items whose expire_at is already in the past (expired but not yet pruned by the cleanup task). |
+  | `export_csv` | `boolean` | — | Used with view_items. When true, fetch all matching items (up to 10 000) and ship them as a downloadable CSV artifact in addition to the inline preview. A CSV is also produced automatically whenever the total exceeds per_page. |
+  | `group_by` | `array` | — | Used with view_items. Columns to aggregate in the top-N summary. Defaults to ['type'] when omitted. Common values: type, public_reference, reference. |
 
 
 ### `curator_manage`
@@ -80,6 +91,17 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `collection_id` | `integer` | — | Target collection ID. Required for add_items, del_item, and update_collection. Use curator_lists action=list_collections to discover IDs. |
   | `items` | `array` | — | List of items to add. Required for add_items. Each item must have 'value' and 'item_type'. Optionally 'public_reference', 'reference', 'expire_days'. |
+
+- **`import_csv`** — bulk-add entries from a stored CSV file (requires collection_id, file_id)
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `file_id` | `string` | — | UUID of the stored CSV file to import. Required for action=import_csv. The CSV must have a header row with the columns: value (required), item_type, public_reference, reference, expire_days. |
+  | `default_item_type` | `string` | — | Used with import_csv. Fallback item_type applied to rows that have an empty/missing 'item_type' column. |
+  | `default_public_reference` | `string` | — | Used with import_csv. Fallback public_reference applied to rows that omit it. |
+  | `default_reference` | `string` | — | Used with import_csv. Fallback reference applied to rows that omit it. |
+  | `default_expire_days` | `integer` | — | Used with import_csv. Fallback expire_days applied to rows that omit it. Omit for permanent entries. |
+  | `dry_run` | `boolean` | — | Used with import_csv. When true, validate the CSV and return projected counts (would_add / invalid_rows) without calling the Curator service. |
 
 - **`del_item`** — remove an entry from a collection (requires collection_id, value, item_type)
 
@@ -104,6 +126,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | `collection_id` | `integer` | — | Target collection ID. Required for add_items, del_item, and update_collection. Use curator_lists action=list_collections to discover IDs. |
   | `description` | `string` | — | Detailed description of the collection. Used for create/update_collection. |
   | `active` | `boolean` | — | Whether the collection is active (default: true). Inactive collections are not dumped. Used for create/update_collection. |
+  | `published` | `boolean` | — | Whether the collection is exposed via the public /data/ HTTP endpoints (default: true). When false, the collection is hidden from public listings AND its dump files are not generated, but the collection remains fully usable via the admin API (curator_manage / curator_lists). Use 'published=false' for agent-only / private lists. Used for create/update_collection. |
 
 
 ## Permissions required

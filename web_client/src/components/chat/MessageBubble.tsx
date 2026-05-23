@@ -3,8 +3,10 @@ import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Copy, Check, User, Bot, FileText, AlertTriangle } from 'lucide-react'
+import { toast } from 'sonner'
 import { type Message } from '@/api/chat'
 import { cn, formatDate } from '@/lib/utils'
+import { copyTextToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { MarkdownLink } from './MarkdownLink'
 import { MarkdownCode } from './MarkdownCode'
@@ -27,9 +29,13 @@ export function MessageBubble({ message }: Props) {
   const isError = !isUser && message.status === 'error'
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(message.content)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    const ok = await copyTextToClipboard(message.content)
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } else {
+      toast.error(t('chat.messageCopyError'))
+    }
   }
 
   return (
