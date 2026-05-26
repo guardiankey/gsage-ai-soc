@@ -95,7 +95,7 @@ wizard::run() {
             wizard::_ask anthropic_api_key     "Anthropic API key"
             ;;
         deepseek)
-            wizard::_ask deepseek_maker_model "DeepSeek model" "deepseek-chat"
+            wizard::_ask deepseek_maker_model "DeepSeek model" "deepseek-v4-flash"
             wizard::_ask deepseek_api_key     "DeepSeek API key"
             ;;
     esac
