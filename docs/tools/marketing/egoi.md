@@ -66,6 +66,7 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_EGOI__API_KEY` | `api_key` | `string` | — | ✓ | E-goi API key. Created under My Account → API Keys in the E-goi web UI. Sent in the 'Apikey' HTTP header. |
 | `TOOL_EGOI__HOST` | `host` | `string` | `"https://api.egoiapp.com"` | — | API base URL (default: https://api.egoiapp.com). Override only when E-goi has provisioned a regional/dedicated host. |
 | `TOOL_EGOI__TIMEOUT` | `timeout` | `integer` | `60` | — | Per-request timeout in seconds (default: 60). |
+| `TOOL_EGOI_CONTACT_MANAGE__AUTO_APPROVE` | `auto_approve` | `boolean` | `false` | — | When true, HITL approval requests for this tool are auto-approved by the backend without human review. Useful for lab/dev environments. DB toolconfig overrides env TOOL_<NAME>__AUTO_APPROVE; default is false. |
 
 _Note: any field above can also be overridden per-tool by using the prefix `TOOL_<TOOL_NAME>__` instead of the shared `TOOL_<NAMESPACE>__` — useful when a single tool in the family needs a distinct value._
 

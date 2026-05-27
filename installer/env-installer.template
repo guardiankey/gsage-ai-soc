@@ -177,3 +177,11 @@ TOOL_CURATOR_LISTS__BASE_URL=http://curator:8000
 TOOL_CURATOR_LISTS__API_KEY=@@GENERATED_CURATOR_KEY@@
 TOOL_CURATOR_MANAGE__BASE_URL=http://curator:8000
 TOOL_CURATOR_MANAGE__API_KEY=@@GENERATED_CURATOR_KEY@@
+
+# ── HITL auto-approval (per-tool) ─────────────────────────────
+# Tools that declare requires_approval=True can be auto-approved to skip the
+# Human-in-the-Loop review step. Resolution order: DB toolconfig (profile=default)
+# > env var TOOL_<TOOL_NAME>__AUTO_APPROVE > default (false). Use only in
+# lab/dev. Examples (uncomment and set to true to enable):
+# TOOL_SEI_WRITE__AUTO_APPROVE=false
+# TOOL_AD_WRITE__AUTO_APPROVE=false

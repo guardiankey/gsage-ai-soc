@@ -60,6 +60,21 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
 
   const messages = data?.messages
 
+  // Track when this client's own stream was active / just ended so we can
+  // suppress the SSE ``messages_updated`` event that the backend emits at
+  // the end of OUR OWN message stream (chat.py publishes the event right
+  // before closing the stream). Without this guard the subscriber would
+  // trigger an extra GET on the messages list redundantly with the
+  // invalidation already issued in ChatPage's onDone.
+  const isStreamingRef = useRef(isStreaming)
+  const streamEndedAtRef = useRef(0)
+  useEffect(() => {
+    if (isStreamingRef.current && !isStreaming) {
+      streamEndedAtRef.current = Date.now()
+    }
+    isStreamingRef.current = isStreaming
+  }, [isStreaming])
+
   // Subscribe to server-pushed conversation update events (SSE) so we
   // refetch the message list immediately when a background-tool
   // continuation appends a new assistant message — instead of waiting
@@ -68,6 +83,10 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
   useEffect(() => {
     if (!orgId || !conversationId) return
     const stop = subscribeConversationEvents(orgId, conversationId, () => {
+      // Skip events that coincide with our own just-finished stream
+      // (ChatPage.onDone already invalidates the messages query).
+      if (isStreamingRef.current) return
+      if (Date.now() - streamEndedAtRef.current < 1500) return
       queryClient.invalidateQueries({
         queryKey: ['messages', orgId, conversationId],
       })

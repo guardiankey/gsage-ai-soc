@@ -74,6 +74,7 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_SMTP_SEND__SMTP_USE_TLS` | `smtp_use_tls` | `boolean` | — | — | Use STARTTLS for the SMTP connection (overrides SMTP_USE_TLS). |
 | `TOOL_SMTP_SEND__SMTP_USERNAME` | `smtp_username` | `string` | — | — | SMTP authentication username (overrides SMTP_USERNAME). |
 | `TOOL_SMTP_SEND__SMTP_VALIDATE_CERTS` | `smtp_validate_certs` | `boolean` | — | — | Validate TLS server certificate (default true).  Set to false only for internal relays using self-signed certificates. |
+| `TOOL_SEND_EMAIL__AUTO_APPROVE` | `auto_approve` | `boolean` | `false` | — | When true, HITL approval requests for this tool are auto-approved by the backend without human review. Useful for lab/dev environments. DB toolconfig overrides env TOOL_<NAME>__AUTO_APPROVE; default is false. |
 
 _Note: any field above can also be overridden per-tool by using the prefix `TOOL_<TOOL_NAME>__` instead of the shared `TOOL_<NAMESPACE>__` — useful when a single tool in the family needs a distinct value._
 

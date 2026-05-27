@@ -75,6 +75,7 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_SSH_COMMAND__HOSTS` | `hosts` | `array` | `[]` | — | List of SSH hosts available for this tool. |
 | `TOOL_SSH_COMMAND__MAX_OUTPUT_BYTES` | `max_output_bytes` | `integer` | `65536` | — | Maximum bytes to capture from stdout + stderr combined. Default: 65536. |
 | `TOOL_SSH_COMMAND__PRESET_COMMANDS` | `preset_commands` | `array` | `[]` | — | Pre-defined commands that can be run without approval. |
+| `TOOL_SSH_COMMAND__AUTO_APPROVE` | `auto_approve` | `boolean` | `false` | — | When true, HITL approval requests for this tool are auto-approved by the backend without human review. Useful for lab/dev environments. DB toolconfig overrides env TOOL_<NAME>__AUTO_APPROVE; default is false. |
 
 ## Permissions required
 

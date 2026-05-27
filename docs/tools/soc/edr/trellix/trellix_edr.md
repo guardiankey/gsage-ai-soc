@@ -80,6 +80,7 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_TRELLIX_EDR__TOKEN_URL` | `token_url` | `string` | `"https://auth.trellix.com/auth/realms/IAM/protocol/openid-connect/token"` | — | Override the OAuth2 token endpoint.  Default: https://auth.trellix.com/auth/realms/IAM/protocol/openid-connect/token. |
 | `TOOL_TRELLIX_EDR__VERIFY_TLS` | `verify_tls` | `boolean` | `true` | — | Verify TLS certificates (default: true). |
 | `TOOL_TRELLIX_EDR__X_API_KEY` | `x_api_key` | `string` | — | ✓ | Trellix x-api-key header value (issued together with the OAuth2 credentials). |
+| `TOOL_TRELLIX_EDR_QUARANTINE_HOST__AUTO_APPROVE` | `auto_approve` | `boolean` | `false` | — | When true, HITL approval requests for this tool are auto-approved by the backend without human review. Useful for lab/dev environments. DB toolconfig overrides env TOOL_<NAME>__AUTO_APPROVE; default is false. |
 
 _Note: any field above can also be overridden per-tool by using the prefix `TOOL_<TOOL_NAME>__` instead of the shared `TOOL_<NAMESPACE>__` — useful when a single tool in the family needs a distinct value._
 

@@ -21,7 +21,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, Any, AsyncIterator, List, Optional
+from typing import Annotated, Any, AsyncIterator, List, Optional, cast
 
 from src.backend_api.app.schemas.pagination import PaginatedResponse, PaginationParams, paginate_query
 
@@ -316,6 +316,107 @@ async def _process_approval_delegations(
     except Exception as exc:
         log.warning("_process_approval_delegations: commit failed: %s", exc)
         await db.rollback()
+
+
+async def _process_auto_approvals(
+    *,
+    approval_ids: list[str],
+    ctx: TenantContext,
+    db: AsyncSession,
+) -> tuple[list[str], list[str]]:
+    """Partition pending approvals into auto-approved vs manual.
+
+    For each id flagged as auto-approve (DB toolconfig > env > default False),
+    immediately resolves the Agno approval row as ``approved`` and dispatches
+    the continuation Celery task — the same path used when a human clicks
+    "Approve" in the UI.
+
+    Returns ``(auto_ids, manual_ids)``. Auto-resolved ids should be excluded
+    from delegation processing and from the ``run_paused`` payload emitted
+    to the client.
+
+    Errors per approval are logged and the id is treated as manual to fail
+    safe (a human is still asked).
+    """
+    if not approval_ids:
+        return [], []
+
+    from src.backend_api.app.services.agent_factory import get_agno_db
+    from src.backend_api.app.services.tool_auto_approve import is_auto_approve
+
+    agno_db = get_agno_db()
+    auto_ids: list[str] = []
+    manual_ids: list[str] = []
+
+    for ap_id in approval_ids:
+        try:
+            ap_row = await agno_db.get_approval(ap_id)
+            if ap_row is None:
+                log.warning("auto_approve: approval %s not found in Agno DB", ap_id)
+                manual_ids.append(ap_id)
+                continue
+
+            tool_name: str = ap_row.get("tool_name") or "*"
+            tool_args: dict = dict(ap_row.get("tool_args") or {})
+            # Unwrap proxy tool names (run_discovered_tool / run_approved_tool)
+            if tool_name in ("run_discovered_tool", "run_approved_tool") and "tool_name" in tool_args:
+                tool_name = tool_args["tool_name"] or tool_name
+
+            enabled = await is_auto_approve(
+                org_id=ctx.org_id, tool_name=tool_name, db=db
+            )
+            if not enabled:
+                manual_ids.append(ap_id)
+                continue
+
+            updated = await agno_db.update_approval(
+                ap_id,
+                expected_status="pending",
+                status="approved",
+                resolved_by=str(ctx.user_id),
+                resolved_at=int(datetime.now(timezone.utc).timestamp()),
+                resolution_data={
+                    "action": "approve",
+                    "auto_approved": True,
+                    "comment": "Auto-approved by tool config",
+                },
+            )
+            if updated is None:
+                log.warning(
+                    "auto_approve: update_approval returned None for ap=%s tool=%s",
+                    ap_id, tool_name,
+                )
+                manual_ids.append(ap_id)
+                continue
+
+            try:
+                from src.backend_api.app.tasks.agent_continuation import (  # noqa: PLC0415
+                    continue_after_approval_resolved,
+                )
+                cast(Any, continue_after_approval_resolved).delay(
+                    ap_id, str(ctx.org_id)
+                )
+            except Exception as cont_exc:
+                log.error(
+                    "auto_approve: failed to dispatch continuation ap=%s: %s",
+                    ap_id, cont_exc, exc_info=True,
+                )
+                # Continuation failed but the approval row is already
+                # resolved — leaving it in manual_ids would mislead the UI.
+                # Keep it in auto_ids and surface via logs.
+            auto_ids.append(ap_id)
+            log.info(
+                "auto-approval: tool=%s approval=%s org=%s user=%s",
+                tool_name, ap_id, ctx.org_id, ctx.user_id,
+            )
+        except Exception as exc:
+            log.error(
+                "auto_approve: unexpected error for ap=%s: %s",
+                ap_id, exc, exc_info=True,
+            )
+            manual_ids.append(ap_id)
+
+    return auto_ids, manual_ids
 
 
 # ---------------------------------------------------------------------------
@@ -943,6 +1044,21 @@ async def send_message(
             conv_id, run_output.run_id, pending_approval_ids,
         )
 
+        # ── Auto-approval: resolve flagged tools and only delegate the rest ──
+        try:
+            auto_ids, manual_ids = await _process_auto_approvals(
+                approval_ids=pending_approval_ids,
+                ctx=ctx,
+                db=db,
+            )
+        except Exception as auto_exc:
+            log.error(
+                "sync auto-approval processing error: %s",
+                auto_exc, exc_info=True,
+            )
+            auto_ids, manual_ids = [], list(pending_approval_ids)
+        pending_approval_ids = manual_ids
+
         # ── Auto-delegation: create GSageApprovalDelegation rows ──────
         await _process_approval_delegations(
             approval_ids=pending_approval_ids,
@@ -953,20 +1069,28 @@ async def send_message(
             run_id=str(run_output.run_id or ""),
         )
 
+        # When every approval was auto-resolved, treat as a regular response:
+        # the continuation Celery task will deliver the assistant's next
+        # message; surface that to the client via status.
+        response_status = "pending_approval" if pending_approval_ids else "auto_approved"
+        default_content = (
+            "This action requires human approval before it can be executed. "
+            "Please review the pending approvals and use POST .../messages/continue "
+            "once they have been resolved."
+            if pending_approval_ids
+            else "The requested action was auto-approved by policy and is being executed."
+        )
+
         return SendMessageResponse(
             id=run_output.run_id or str(uuid.uuid4()),
             session_id=str(session.id),
             agno_session_id=session.agno_session_id,
             role="assistant",
-            content=_extract_text(run_output.content) or (
-                "This action requires human approval before it can be executed. "
-                "Please review the pending approvals and use POST .../messages/continue "
-                "once they have been resolved."
-            ),
+            content=_extract_text(run_output.content) or default_content,
             created_at=datetime.now(timezone.utc),
             metadata=MessageMetadata(run_id=run_output.run_id),
-            status="pending_approval",
-            pending_run_id=run_output.run_id,
+            status=response_status,
+            pending_run_id=run_output.run_id if pending_approval_ids else None,
             pending_approvals=pending_approval_ids or None,
         )
 
@@ -1063,19 +1187,39 @@ async def continue_run(
             if approval_id:
                 pending_approval_ids.append(str(approval_id))
 
+        # Auto-approval: resolve flagged tools and only return the manual rest.
+        try:
+            auto_ids, manual_ids = await _process_auto_approvals(
+                approval_ids=pending_approval_ids,
+                ctx=ctx,
+                db=db,
+            )
+        except Exception as auto_exc:
+            log.error(
+                "continue_run auto-approval processing error: %s",
+                auto_exc, exc_info=True,
+            )
+            auto_ids, manual_ids = [], list(pending_approval_ids)
+        pending_approval_ids = manual_ids
+
+        response_status = "pending_approval" if pending_approval_ids else "auto_approved"
+        default_content = (
+            "Additional approvals are required. Please resolve all pending approvals "
+            "and call this endpoint again."
+            if pending_approval_ids
+            else "Pending approvals were auto-approved by policy and execution is continuing."
+        )
+
         return SendMessageResponse(
             id=run_output.run_id or str(uuid.uuid4()),
             session_id=str(session.id),
             agno_session_id=session.agno_session_id,
             role="assistant",
-            content=_extract_text(run_output.content) or (
-                "Additional approvals are required. Please resolve all pending approvals "
-                "and call this endpoint again."
-            ),
+            content=_extract_text(run_output.content) or default_content,
             created_at=datetime.now(timezone.utc),
             metadata=MessageMetadata(run_id=run_output.run_id),
-            status="pending_approval",
-            pending_run_id=run_output.run_id,
+            status=response_status,
+            pending_run_id=run_output.run_id if pending_approval_ids else None,
             pending_approvals=pending_approval_ids or None,
         )
 
@@ -1140,6 +1284,7 @@ async def _sse_stream(
 
     final_metrics: dict = {}
     pending_approval_ids: list[str] = []
+    auto_approved_ids: list[str] = []
     paused_run_id: Optional[str] = None
     content_started = False
     retries_left = _LLM_RETRY_ATTEMPTS
@@ -1209,6 +1354,26 @@ async def _sse_stream(
                             if approval_id:
                                 pending_approval_ids.append(str(approval_id))
 
+                        # Auto-approval pass: resolve flagged tools immediately
+                        # and only delegate / notify for the manual remainder.
+                        try:
+                            auto_ids, manual_ids = await _process_auto_approvals(
+                                approval_ids=pending_approval_ids,
+                                ctx=ctx,
+                                db=db,
+                            )
+                        except Exception as auto_exc:
+                            log.error(
+                                "SSE auto-approval processing error: %s",
+                                auto_exc, exc_info=True,
+                            )
+                            auto_ids, manual_ids = [], list(pending_approval_ids)
+                        auto_approved_ids.extend(auto_ids)
+                        # Replace pending list with the manual subset so the
+                        # SSE event / metadata only mentions approvals that
+                        # actually require user action.
+                        pending_approval_ids = manual_ids
+
                         # Process approval delegations (same as sync path)
                         try:
                             await _process_approval_delegations(
@@ -1226,10 +1391,22 @@ async def _sse_stream(
                                 exc_info=True,
                             )
 
-                        yield _fmt_sse("run_paused", {
-                            "pending_approvals": pending_approval_ids,
-                            "run_id": paused_run_id,
-                        })
+                        # Skip the run_paused SSE event entirely when every
+                        # pending approval was auto-resolved — the UI should
+                        # not flash an approval banner. The continuation
+                        # Celery task will deliver the assistant's next
+                        # message through the conversation's SSE channel.
+                        if pending_approval_ids:
+                            yield _fmt_sse("run_paused", {
+                                "pending_approvals": pending_approval_ids,
+                                "run_id": paused_run_id,
+                            })
+                        else:
+                            log.info(
+                                "SSE: all %d pending approvals were auto-resolved "
+                                "(run_id=%s); skipping run_paused emit",
+                                len(auto_ids), paused_run_id,
+                            )
 
                     elif event_type == RunEvent.run_error:
                         err_str = str(getattr(chunk, "content", ""))
@@ -1243,6 +1420,7 @@ async def _sse_stream(
                             # Reset per-attempt state before retry
                             final_metrics = {}
                             pending_approval_ids = []
+                            auto_approved_ids = []
                             paused_run_id = None
                             await asyncio.sleep(delay)
                             break  # break inner for-loop → re-enter while
@@ -1286,6 +1464,7 @@ async def _sse_stream(
                     # Reset per-attempt state before retry
                     final_metrics = {}
                     pending_approval_ids = []
+                    auto_approved_ids = []
                     paused_run_id = None
                     await asyncio.sleep(delay)
                     continue
@@ -1300,7 +1479,10 @@ async def _sse_stream(
 
         # Safety net: stream finished but no content was ever delivered.
         # This can happen when run_error is NOT emitted but the LLM returned nothing.
-        if not content_started and not pending_approval_ids:
+        # Auto-approved runs are also content-less here — the continuation
+        # Celery task will deliver the assistant's next message — so do not
+        # treat them as an error.
+        if not content_started and not pending_approval_ids and not auto_approved_ids:
             log.warning("SSE stream completed with no content — emitting error")
             yield _fmt_sse("content_delta", {"delta": _LLM_UNAVAILABLE_MSG})
             yield _fmt_sse(
@@ -1313,6 +1495,13 @@ async def _sse_stream(
         if pending_approval_ids:
             end_metadata["pending_approvals"] = pending_approval_ids
             end_metadata["run_id"] = paused_run_id
+        if auto_approved_ids:
+            # Signal to the frontend that one or more approvals were
+            # auto-resolved; a follow-up assistant message is being produced
+            # by the continuation Celery task and will arrive via the
+            # conversation's messages_updated SSE channel.
+            end_metadata["auto_approved"] = auto_approved_ids
+            end_metadata["has_active_bg_tasks"] = True
 
         # Flush any text held back by the response filter (e.g. trailing
         # text that could have been an opening fence).

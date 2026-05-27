@@ -167,6 +167,11 @@ export function streamMessage(
 ): void {
   const token = getAccessToken()
   const deptId = getDeptId()
+  // Guard against double-invocation of terminal callbacks: the server sends
+  // ``message_end`` and then closes the connection, which would otherwise
+  // fire ``onclose`` and call ``onDone`` a second time (causing duplicate
+  // query invalidations / refetches on the UI side).
+  let terminated = false
   fetchEventSource(`${SSE_URL}/v1/orgs/${orgId}/chat/conversations/${convId}/messages/stream`, {
     method: 'POST',
     headers: {
@@ -187,8 +192,12 @@ export function streamMessage(
         } else if (ev.event === 'run_paused') {
           callbacks.onPaused?.(parsed)
         } else if (ev.event === 'message_end') {
+          if (terminated) return
+          terminated = true
           callbacks.onDone(parsed.metadata, parsed.status ?? null)
         } else if (ev.event === 'error') {
+          if (terminated) return
+          terminated = true
           callbacks.onError(parsed.detail ?? 'Streaming error')
         }
       } catch {
@@ -197,12 +206,20 @@ export function streamMessage(
       }
     },
     onclose() {
-      // Stream closed by server without an explicit message_end (e.g. network drop).
-      // Call onDone so the UI doesn't hang indefinitely.
+      // Stream closed by server. If a terminal event (``message_end`` or
+      // ``error``) already fired, do NOT call onDone again — that would
+      // re-invalidate the messages/conversations queries and trigger
+      // duplicate GETs. Only act as a fallback for true connection drops
+      // where no terminal event was received.
+      if (terminated) return
+      terminated = true
       callbacks.onDone(undefined)
     },
     onerror(err) {
-      callbacks.onError(String(err))
+      if (!terminated) {
+        terminated = true
+        callbacks.onError(String(err))
+      }
       throw err // stop retrying
     },
   })

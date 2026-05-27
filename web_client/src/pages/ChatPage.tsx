@@ -118,9 +118,17 @@ export default function ChatPage() {
             queryClient
               .invalidateQueries({ queryKey: ['messages', orgId, targetConvId] })
               .then(() => {
-                setStreamingContent('')
-                accumulated = ''
-                setPendingUserMessage(null)
+                // Defer one animation frame so the messages useQuery has
+                // time to re-render with the freshly refetched data before
+                // we remove the streaming placeholder. Without this rAF the
+                // placeholder is cleared in a render that runs before the
+                // QueryObserver notifies subscribers, producing a brief
+                // visual gap ("flicker") at the end of the stream.
+                requestAnimationFrame(() => {
+                  setStreamingContent('')
+                  accumulated = ''
+                  setPendingUserMessage(null)
+                })
               })
             queryClient.invalidateQueries({ queryKey: ['conversations', orgId] })
             chatWindowRef.current?.scrollToBottom()
@@ -128,9 +136,13 @@ export default function ChatPage() {
             queryClient
               .invalidateQueries({ queryKey: ['messages', orgId, targetConvId] })
               .then(() => {
-                setStreamingContent('')
-                accumulated = ''
-                setPendingUserMessage(null)
+                // See comment above — defer to next frame to avoid the
+                // end-of-stream flicker.
+                requestAnimationFrame(() => {
+                  setStreamingContent('')
+                  accumulated = ''
+                  setPendingUserMessage(null)
+                })
               })
             queryClient.invalidateQueries({ queryKey: ['conversations', orgId] })
             chatWindowRef.current?.scrollToBottom()
@@ -145,9 +157,14 @@ export default function ChatPage() {
           queryClient
             .invalidateQueries({ queryKey: ['messages', orgId, targetConvId] })
             .then(() => {
-              setStreamingContent('')
-              accumulated = ''
-              setPendingUserMessage(null)
+              // Defer to next frame so the refetched messages render before
+              // we remove the streaming placeholder (avoids end-of-stream
+              // flicker).
+              requestAnimationFrame(() => {
+                setStreamingContent('')
+                accumulated = ''
+                setPendingUserMessage(null)
+              })
             })
         },
       }

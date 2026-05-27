@@ -57,6 +57,8 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_GLPI__APP_TOKEN` | `app_token` | `string` | `""` | — | GLPI application token. |
 | `TOOL_GLPI__URL` | `url` | `string` | `""` | — | GLPI REST API base URL. |
 | `TOOL_GLPI__USER_TOKEN` | `user_token` | `string` | `""` | — | GLPI user token. |
+| `TOOL_GLPI_CREATE_TICKET__AUTO_APPROVE` | `auto_approve` | `boolean` | `false` | — | When true, HITL approval requests for this tool are auto-approved by the backend without human review. Useful for lab/dev environments. DB toolconfig overrides env TOOL_<NAME>__AUTO_APPROVE; default is false. |
+| `TOOL_GLPI_UPDATE_TICKET__AUTO_APPROVE` | `auto_approve` | `boolean` | `false` | — | When true, HITL approval requests for this tool are auto-approved by the backend without human review. Useful for lab/dev environments. DB toolconfig overrides env TOOL_<NAME>__AUTO_APPROVE; default is false. |
 
 _Note: any field above can also be overridden per-tool by using the prefix `TOOL_<TOOL_NAME>__` instead of the shared `TOOL_<NAMESPACE>__` — useful when a single tool in the family needs a distinct value._
 

@@ -70,6 +70,7 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_AZURE__DEFAULT_SUBSCRIPTION_ID` | `default_subscription_id` | `string` | `""` | — | Subscription used when the caller omits 'params.subscription_id'. |
 | `TOOL_AZURE__TENANT_ID` | `tenant_id` | `string` | `""` | — | Microsoft Entra ID (Azure AD) tenant ID (UUID). |
 | `TOOL_AZURE__TIMEOUT` | `timeout` | `integer` | `60` | — | HTTP request timeout in seconds (default 60). |
+| `TOOL_AZURE_MANAGE__AUTO_APPROVE` | `auto_approve` | `boolean` | `false` | — | When true, HITL approval requests for this tool are auto-approved by the backend without human review. Useful for lab/dev environments. DB toolconfig overrides env TOOL_<NAME>__AUTO_APPROVE; default is false. |
 
 _Note: any field above can also be overridden per-tool by using the prefix `TOOL_<TOOL_NAME>__` instead of the shared `TOOL_<NAMESPACE>__` — useful when a single tool in the family needs a distinct value._
 

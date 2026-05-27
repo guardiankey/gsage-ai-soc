@@ -17,7 +17,9 @@ gSage AI — Nmap Network Scanner tool.
 
 The variables below are derived automatically from each tool's `config_schema`. Set them in your `.env` (or via your secrets backend) to seed defaults for every organisation. **Per-org DB config takes precedence over env vars.**
 
-_No configuration-derived environment variables._
+| Variable | Maps to field | Type | Default | Sensitive | Description |
+| --- | --- | --- | --- | :---: | --- |
+| `TOOL_NMAP_SCAN__AUTO_APPROVE` | `auto_approve` | `boolean` | `false` | — | When true, HITL approval requests for this tool are auto-approved by the backend without human review. Useful for lab/dev environments. DB toolconfig overrides env TOOL_<NAME>__AUTO_APPROVE; default is false. |
 
 **Other environment variables** (read directly from the source — not part of `config_schema`):
 

@@ -110,6 +110,7 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_ACTIVE_DIRECTORY__SSH_PRIVATE_KEY` | `ssh_private_key` | `string` | — | ✓ | PEM/OpenSSH private key content for ssh_user (stored encrypted). Passphrase-less keys only. |
 | `TOOL_ACTIVE_DIRECTORY__SSH_USER` | `ssh_user` | `string` | `""` | — | Local Windows / AD user that PowerShell should impersonate. Must have permission to run the AD cmdlets used by ad_write. |
 | `TOOL_ACTIVE_DIRECTORY__WRITE_ENABLED` | `write_enabled` | `boolean` | `false` | — | Master switch for ad_write. When false, every write action fails with CONFIG_WRITE_DISABLED. Default false. |
+| `TOOL_AD_WRITE__AUTO_APPROVE` | `auto_approve` | `boolean` | `false` | — | When true, HITL approval requests for this tool are auto-approved by the backend without human review. Useful for lab/dev environments. DB toolconfig overrides env TOOL_<NAME>__AUTO_APPROVE; default is false. |
 
 _Note: any field above can also be overridden per-tool by using the prefix `TOOL_<TOOL_NAME>__` instead of the shared `TOOL_<NAMESPACE>__` — useful when a single tool in the family needs a distinct value._
 

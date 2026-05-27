@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
@@ -28,6 +28,7 @@ from agno.media import Image
 from agno.tools.function import Function, ToolResult
 from agno.tools.mcp import MCPTools
 from agno.tools.mcp.params import StreamableHTTPClientParams
+from mcp.shared.exceptions import McpError
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1119,7 +1120,60 @@ class ApprovalAwareMCPTools(MCPTools):
                 pass
 
             log.debug("proxy: calling MCP tool '%s' with params %s", tool_name, params)
-            result = await active_session.call_tool(tool_name, params or {})
+            # Pass the configured per-tool timeout explicitly. Without this
+            # the MCP SDK falls back to its 30s default, which is shorter
+            # than ``settings.mcp_tool_timeout_seconds`` (typically 60s) and
+            # caused premature ``ClientRequest`` timeouts on slow tools
+            # (e.g. RT ticket creation, k8s operations).
+            tool_timeout = _settings.mcp_tool_timeout_seconds
+            try:
+                result = await active_session.call_tool(
+                    tool_name,
+                    params or {},
+                    read_timeout_seconds=timedelta(seconds=tool_timeout),
+                )
+            except McpError as exc:
+                # Surface the MCP-level error (including timeouts) back to
+                # the agent as a normal ToolResult so the run can complete
+                # cleanly. Otherwise the exception propagates out of
+                # ``aexecute`` and, in the HITL/background-continuation
+                # path, leaves the conversation hanging "waiting for
+                # approval" without ever emitting an assistant message.
+                msg = str(exc) or exc.__class__.__name__
+                if "Timed out" in msg or "timeout" in msg.lower():
+                    log.warning(
+                        "proxy: MCP tool '%s' timed out after %ss",
+                        tool_name, tool_timeout,
+                    )
+                    return ToolResult(
+                        content=(
+                            f"Error: MCP tool '{tool_name}' timed out after "
+                            f"{tool_timeout}s. The remote operation may still "
+                            "be in progress on the target system. Inform the "
+                            "user and consider retrying or breaking the "
+                            "request into smaller steps."
+                        )
+                    )
+                log.warning(
+                    "proxy: MCP tool '%s' returned McpError: %s",
+                    tool_name, msg, exc_info=True,
+                )
+                return ToolResult(
+                    content=f"Error calling MCP tool '{tool_name}': {msg}"
+                )
+            except Exception as exc:
+                # Defensive catch-all: any unexpected failure must be turned
+                # into a ToolResult so the agent loop can close gracefully.
+                log.warning(
+                    "proxy: MCP tool '%s' raised unexpected error: %s",
+                    tool_name, exc, exc_info=True,
+                )
+                return ToolResult(
+                    content=(
+                        f"Error calling MCP tool '{tool_name}': "
+                        f"{exc.__class__.__name__}: {exc}"
+                    )
+                )
 
             if result.isError:
                 return ToolResult(content=f"Error from MCP tool '{tool_name}': {result.content}")

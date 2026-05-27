@@ -66,6 +66,7 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_GITLAB__TOKEN` | `token` | `string` | `""` | — | Personal Access Token (PAT).  Needs 'read_api' scope for gitlab_read and 'api' scope for gitlab_manage. |
 | `TOOL_GITLAB__URL` | `url` | `string` | `""` | — | Base URL of the GitLab instance, e.g. 'https://gitlab.com' or 'https://git.yourcompany.com'.  Must NOT include /api/v4. |
 | `TOOL_GITLAB__VERIFY_SSL` | `verify_ssl` | `boolean` | `true` | — | Verify TLS certificate of the GitLab server (default: true). |
+| `TOOL_GITLAB_MANAGE__AUTO_APPROVE` | `auto_approve` | `boolean` | `false` | — | When true, HITL approval requests for this tool are auto-approved by the backend without human review. Useful for lab/dev environments. DB toolconfig overrides env TOOL_<NAME>__AUTO_APPROVE; default is false. |
 
 _Note: any field above can also be overridden per-tool by using the prefix `TOOL_<TOOL_NAME>__` instead of the shared `TOOL_<NAMESPACE>__` — useful when a single tool in the family needs a distinct value._
 
