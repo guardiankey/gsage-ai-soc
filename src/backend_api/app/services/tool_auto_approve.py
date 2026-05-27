@@ -23,8 +23,8 @@ import uuid
 from typing import Optional
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.shared.database import _get_session_maker
 from src.shared.models.tool_config import GSageToolConfig
 
 log = logging.getLogger(__name__)
@@ -59,21 +59,26 @@ def _env_auto_approve(tool_name: str) -> Optional[bool]:
 
 
 async def _db_auto_approve(
-    *, org_id: uuid.UUID, tool_name: str, db: AsyncSession
+    *, org_id: uuid.UUID, tool_name: str
 ) -> Optional[bool]:
     """Read ``auto_approve`` from the ``GSageToolConfig`` row (profile=default).
 
-    Returns ``None`` when there is no row, or when the row exists but does
-    not declare ``auto_approve``. Decryption errors are logged and treated
-    as ``None`` so the caller falls back to env/default.
+    Opens a **fresh** ``AsyncSession`` so this lookup is safe to call from
+    contexts where the request-scoped session is already closed (e.g. the
+    SSE generator that keeps streaming after FastAPI finalised the
+    response). Returns ``None`` when there is no row, or when the row
+    exists but does not declare ``auto_approve``. Decryption errors are
+    logged and treated as ``None`` so the caller falls back to env/default.
     """
     stmt = select(GSageToolConfig).where(
         GSageToolConfig.org_id == org_id,
         GSageToolConfig.tool_name == tool_name,
         GSageToolConfig.profile_id == "default",
     )
-    result = await db.execute(stmt)
-    row = result.scalar_one_or_none()
+    session_maker = _get_session_maker()
+    async with session_maker() as session:
+        result = await session.execute(stmt)
+        row = result.scalar_one_or_none()
     if row is None:
         return None
     try:
@@ -92,7 +97,7 @@ async def _db_auto_approve(
 
 
 async def is_auto_approve(
-    *, org_id: uuid.UUID, tool_name: str, db: AsyncSession
+    *, org_id: uuid.UUID, tool_name: str
 ) -> bool:
     """Return True when HITL approvals for this tool should be auto-approved.
 
@@ -104,7 +109,7 @@ async def is_auto_approve(
     if cached is not None and cached[1] > now:
         return cached[0]
 
-    db_value = await _db_auto_approve(org_id=org_id, tool_name=tool_name, db=db)
+    db_value = await _db_auto_approve(org_id=org_id, tool_name=tool_name)
     if db_value is not None:
         resolved = db_value
     else:

@@ -363,7 +363,7 @@ async def _process_auto_approvals(
                 tool_name = tool_args["tool_name"] or tool_name
 
             enabled = await is_auto_approve(
-                org_id=ctx.org_id, tool_name=tool_name, db=db
+                org_id=ctx.org_id, tool_name=tool_name,
             )
             if not enabled:
                 manual_ids.append(ap_id)
