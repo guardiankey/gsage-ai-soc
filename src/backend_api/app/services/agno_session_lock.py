@@ -57,11 +57,39 @@ _CHANNEL_PREFIX = "gsage:conv-updates:"
 # ---------------------------------------------------------------------------
 
 _client: Optional[redis.Redis] = None
+_client_loop_id: Optional[int] = None
 
 
 def _get_client() -> redis.Redis:
-    """Return a process-wide async Redis client (lazy)."""
-    global _client
+    """Return a process-wide async Redis client (lazy).
+
+    In Celery fork workers each task runs under a *fresh* ``asyncio.run()``
+    loop. ``redis.asyncio`` connections (asyncio streams) are bound to the
+    loop they were created on, so a cached client from a previous task
+    holds dead transports and the next ``await client.set(...)`` raises
+    ``RuntimeError: Event loop is closed`` / ``Future attached to a
+    different loop``. We detect the loop change here and rebuild the
+    client transparently — same pattern used in
+    ``src/shared/database.py`` for the SQLAlchemy async engine.
+    """
+    global _client, _client_loop_id
+
+    try:
+        current_loop_id: Optional[int] = id(asyncio.get_running_loop())
+    except RuntimeError:
+        current_loop_id = None
+
+    if (
+        _client is not None
+        and current_loop_id is not None
+        and _client_loop_id is not None
+        and _client_loop_id != current_loop_id
+    ):
+        # Drop the stale client without touching its connections — the old
+        # event loop is already closed and awaiting close() on it would
+        # raise. Leak the underlying sockets; the OS will reclaim them.
+        _client = None
+
     if _client is None:
         settings = get_settings()
         _client = redis.from_url(
@@ -69,6 +97,7 @@ def _get_client() -> redis.Redis:
             encoding="utf-8",
             decode_responses=True,
         )
+        _client_loop_id = current_loop_id
     return _client
 
 

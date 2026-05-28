@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
 from typing import Optional, Union
 
 import aiosmtplib
@@ -464,6 +465,15 @@ async def send_email(
     if cc_list:
         msg["Cc"] = ", ".join(cc_list)
     # BCC intentionally omitted from headers
+
+    # Required by RFC 5322 and enforced by strict MTAs (Gmail rejects
+    # messages without Message-ID / Date headers). The Message-ID domain
+    # is taken from the From address so it matches the sending domain
+    # (helps with DMARC alignment when DKIM signs the header).
+    from_domain = cfg.from_email.rpartition("@")[2] or None
+    msg["Message-ID"] = make_msgid(domain=from_domain)
+    if "Date" not in msg:
+        msg["Date"] = formatdate(localtime=True)
 
     # Build an unverified SSL context when the admin opted out of cert
     # validation (e.g. internal relays using self-signed certificates).
