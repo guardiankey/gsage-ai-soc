@@ -987,6 +987,16 @@ def _build_model(org: Optional["GSageOrganization"] = None):
             api_key=api_key
         )
 
+    if provider == "vllm":
+        from agno.models.vllm import VLLM
+        model_id = (org.default_maker_model.strip() if org and org.default_maker_model else None) or settings.vllm_maker_model
+        api_key = (org.llm_api_key if org else None) or settings.vllm_api_key
+        return VLLM(
+            id=model_id,
+            api_key=api_key,
+            base_url=settings.vllm_base_url,
+        )
+
     # Default: Ollama
     from agno.models.ollama import Ollama
 

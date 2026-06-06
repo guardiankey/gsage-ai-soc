@@ -96,7 +96,7 @@ export default function OrganizationPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {['ollama', 'openai', 'deepseek', 'anthropic', 'gemini'].map((p) => (
+              {['ollama', 'openai', 'deepseek', 'anthropic', 'gemini','vllm'].map((p) => (
                 <SelectItem key={p} value={p}>{p}</SelectItem>
               ))}
             </SelectContent>

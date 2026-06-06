@@ -130,6 +130,17 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_maker_model: str = "claude-3-5-haiku-latest"
 
+    # ── vLLM (self-hosted, OpenAI-compatible) ─────────────────────────────
+    # Use when running a local/private vLLM server.
+    # IMPORTANT: start vLLM with --enable-auto-tool-choice and
+    # --tool-call-parser (e.g. pythonic or hermes) for tool calls to work
+    # correctly in streaming mode with models like Gemma.
+    # Example: vllm serve google/gemma-4-E4B-it \
+    #   --enable-auto-tool-choice --tool-call-parser pythonic
+    vllm_api_key: str = "EMPTY"  # vLLM accepts any non-empty value
+    vllm_base_url: str = "http://localhost:8000/v1"
+    vllm_maker_model: str = "not-set"  # must match the model name served by vLLM
+
     # ── Embeddings (Ollama — used by Weaviate text2vec-ollama module) ─────
     # The gsage-ollama entrypoint creates a custom model (nomic-embed-ctx8k) from
     # nomic-embed-text with expanded num_ctx to avoid context-length errors.

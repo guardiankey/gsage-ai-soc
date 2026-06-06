@@ -104,6 +104,10 @@ async def ensure_admin(session: AsyncSession) -> Optional[str]:
         maker_model = settings.deepseek_maker_model
     elif provider == "gemini":
         maker_model = settings.gemini_maker_model
+    elif provider == "anthropic":
+        maker_model = settings.anthropic_maker_model
+    elif provider == "vllm":
+        maker_model = settings.vllm_maker_model
     else:
         maker_model = settings.ollama_maker_model
     # reviewer defaults to same as maker (no separate reviewer setting)
