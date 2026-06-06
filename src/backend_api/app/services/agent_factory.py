@@ -988,9 +988,22 @@ def _build_model(org: Optional["GSageOrganization"] = None):
         )
 
     if provider == "vllm":
-        from agno.models.vllm import VLLM
         model_id = (org.default_maker_model.strip() if org and org.default_maker_model else None) or settings.vllm_maker_model
         api_key = (org.llm_api_key if org else None) or settings.vllm_api_key
+        parser_mode = (settings.vllm_tool_call_parser or "none").strip().lower()
+        force_non_streaming = settings.vllm_force_non_streaming
+        # Use the gSage adapter when streaming tool-call recovery or forced
+        # non-streaming is requested; otherwise the stock Agno VLLM model.
+        if parser_mode not in ("", "none") or force_non_streaming:
+            from src.shared.llm.vllm_gemma import GemmaToolCallVLLM
+            return GemmaToolCallVLLM(
+                id=model_id,
+                api_key=api_key,
+                base_url=settings.vllm_base_url,
+                tool_call_dialect=None if parser_mode in ("", "none") else parser_mode,
+                force_non_streaming=force_non_streaming,
+            )
+        from agno.models.vllm import VLLM
         return VLLM(
             id=model_id,
             api_key=api_key,

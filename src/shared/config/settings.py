@@ -140,6 +140,15 @@ class Settings(BaseSettings):
     vllm_api_key: str = "EMPTY"  # vLLM accepts any non-empty value
     vllm_base_url: str = "http://localhost:8000/v1"
     vllm_maker_model: str = "not-set"  # must match the model name served by vLLM
+    # Client-side recovery of tool calls leaked as plain text during streaming
+    # (some vLLM tool-call parsers only emit proper tool_calls when stream=false).
+    # "gemma" → detect/convert Gemma 4 pythonic blocks; "none" → disable parsing
+    # (native tool_calls still pass through untouched).
+    vllm_tool_call_parser: str = "gemma"
+    # Robustness fallback: serve streaming requests via a single non-streaming
+    # call internally (where vLLM emits correct tool_calls), then replay as one
+    # delta. Enable if the text parser is not enough for your model/build.
+    vllm_force_non_streaming: bool = False
 
     # ── Embeddings (Ollama — used by Weaviate text2vec-ollama module) ─────
     # The gsage-ollama entrypoint creates a custom model (nomic-embed-ctx8k) from
