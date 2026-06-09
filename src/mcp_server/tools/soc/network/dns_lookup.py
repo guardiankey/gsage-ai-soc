@@ -32,7 +32,7 @@ class DNSLookupTool(BaseTool):
     version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = "Resolve DNS records (A, AAAA, MX, TXT, NS, CNAME, SOA) for domains and reverse PTR for IPs"
     category: ClassVar[str] = "dns"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     permissions: ClassVar[list[str]] = ["dns:read"]
     rate_limit_per_minute: ClassVar[int] = 60
     timeout_seconds: ClassVar[int] = 10

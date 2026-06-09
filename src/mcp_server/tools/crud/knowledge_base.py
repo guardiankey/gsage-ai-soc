@@ -40,7 +40,7 @@ class KnowledgeBaseCrudTool(CrudBaseTool):
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = "Search, read, create and manage the organization's knowledge base articles (Weaviate backend)"
     category: ClassVar[str] = "kb"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     rate_limit_per_minute: ClassVar[int] = 30
     timeout_seconds: ClassVar[int] = 15
 

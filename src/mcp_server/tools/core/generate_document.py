@@ -177,7 +177,7 @@ class GenerateDocumentTool(BaseTool):
         "Fenced 'mermaid' and 'dot' blocks become inline diagrams in PDF output (pandoc bundle)."
     )
     category: ClassVar[str] = "document"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     permissions: ClassVar[list[str]] = ["files:read", "files:write"]
     rate_limit_per_minute: ClassVar[int] = 10
     timeout_seconds: ClassVar[int] = 120

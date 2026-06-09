@@ -29,7 +29,7 @@ class IPReputationTool(BaseTool):
     version: ClassVar[str] = "0.1.0"
     summary: ClassVar[str] = "Query threat intelligence feeds to check an IP address's reputation and maliciousness score"
     category: ClassVar[str] = "threat_intel"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     available: ClassVar[bool] = False  # stub — requires threat-intel API keys
     permissions: ClassVar[list[str]] = ["threat:intel"]
     rate_limit_per_minute: ClassVar[int] = 30

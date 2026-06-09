@@ -142,13 +142,29 @@ class Settings(BaseSettings):
     vllm_maker_model: str = "not-set"  # must match the model name served by vLLM
     # Client-side recovery of tool calls leaked as plain text during streaming
     # (some vLLM tool-call parsers only emit proper tool_calls when stream=false).
-    # "gemma" → detect/convert Gemma 4 pythonic blocks; "none" → disable parsing
-    # (native tool_calls still pass through untouched).
+    # "gemma" → detect/convert Gemma 4 pythonic blocks;
+    # "qwen"  → detect/convert Qwen/Hermes <tool_call>{json}</tool_call> blocks
+    #           (aliases: "hermes"); "none" → disable parsing (native tool_calls
+    # still pass through untouched).
     vllm_tool_call_parser: str = "gemma"
     # Robustness fallback: serve streaming requests via a single non-streaming
     # call internally (where vLLM emits correct tool_calls), then replay as one
     # delta. Enable if the text parser is not enough for your model/build.
     vllm_force_non_streaming: bool = False
+    # Hybrid "thinking" models (e.g. Qwen3) can spend the whole turn reasoning
+    # and finish by narrating the action in plain text instead of emitting a
+    # tool call. Set to false to disable the model's thinking mode
+    # (sent as chat_template_kwargs={"enable_thinking": false}) so it calls
+    # tools directly. Leave unset (None) to keep the model/server default.
+    vllm_enable_thinking: bool | None = None
+
+    # Diagnostic: when set to a writable directory path, every outgoing
+    # request to vLLM is dumped as JSON (messages + tools + tool_choice +
+    # extra_body) so it can be bit-for-bit replayed by
+    # ``limbo/debug_vllm_toolcalls.py --replay <file>`` for bisection.
+    # WARNING: dump files contain full prompts and history (PII).  Use only
+    # in development; leave empty in production.
+    vllm_debug_request_dump_path: str = ""
 
     # ── Embeddings (Ollama — used by Weaviate text2vec-ollama module) ─────
     # The gsage-ollama entrypoint creates a custom model (nomic-embed-ctx8k) from

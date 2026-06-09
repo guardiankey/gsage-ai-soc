@@ -60,7 +60,7 @@ class OrganizationUpdate(BaseModel):
     default_reviewer_model: Optional[str] = Field(default=None, max_length=100)
     agent_timeout_seconds: Optional[int] = Field(default=None, ge=10, le=300)
     max_context_tokens: Optional[int] = Field(default=None, ge=1000, le=128000)
-    llm_provider: Optional[str] = Field(default=None, pattern=r"^(ollama|openai|deepseek|anthropic|gemini)$")
+    llm_provider: Optional[str] = Field(default=None, pattern=r"^(ollama|openai|deepseek|anthropic|gemini|vllm)$")
     # Providing a value sets the key; providing null clears it
     llm_api_key: Optional[str] = None
 

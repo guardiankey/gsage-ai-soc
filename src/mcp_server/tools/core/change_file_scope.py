@@ -66,7 +66,7 @@ class ChangeFileScopeTool(BaseTool):
         "department-shared. Only the file owner can perform this change."
     )
     category: ClassVar[str] = "file"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     permissions: ClassVar[list[str]] = ["files:write"]
     rate_limit_per_minute: ClassVar[int] = 30
     timeout_seconds: ClassVar[int] = 10

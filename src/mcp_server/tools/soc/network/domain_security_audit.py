@@ -56,7 +56,7 @@ class DomainSecurityAuditTool(BaseTool):
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = "Comprehensive domain and email security posture check: SPF, DKIM, DMARC, DNSSEC, TLS, and MX"
     category: ClassVar[str] = "dns"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     permissions: ClassVar[list[str]] = ["dns:security"]
     rate_limit_per_minute: ClassVar[int] = 20
     timeout_seconds: ClassVar[int] = 30

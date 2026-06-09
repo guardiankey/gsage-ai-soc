@@ -105,7 +105,7 @@ class MermaidReferenceTool(BaseTool):
         "Call this before creating any Mermaid diagram to avoid version incompatibilities."
     )
     category: ClassVar[str] = "utility"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
 
     # No permissions required — available to all authenticated users.
     permissions: ClassVar[list[str]] = []

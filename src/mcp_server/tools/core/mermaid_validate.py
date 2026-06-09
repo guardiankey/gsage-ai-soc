@@ -75,7 +75,7 @@ class MermaidValidateTool(BaseTool):
         "MUST be called before showing any Mermaid diagram to the user."
     )
     category: ClassVar[str] = "utility"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
 
     permissions: ClassVar[list[str]] = []
     use_circuit_breaker: ClassVar[bool] = False

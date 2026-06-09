@@ -279,7 +279,7 @@ class NmapScanTool(BaseTool):
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = "Network port scan and service detection using Nmap on a host, IP address, or CIDR range"
     category: ClassVar[str] = "network"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     permissions: ClassVar[list[str]] = ["network:scan"]
     rate_limit_per_minute: ClassVar[int] = 5
     timeout_seconds: ClassVar[int] = 300

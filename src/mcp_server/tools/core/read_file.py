@@ -79,7 +79,7 @@ class ReadFileTool(BaseTool):
     version: ClassVar[str] = "2.0.0"
     summary: ClassVar[str] = "Read a text file attachment from the conversation or list all currently attached files"
     category: ClassVar[str] = "file"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     permissions: ClassVar[list[str]] = ["agents:run"]
     rate_limit_per_minute: ClassVar[int] = 60
     timeout_seconds: ClassVar[int] = 30

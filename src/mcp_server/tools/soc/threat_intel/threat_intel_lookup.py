@@ -327,7 +327,7 @@ class ThreatIntelLookupTool(BaseTool):
         "of an IP, URL, domain, or file hash (MD5/SHA1/SHA256)"
     )
     category: ClassVar[str] = "threat_intel"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     permissions: ClassVar[list[str]] = ["threat:intel"]
     rate_limit_per_minute: ClassVar[int] = 30
     timeout_seconds: ClassVar[int] = 25

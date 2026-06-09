@@ -1018,7 +1018,7 @@ class EmlAnalyzerTool(BaseTool):
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = "Analyze .eml email files for phishing indicators, spoofing, malicious attachments, and suspicious URLs"
     category: ClassVar[str] = "email"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     permissions: ClassVar[list[str]] = ["agents:run"]
     rate_limit_per_minute: ClassVar[int] = 20
     timeout_seconds: ClassVar[int] = 60

@@ -73,7 +73,7 @@ class ListRecentArtifactsTool(BaseTool):
         "artifacts and chat attachments (own files + department-shared)"
     )
     category: ClassVar[str] = "file"
-    core_tool: ClassVar[bool] = True
+    core_tool: ClassVar[bool] = False
     permissions: ClassVar[list[str]] = ["agents:run"]
     rate_limit_per_minute: ClassVar[int] = 60
     timeout_seconds: ClassVar[int] = 15
