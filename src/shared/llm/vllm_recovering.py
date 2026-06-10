@@ -802,6 +802,7 @@ def _dump_request_payload(
     tool_choice: Any,
     extra_body: Any,
     enable_thinking: Any,
+    final_request_params: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Write the outgoing request to a timestamped JSON file.
 
@@ -837,6 +838,15 @@ def _dump_request_payload(
         "tools": _to_jsonable(tools),
         "tool_choice": _to_jsonable(tool_choice),
         "extra_body": _to_jsonable(extra_body),
+        # Full kwargs dict that goes to OpenAI ``chat.completions.create``
+        # (post Agno's ``get_request_params`` merge — includes temperature,
+        # top_p, max_tokens, seed, response_format, service_tier, …).
+        # ``messages``/``tools`` are NOT re-included here to keep the file
+        # small; only the *extra* keys Agno appends are captured.
+        "final_request_extras": _to_jsonable(
+            {k: v for k, v in (final_request_params or {}).items()
+             if k not in {"messages", "tools", "tool_choice", "extra_body"}}
+        ),
     }
     fname = f"req_{int(_time.time() * 1000)}_{uuid4().hex[:8]}.json"
     try:
@@ -1230,10 +1240,31 @@ class RecoveringToolCallVLLM(VLLM):
         messages = _extract_invoke_arg("messages", 0, args, kwargs)
         tools = _extract_invoke_arg("tools", 3, args, kwargs)
         tool_choice = _extract_invoke_arg("tool_choice", 4, args, kwargs)
+        response_format = _extract_invoke_arg("response_format", 2, args, kwargs)
+
+        # Resolve the FINAL kwargs dict Agno will send to OpenAI SDK so we
+        # capture every parameter the model sees (temperature, top_p,
+        # max_tokens, seed, response_format, service_tier, …) — not just the
+        # ones explicitly passed to invoke_stream.  Best-effort: any error
+        # falls back to an empty dict so instrumentation never breaks the
+        # request path.
+        final_request_params: Dict[str, Any] = {}
+        try:
+            final_request_params = self.get_request_params(
+                response_format=response_format,
+                tools=tools,
+                tool_choice=tool_choice,
+            ) or {}
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"RecoveringToolCallVLLM: get_request_params snapshot failed: {exc}")
+
         if debug_on:
-            request_params = getattr(self, "request_params", None) or {}
-            extra_body = request_params.get("extra_body") if isinstance(request_params, dict) else None
+            extra_body = final_request_params.get("extra_body")
             extra_body_keys = sorted(extra_body.keys()) if isinstance(extra_body, dict) else None
+            extras = {
+                k: v for k, v in final_request_params.items()
+                if k not in {"messages", "tools", "tool_choice", "extra_body"}
+            }
             log_debug(
                 "RecoveringToolCallVLLM request -> "
                 f"model={self.id} dialect={self.tool_call_dialect} "
@@ -1242,9 +1273,8 @@ class RecoveringToolCallVLLM(VLLM):
                 f"messages={_summarize_messages(messages)} "
                 f"tools={_summarize_tools(tools)} "
                 f"tool_choice={tool_choice} "
-                f"response_format={'set' if isinstance(request_params, dict) and request_params.get('response_format') else None} "
-                f"stream_options={(request_params or {}).get('stream_options') if isinstance(request_params, dict) else None} "
-                f"extra_body_keys={extra_body_keys}"
+                f"extra_body_keys={extra_body_keys} "
+                f"final_request_extras={extras}"
             )
         if dump_dir:
             _dump_request_payload(
@@ -1253,12 +1283,9 @@ class RecoveringToolCallVLLM(VLLM):
                 messages=messages,
                 tools=tools,
                 tool_choice=tool_choice,
-                extra_body=(
-                    (getattr(self, "request_params", None) or {}).get("extra_body")
-                    if isinstance(getattr(self, "request_params", None), dict)
-                    else None
-                ),
+                extra_body=final_request_params.get("extra_body"),
                 enable_thinking=getattr(self, "enable_thinking", None),
+                final_request_params=final_request_params,
             )
 
     def _normalize_nonstream_response(self, model_response: ModelResponse) -> ModelResponse:
