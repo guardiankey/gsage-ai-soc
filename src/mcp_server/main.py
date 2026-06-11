@@ -119,13 +119,16 @@ def _base_tool_to_mcp(tool) -> mcp_types.Tool:
         if cred_ns:
             meta["credential_namespace"] = cred_ns
 
-    return mcp_types.Tool(
-        name=tool.name,
-        description=getattr(tool, "__doc__", None) or f"{tool.name} (v{tool.version})",
-        inputSchema=input_schema,
-        annotations=annotations,
-        _meta=meta,
-    )
+    # ``mcp.types.Tool`` is a Pydantic v2 model with ``extra="allow"`` and an
+    # alias on ``_meta``; constructing via ``model_validate`` avoids spurious
+    # Pylance "unknown parameter" diagnostics that hit the kwarg form.
+    return mcp_types.Tool.model_validate({
+        "name": tool.name,
+        "description": getattr(tool, "__doc__", None) or f"{tool.name} (v{tool.version})",
+        "inputSchema": input_schema,
+        "annotations": annotations,
+        "_meta": meta,
+    })
 
 
 # ── MCP Protocol Server ───────────────────────────────────────────────────
@@ -232,13 +235,13 @@ async def handle_list_tools() -> list[mcp_types.Tool]:
                         if existing_desc
                         else suffix
                     )
-                    mcp_tools[i] = mcp_types.Tool(
-                        name=old.name,
-                        description=new_desc,
-                        inputSchema=schema,
-                        annotations=old.annotations,
-                        _meta=old.meta,
-                    )
+                    mcp_tools[i] = mcp_types.Tool.model_validate({
+                        "name": old.name,
+                        "description": new_desc,
+                        "inputSchema": schema,
+                        "annotations": old.annotations,
+                        "_meta": old.meta,
+                    })
 
         return mcp_tools
 

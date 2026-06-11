@@ -122,6 +122,24 @@ class GSageTool(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="If true, tool fails without org config",
     )
 
+    # User-credential keychain fields (persisted so backend_api can read
+    # them without needing the mcp_server in-memory registry).
+    requires_user_credentials: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        comment="Tool requires a personal per-user credential",
+    )
+    credential_namespace: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Shared namespace key for credential lookup; tool name used when NULL",
+    )
+    credential_schema: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="JSON schema describing the required credential fields",
+    )
+
     # Status
     is_active: Mapped[bool] = mapped_column(
         default=True,

@@ -10,6 +10,7 @@ exposes only ``has_*`` flags.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Annotated
 
@@ -30,12 +31,13 @@ from src.backend_api.app.schemas.credentials import (
     ToolLinkOut,
 )
 from src.backend_api.app.services import credentials_service
-from src.mcp_server.registry.registry import get_registry
 from src.shared.models.user_credential import GSageUserCredential
 from src.shared.models.user_organization import GSageUserOrganization
 
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 # Permission gate applied to every endpoint.
 _PERM = Depends(require_permission("credentials:personal"))
@@ -120,6 +122,77 @@ async def create_my_credential(
         db, user_id=membership.user_id, org_id=org_id, payload=payload
     )
     return _to_out(cred)
+
+
+# ---------------------------------------------------------------------------
+# Tools available for credential linking
+# (declared BEFORE ``/{cred_id}`` so FastAPI does not match it as a UUID path).
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/available-tools",
+    response_model=list[AvailableToolOut],
+    summary="List tools that accept user credentials",
+)
+async def list_available_tools(
+    org_id: uuid.UUID,
+    membership: Annotated[GSageUserOrganization, Depends(get_org_membership)],
+    _perm: Annotated[None, _PERM],
+    db: AsyncSession = Depends(get_db),
+) -> list[AvailableToolOut]:
+    """Return distinct credential namespaces that a personal credential can be
+    linked to, by querying the ``gsage_tools`` table synced by the MCP server.
+
+    Tools sharing a ``credential_namespace`` (e.g. ``sei_pen_read`` and
+    ``sei_pen_write`` both with namespace ``sei_pen``) are collapsed into
+    a single entry whose ``name`` is the namespace.
+
+    The list is intentionally **unfiltered** by user permissions: a user
+    can pre-create credentials for tools they may later be granted access
+    to.  Permission gating still applies at tool execution time.
+    """
+    from sqlalchemy import select as _select
+    from src.shared.models.tool import GSageTool
+
+    result = await db.execute(
+        _select(GSageTool).where(
+            GSageTool.requires_user_credentials.is_(True),
+            GSageTool.is_active.is_(True),
+        )
+    )
+    tools = result.scalars().all()
+    logger.info("available-tools: found %d active tools with requires_user_credentials", len(tools))
+
+    grouped: dict[str, dict] = {}
+    for tool in tools:
+        namespace = tool.credential_namespace or tool.name
+        bucket = grouped.setdefault(namespace, {
+            "name": namespace,
+            "summary": tool.summary or "",
+            "category": tool.category or "",
+            "credential_schema": tool.credential_schema,
+            "members": [],
+        })
+        bucket["members"].append(tool.name)
+
+    out: list[AvailableToolOut] = []
+    for namespace, bucket in grouped.items():
+        members = sorted(set(bucket["members"]))
+        if len(members) > 1 or members != [namespace]:
+            member_hint = f" \u2014 shared by: {', '.join(members)}"
+        else:
+            member_hint = ""
+        out.append(
+            AvailableToolOut(
+                name=namespace,
+                summary=(bucket["summary"] + member_hint).strip(),
+                category=bucket["category"],
+                credential_schema=bucket["credential_schema"],
+            )
+        )
+    out.sort(key=lambda x: (x.category, x.name))
+    return out
 
 
 @router.get(
@@ -236,67 +309,3 @@ async def activate_credential_link(
         db, cred_id=cred_id, link_id=link_id, user_id=membership.user_id
     )
     return ToolLinkOut.model_validate(link)
-
-
-# ---------------------------------------------------------------------------
-# Tools available for credential linking
-# ---------------------------------------------------------------------------
-
-
-@router.get(
-    "/available-tools",
-    response_model=list[AvailableToolOut],
-    summary="List tools that accept user credentials",
-)
-async def list_available_tools(
-    org_id: uuid.UUID,
-    membership: Annotated[GSageUserOrganization, Depends(get_org_membership)],
-    _perm: Annotated[None, _PERM],
-) -> list[AvailableToolOut]:
-    """Return distinct credential namespaces that a personal credential can be
-    linked to.
-
-    Tools sharing a ``credential_namespace`` (e.g. ``sei_pen_read`` and
-    ``sei_pen_write`` both with namespace ``sei_pen``) are collapsed into
-    a single entry whose ``name`` is the namespace; the ``summary`` lists
-    the member tool names.
-
-    The list is intentionally **unfiltered** by user permissions: a user
-    can pre-create credentials for tools they may later be granted access
-    to.  Permission gating still applies at tool execution time.
-    """
-    registry = get_registry()
-    grouped: dict[str, dict] = {}
-    for entry in registry.list_all():
-        if not entry.get("is_latest"):
-            continue
-        tool = registry.get_tool(entry["name"])
-        if tool is None or not getattr(tool, "requires_user_credentials", False):
-            continue
-        namespace = getattr(tool, "credential_namespace", None) or tool.name
-        bucket = grouped.setdefault(namespace, {
-            "name": namespace,
-            "summary": getattr(tool, "summary", "") or "",
-            "category": getattr(tool, "category", "") or "",
-            "credential_schema": getattr(tool, "credential_schema", None),
-            "members": [],
-        })
-        bucket["members"].append(tool.name)
-
-    out: list[AvailableToolOut] = []
-    for namespace, bucket in grouped.items():
-        members = sorted(set(bucket["members"]))
-        if len(members) > 1 or members != [namespace]:
-            member_hint = f" — shared by: {', '.join(members)}"
-        else:
-            member_hint = ""
-        out.append(
-            AvailableToolOut(
-                name=namespace,
-                summary=(bucket["summary"] + member_hint).strip(),
-                category=bucket["category"],
-                credential_schema=bucket["credential_schema"],
-            )
-        )
-    out.sort(key=lambda x: (x.category, x.name))
-    return out
