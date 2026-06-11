@@ -11,7 +11,7 @@ gSage AI — Mermaid diagram validator and renderer.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `mermaid_validate` | Validate Mermaid diagram syntax (and optionally render a PNG). MUST be called before showing any Mermaid diagram to the user. | — | — | ✓ |
+| `mermaid_validate` | Validate Mermaid diagram syntax (and optionally render a PNG). MUST be called before showing any Mermaid diagram to the user. | — | — | — |
 
 ## Environment variables
 

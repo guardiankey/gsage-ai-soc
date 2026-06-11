@@ -65,6 +65,9 @@ class SeiWriteTool(BaseTool):
     use_circuit_breaker: ClassVar[bool] = True
     requires_approval: ClassVar[bool] = True
 
+    # Shared org-level configuration namespace for the seiws (SOAP) tool family.
+    config_namespace: ClassVar[Optional[str]] = "seiws"
+
     audit_field_mapping: ClassVar[dict] = {}
 
     params_schema: ClassVar[dict] = {

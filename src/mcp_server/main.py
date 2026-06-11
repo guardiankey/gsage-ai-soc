@@ -23,7 +23,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Optional
 
 import anyio
 import redis.asyncio as redis
@@ -108,6 +108,16 @@ def _base_tool_to_mcp(tool) -> mcp_types.Tool:
     if getattr(tool, "requires_approval", False):
         annotations = mcp_types.ToolAnnotations(destructiveHint=True)
         meta = {"requires_approval": True}
+
+    if getattr(tool, "requires_user_credentials", False):
+        meta = dict(meta or {})
+        meta["requires_user_credentials"] = True
+        cred_schema = getattr(tool, "credential_schema", None)
+        if cred_schema:
+            meta["credential_schema"] = cred_schema
+        cred_ns = getattr(tool, "credential_namespace", None)
+        if cred_ns:
+            meta["credential_namespace"] = cred_ns
 
     return mcp_types.Tool(
         name=tool.name,
@@ -293,6 +303,14 @@ async def handle_call_tool(
         tenant.org_id, tenant.user_id, name, list((arguments or {}).keys()),
     )
 
+    # ── Strip & inject per-tool user credential (passed inline by the agent
+    # proxy as a reserved ``_user_credential`` arg, never set by the LLM) ──
+    injected_credential: Optional[dict] = None
+    if arguments and "_user_credential" in arguments:
+        cred = arguments.pop("_user_credential")
+        if isinstance(cred, dict):
+            injected_credential = cred
+
     registry = get_registry()
     tool = registry.get_tool(name)
     if tool is None:
@@ -305,6 +323,17 @@ async def handle_call_tool(
             type="text",
             text=json.dumps({"status": "error", "error": {"code": "TOOL_NOT_FOUND", "message": f"Tool '{name}' not found"}}),
         )]
+
+    # Key the credential under the tool's namespace so tools that share a
+    # ``credential_namespace`` see the same credential dict.
+    if injected_credential is not None:
+        cred_key = getattr(tool, "credential_namespace", None) or tool.name
+        agent_ctx.user_credentials[cred_key] = injected_credential
+        logger.debug(
+            "call_tool: injected user credential for tool=%s under key=%s (fields=%s)",
+            name, cred_key,
+            sorted(k for k, v in injected_credential.items() if v is not None),
+        )
 
     async with _state.session_factory() as session:
         result = await tool.run(

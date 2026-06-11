@@ -24,6 +24,7 @@ const AIAgentsPage = lazy(() => import('@/pages/ScheduledJobsPage'))
 const ApprovalRulesPage = lazy(() => import('@/pages/ApprovalRulesPage'))
 const ProfilePage = lazy(() => import('@/pages/ProfilePage'))
 const ApiKeysPage = lazy(() => import('@/pages/ApiKeysPage'))
+const CredentialsPage = lazy(() => import('@/pages/CredentialsPage'))
 const DataStoresPage = lazy(() => import('@/pages/DataStoresPage'))
 
 // Admin pages
@@ -157,6 +158,14 @@ export default function App() {
                   element={
                     <Suspense fallback={<PageLoader />}>
                       <ApiKeysPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/credentials"
+                  element={
+                    <Suspense fallback={<PageLoader />}>
+                      <CredentialsPage />
                     </Suspense>
                   }
                 />

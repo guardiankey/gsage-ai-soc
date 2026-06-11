@@ -11,7 +11,7 @@ gSage AI — list_recent_artifacts MCP tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `list_recent_artifacts` | List files accessible to the current user — both tool-generated artifacts and chat attachments (own files + department-shared) | `agents:run` | — | ✓ |
+| `list_recent_artifacts` | List files accessible to the current user — both tool-generated artifacts and chat attachments (own files + department-shared) | `agents:run` | — | — |
 
 ## Environment variables
 

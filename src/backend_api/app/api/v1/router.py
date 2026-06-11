@@ -20,6 +20,7 @@ from src.backend_api.app.api.v1 import (
     background_tasks,
     channels_teams,
     chat,
+    credentials,
     datastores,
     departments,
     files,
@@ -61,6 +62,11 @@ _org_router.include_router(
     api_keys.personal_router,
     prefix="/v1/orgs/{org_id}/me/api-keys",
     tags=["API Keys"],
+)
+_org_router.include_router(
+    credentials.router,
+    prefix="/v1/orgs/{org_id}/me/credentials",
+    tags=["Credentials"],
 )
 _org_router.include_router(knowledge.router, prefix="/v1", tags=["Knowledge"])
 _org_router.include_router(approvals.router, prefix="/v1", tags=["Approvals"])

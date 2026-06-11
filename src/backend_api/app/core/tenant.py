@@ -35,6 +35,7 @@ _MEMBER_PERMISSIONS: frozenset[str] = _VIEWER_PERMISSIONS | frozenset(
         "memory:read",
         "memory:delete",
         "apikeys:personal",
+        "credentials:personal",
         "scheduled_jobs:read",
         "approval_rules:read",
         "approvals:resolve",

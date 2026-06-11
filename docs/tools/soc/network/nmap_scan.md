@@ -11,7 +11,7 @@ gSage AI — Nmap Network Scanner tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `nmap_scan` | Network port scan and service detection using Nmap on a host, IP address, or CIDR range | `network:scan` | ✓ | ✓ |
+| `nmap_scan` | Network port scan and service detection using Nmap on a host, IP address, or CIDR range | `network:scan` | ✓ | — |
 
 ## Environment variables
 

@@ -961,7 +961,24 @@ class ApprovalAwareMCPTools(MCPTools):
     before the parent builds :class:`Function` objects so that Agno's built-in
     approval/pause mechanism is activated automatically — no hard-coded tool
     name lists needed.
+
+    Additionally tracks which tools advertise ``requires_user_credentials``
+    so the proxy entrypoint can resolve the active credential from the
+    per-user keychain and forward it inline as a reserved ``_user_credential``
+    parameter before dispatching the MCP call.  Tools sharing a
+    ``credential_namespace`` (e.g. ``sei_pen_read`` and ``sei_pen_write``)
+    resolve against the same keychain entry.
     """
+
+    # Maps tool name → credential namespace (or tool name when no namespace).
+    # An entry exists iff the tool advertised ``requires_user_credentials``.
+    _credential_namespace_by_tool: dict[str, str]
+    # User id captured from TenantContext for keychain lookups.
+    _credential_user_id: Optional[uuid.UUID] = None
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._credential_namespace_by_tool = {}
 
     async def build_tools(self) -> None:
         if self.session is None:
@@ -970,10 +987,25 @@ class ApprovalAwareMCPTools(MCPTools):
         # Pre-scan: discover which tools require approval from their _meta.
         available = await self.session.list_tools()
         approval_names: set[str] = set()
+        credential_ns: dict[str, str] = {}
         for tool in available.tools:
             meta = getattr(tool, "meta", None) or {}
             if meta.get("requires_approval"):
                 approval_names.add(tool.name)
+            if meta.get("requires_user_credentials"):
+                credential_ns[tool.name] = (
+                    meta.get("credential_namespace") or tool.name
+                )
+
+        self._credential_namespace_by_tool = credential_ns
+        if credential_ns:
+            log.info(
+                "Keychain: tools requiring user credentials: %s",
+                ", ".join(
+                    f"{name}\u2192{ns}" if ns != name else name
+                    for name, ns in sorted(credential_ns.items())
+                ),
+            )
 
         if approval_names:
             # Merge with any names passed at construction time.
@@ -1065,6 +1097,52 @@ class ApprovalAwareMCPTools(MCPTools):
                 await active_session.send_ping()
             except Exception:
                 pass
+
+            # ── Resolve per-user credential when the tool requires it ────────
+            # Tools that advertised ``requires_user_credentials`` via MCP
+            # metadata get their active credential looked up in the user
+            # keychain and forwarded inline as a reserved ``_user_credential``
+            # field (stripped by the MCP server before calling the tool).
+            # When no credential is configured, abort early with a guidance
+            # message instead of incurring a CREDENTIAL_MISSING round-trip.
+            cred_required = (
+                tool_name in mcp_tools_instance._credential_namespace_by_tool
+            )
+            if cred_required:
+                user_id = mcp_tools_instance._credential_user_id
+                if user_id is None:
+                    return ToolResult(
+                        content=(
+                            f"Error: tool '{tool_name}' requires a personal credential, "
+                            "but no authenticated user is associated with this run."
+                        )
+                    )
+                cred_key = mcp_tools_instance._credential_namespace_by_tool[tool_name]
+                # Late import to avoid circular dependencies at module load.
+                from src.backend_api.app.services import credentials_service  # noqa: PLC0415
+                from src.shared.database import _get_session_maker  # noqa: PLC0415
+
+                session_maker = _get_session_maker()
+                async with session_maker() as db:
+                    cred = await credentials_service.resolve_active_for_tool(
+                        db, user_id=user_id, tool_name=cred_key,
+                    )
+                if cred is None:
+                    return ToolResult(
+                        content=(
+                            f"Tool '{tool_name}' requires a personal credential, but "
+                            "you don't have one configured. Open Settings → "
+                            "Credentials, create a credential, link it to "
+                            f"'{cred_key}', and mark it as active. Then retry."
+                        )
+                    )
+                params = dict(params or {})
+                params["_user_credential"] = cred
+                log.debug(
+                    "proxy: injected user credential into '%s' (fields=%s)",
+                    tool_name,
+                    sorted(k for k, v in cred.items() if v is not None and k != "credential_id"),
+                )
 
             log.debug("proxy: calling MCP tool '%s' with params %s", tool_name, params)
             # Pass the configured per-tool timeout explicitly. Without this

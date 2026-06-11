@@ -11,7 +11,7 @@ gSage AI — DNS Lookup tool (MVP ⭐).
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `dns_lookup` | Resolve DNS records (A, AAAA, MX, TXT, NS, CNAME, SOA) for domains and reverse PTR for IPs | `dns:read` | — | ✓ |
+| `dns_lookup` | Resolve DNS records (A, AAAA, MX, TXT, NS, CNAME, SOA) for domains and reverse PTR for IPs | `dns:read` | — | — |
 
 ## Configuration
 

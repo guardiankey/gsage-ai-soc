@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { LogOut, User, Key, ChevronDown, Building2, Layers } from 'lucide-react'
+import { LogOut, User, Key, KeyRound, ChevronDown, Building2, Layers } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -80,6 +80,14 @@ export function UserMenu() {
             <Link to="/api-keys" className="flex items-center gap-2 cursor-pointer">
               <Key className="h-4 w-4" />
               {t('nav.apiKeys')}
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {hasPermission('credentials:personal') && (
+          <DropdownMenuItem asChild>
+            <Link to="/credentials" className="flex items-center gap-2 cursor-pointer">
+              <KeyRound className="h-4 w-4" />
+              {t('nav.credentials')}
             </Link>
           </DropdownMenuItem>
         )}

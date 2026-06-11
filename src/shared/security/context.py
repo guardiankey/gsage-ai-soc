@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class RequestSource(str, Enum):
@@ -53,6 +53,14 @@ class AgentContext:
     source: RequestSource
     api_key_id: Optional[uuid.UUID] = None
     dept_id: Optional[uuid.UUID] = None
+
+    # Per-tool decrypted user credentials resolved from the keychain at
+    # request entry (typically by the agent proxy in agent_factory.py for
+    # web/api flows, or by the MCP server when ``_user_credential`` is
+    # forwarded inline in tool params).  Map key is the tool's ``name``;
+    # value is the dict produced by ``GSageUserCredential.to_runtime_dict``.
+    # NEVER serialised — credentials are re-resolved on each invocation.
+    user_credentials: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self):
         """Validate context fields."""

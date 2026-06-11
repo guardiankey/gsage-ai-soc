@@ -71,6 +71,13 @@ from src.shared.models.user_department import GSageUserDepartment, DepartmentRol
 # SSO email domain → org mapping
 from src.shared.models.org_email_domain import GSageOrgEmailDomain
 
+# Per-user credentials keychain
+from src.shared.models.user_credential import (
+    GSageUserCredential,
+    GSageUserCredentialToolLink,
+    CredentialKind,
+)
+
 __all__ = [
     # Base
     "Base",
@@ -133,4 +140,8 @@ __all__ = [
     "DepartmentRole",
     # SSO email domain mapping
     "GSageOrgEmailDomain",
+    # User credentials keychain
+    "GSageUserCredential",
+    "GSageUserCredentialToolLink",
+    "CredentialKind",
 ]

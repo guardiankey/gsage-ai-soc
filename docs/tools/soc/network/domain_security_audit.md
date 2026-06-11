@@ -11,7 +11,7 @@ gSage AI — Domain Security Audit tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `domain_security_audit` | Comprehensive domain and email security posture check: SPF, DKIM, DMARC, DNSSEC, TLS, and MX | `dns:security` | — | ✓ |
+| `domain_security_audit` | Comprehensive domain and email security posture check: SPF, DKIM, DMARC, DNSSEC, TLS, and MX | `dns:security` | — | — |
 
 ## Environment variables
 

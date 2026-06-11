@@ -11,7 +11,7 @@ gSage AI — Threat Intelligence Lookup tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `threat_intel_lookup` | Query VirusTotal and AbuseIPDB to assess the threat reputation of an IP, URL, domain, or file hash (MD5/SHA1/SHA256) | `threat:intel` | — | ✓ |
+| `threat_intel_lookup` | Query VirusTotal and AbuseIPDB to assess the threat reputation of an IP, URL, domain, or file hash (MD5/SHA1/SHA256) | `threat:intel` | — | — |
 
 ## Configuration
 

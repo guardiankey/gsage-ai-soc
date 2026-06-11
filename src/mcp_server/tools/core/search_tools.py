@@ -164,6 +164,11 @@ class SearchToolsTool(BaseTool):
                 "category": getattr(t, "category", "general"),
                 "requires_config": t.requires_config,
                 "requires_approval": t.requires_approval,
+                "requires_user_credentials": getattr(
+                    t, "requires_user_credentials", False
+                ),
+                "credential_schema": getattr(t, "credential_schema", None),
+                "credential_namespace": getattr(t, "credential_namespace", None),
                 "params_schema": t.effective_params_schema,
             }
             for t in tools

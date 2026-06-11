@@ -11,7 +11,7 @@ gSage AI — change_file_scope MCP tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `change_file_scope` | Change a generated file's visibility between private (user) and department-shared. Only the file owner can perform this change. | `files:write` | — | ✓ |
+| `change_file_scope` | Change a generated file's visibility between private (user) and department-shared. Only the file owner can perform this change. | `files:write` | — | — |
 
 ## Environment variables
 

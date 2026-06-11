@@ -11,7 +11,7 @@ gSage AI — EML Security Analyzer tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `eml_analyzer` | Analyze .eml email files for phishing indicators, spoofing, malicious attachments, and suspicious URLs | `agents:run` | — | ✓ |
+| `eml_analyzer` | Analyze .eml email files for phishing indicators, spoofing, malicious attachments, and suspicious URLs | `agents:run` | — | — |
 
 ## Environment variables
 

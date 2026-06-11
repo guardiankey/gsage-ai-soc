@@ -11,7 +11,7 @@ gSage AI — Knowledge Base CRUD tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `knowledge_base` | Search, read, create and manage the organization's knowledge base articles (Weaviate backend) | `crud:knowledge_base:read`, `crud:knowledge_base:write` | — | ✓ |
+| `knowledge_base` | Search, read, create and manage the organization's knowledge base articles (Weaviate backend) | `crud:knowledge_base:read`, `crud:knowledge_base:write` | — | — |
 
 ## Environment variables
 

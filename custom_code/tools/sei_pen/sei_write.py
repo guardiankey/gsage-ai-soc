@@ -74,6 +74,18 @@ class SeiPenWriteTool(BaseTool):
     requires_approval: ClassVar[bool] = True
     supports_multiple_configs: ClassVar[bool] = False
 
+    # Shared org-level configuration and user keychain entry across all
+    # ``sei_pen_*`` tools.
+    config_namespace: ClassVar[Optional[str]] = "sei_pen"
+    requires_user_credentials: ClassVar[bool] = True
+    credential_namespace: ClassVar[Optional[str]] = "sei_pen"
+    credential_schema: ClassVar[Optional[dict]] = {
+        "kind": "basic",
+        "required": ["username", "password"],
+        "optional": [],
+        "description": "SEI-PEN username and password (login/sigla and senha).",
+    }
+
     audit_field_mapping: ClassVar[dict] = {"target_entities": "protocolo"}
 
     # ── Tool params ───────────────────────────────────────────────────────────
@@ -263,14 +275,6 @@ class SeiPenWriteTool(BaseTool):
                     "Example: http://sei.myorg.gov.br/sei/modulos/wssei/controlador_ws.php/api/v2"
                 ),
             },
-            "usuario": {
-                "type": "string",
-                "description": "SEI username (login/sigla).",
-            },
-            "senha": {
-                "type": "string",
-                "description": "SEI password. Stored encrypted.",
-            },
             "orgao_id": {
                 "type": "string",
                 "description": "SEI organ/agency numeric ID (e.g. '0' for the default organ).",
@@ -280,7 +284,7 @@ class SeiPenWriteTool(BaseTool):
                 "description": "Default unit ID sent with every request to maintain session context.",
             },
         },
-        "required": ["usuario", "senha", "orgao_id"],
+        "required": ["orgao_id"],
         "additionalProperties": False,
     }
     config_defaults: ClassVar[dict] = {}
@@ -312,14 +316,22 @@ class SeiPenWriteTool(BaseTool):
         except SeiPenError as exc:
             return self._failure("CONFIG_ERROR", str(exc))
 
-        # ── Validate credentials ──────────────────────────────────────────────
-        usuario: str = config.get("usuario", "").strip()
-        senha: str = config.get("senha", "").strip()
+        # ── Resolve credentials (user keychain shared by all sei_pen_* tools) ──
+        user_creds = agent_context.user_credentials.get("sei_pen") or {}
+        usuario: str = (user_creds.get("username") or "").strip()
+        senha: str = (user_creds.get("password") or "").strip()
         orgao_id: str = str(config.get("orgao_id", "")).strip()
-        if not usuario or not senha or not orgao_id:
+        if not usuario or not senha:
+            return self._failure(
+                "CREDENTIAL_MISSING",
+                "SEI-PEN requires a personal credential. Configure your "
+                "'sei_pen' credential in Settings → Credentials and link "
+                "it as active for this tool.",
+            )
+        if not orgao_id:
             return self._failure(
                 "CONFIG_ERROR",
-                "Tool config must include 'usuario', 'senha', and 'orgao_id'.",
+                "Tool config must include 'orgao_id'.",
             )
 
         # ── Build request ─────────────────────────────────────────────────────

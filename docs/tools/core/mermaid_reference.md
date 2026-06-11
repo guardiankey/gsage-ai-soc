@@ -11,7 +11,7 @@ gSage AI — Mermaid diagram syntax reference tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `mermaid_reference` | Get Mermaid diagram syntax reference to generate correct diagrams. Call this before creating any Mermaid diagram to avoid version incompatibilities. | — | — | ✓ |
+| `mermaid_reference` | Get Mermaid diagram syntax reference to generate correct diagrams. Call this before creating any Mermaid diagram to avoid version incompatibilities. | — | — | — |
 
 ## Environment variables
 

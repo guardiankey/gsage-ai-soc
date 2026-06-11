@@ -229,6 +229,26 @@ class BaseTool(ABC):
     # advertises the flag via tool annotations so the agent layer can act.
     requires_approval: ClassVar[bool] = False
 
+    # ── User credentials (per-user keychain) ────────────────────────────────
+    # When True, the agent must resolve an active user credential before
+    # dispatching the call and inject it into ``AgentContext.user_credentials``
+    # under this tool's ``credential_namespace`` (or its name when no
+    # namespace is set).  The MCP server advertises the flag and the
+    # optional ``credential_schema`` via tool metadata so the agent layer
+    # can pre-validate and the UI can render dynamic forms.
+    requires_user_credentials: ClassVar[bool] = False
+    credential_schema: ClassVar[Optional[dict]] = None
+
+    # Optional shared-keychain namespace.  When set, a family of related
+    # tools (e.g. ``sei_pen_read`` and ``sei_pen_write``) share a single
+    # user credential link under the namespace identifier.  The
+    # credentials service stores ``tool_name = credential_namespace`` in
+    # ``gsage_user_credential_tool_links``; the agent factory resolves and
+    # injects the credential into ``AgentContext.user_credentials[namespace]``
+    # so every tool in the family reads from the same key.  ``None``
+    # (default) → legacy behaviour, keyed by ``self.name``.
+    credential_namespace: ClassVar[Optional[str]] = None
+
     # ── Background execution ─────────────────────────────────────────────────
     # When always_background=True, every invocation is immediately dispatched
     # to the Celery worker without attempting synchronous execution.
@@ -666,6 +686,34 @@ class BaseTool(ABC):
             return result
 
         state = await self.load_state(agent_context, session, profile_id=profile_id)
+
+        # ── 4a. User-credential gating ────────────────────────────────────
+        # When the tool declares ``requires_user_credentials=True``, the
+        # agent proxy is expected to resolve the active credential from
+        # the user keychain and inject it into
+        # ``AgentContext.user_credentials`` before dispatch.  If nothing is
+        # present here, surface a clear CREDENTIAL_MISSING error so the LLM
+        # tells the user to configure their keychain.
+        if self.requires_user_credentials:
+            user_creds = getattr(agent_context, "user_credentials", None) or {}
+            cred_key = self.credential_namespace or self.name
+            if not user_creds.get(cred_key):
+                elapsed = int((time.monotonic() - start) * 1000)
+                result = self._failure(
+                    code="CREDENTIAL_MISSING",
+                    message=(
+                        f"Tool '{self.name}' requires a personal credential. "
+                        "Configure one in your keychain (Settings → Credentials) "
+                        "and link it to this tool as the active credential."
+                    ),
+                    execution_time_ms=elapsed,
+                )
+                await audit.log_execution(
+                    agent_context, self.name, self.version,
+                    params, "error", elapsed, "CREDENTIAL_MISSING",
+                    audit_context=audit_context or None,
+                )
+                return result
 
         # ── 4b. Required-params validation (must happen BEFORE BG dispatch) ──
         # Validate required fields from params_schema before calling execute()
