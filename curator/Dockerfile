@@ -32,6 +32,9 @@ COPY --from=builder /install /usr/local
 
 WORKDIR /app
 COPY curator/app /app/app
+# Standalone admin CLI — invoke as `/app/cli.py`, `./cli.py` or `python3 /app/cli.py`.
+COPY curator/cli.py /app/cli.py
+RUN chmod +x /app/cli.py
 
 RUN groupadd -r curator \
     && useradd -r -g curator -m -d /home/curator -s /usr/sbin/nologin curator

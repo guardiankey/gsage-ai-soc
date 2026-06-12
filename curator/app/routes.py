@@ -6,6 +6,7 @@ Endpoints:
     GET    /a/list_collections
     POST   /a/create_collection
     PUT    /a/{collection_id}/update_collection
+    DELETE /a/{collection_id}/del_collection
     POST   /a/{collection_id}/add_item
     DELETE /a/{collection_id}/del_item
     GET    /a/{collection_id}/view_item
@@ -14,7 +15,9 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import shutil
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -152,6 +155,45 @@ async def update_collection(
     return c
 
 
+@router.delete("/{collection_id}/del_collection", status_code=200, dependencies=[_auth])
+async def del_collection(
+    collection_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Hard-delete a collection and **all** of its items (cascade).
+
+    Unlike ``del_item`` (a soft-delete that preserves differential history),
+    this physically removes the collection row, cascade-deletes every item via
+    the ``ON DELETE CASCADE`` FK, and removes the on-disk dump directory
+    (``{data_dir}/{slug}/``) so the public ``/data/`` listing no longer serves
+    stale files. This operation is irreversible.
+    """
+    c = await _get_collection_or_404(collection_id, db)
+    slug = c.slug
+
+    # Count items for the response (best-effort).
+    item_count = (
+        await db.execute(
+            select(func.count()).select_from(Item).where(Item.collection_id == collection_id)
+        )
+    ).scalar_one()
+
+    await db.delete(c)
+    await db.commit()
+
+    # Remove the on-disk dump directory so stale files are not served.
+    slug_dir = Path(get_settings().data_dir) / slug
+    if slug_dir.is_dir():
+        try:
+            shutil.rmtree(slug_dir)
+        except OSError as exc:
+            # The DB row is already gone; surface the cleanup issue without failing.
+            log.warning("del_collection: failed to remove %s: %s", slug_dir, exc)
+
+    log.info("del_collection: id=%s slug=%s items=%s", collection_id, slug, item_count)
+    return {"deleted_collection_id": collection_id, "slug": slug, "deleted_items": item_count}
+
+
 @router.post("/{collection_id}/add_item", response_model=ItemOut, status_code=200, dependencies=[_auth])
 async def add_item(
     collection_id: int,
@@ -162,7 +204,9 @@ async def add_item(
 
     # Validate value for this collection type
     try:
-        canonical = validate_value(c.type, payload.value)
+        canonical = validate_value(
+            c.type, payload.value, strict=get_settings().strict_validation
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -248,7 +292,9 @@ async def del_item(
     c = await _get_collection_or_404(collection_id, db)
 
     try:
-        canonical = validate_value(c.type, payload.value)
+        canonical = validate_value(
+            c.type, payload.value, strict=get_settings().strict_validation
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

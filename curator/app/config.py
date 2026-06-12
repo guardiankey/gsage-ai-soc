@@ -10,6 +10,12 @@ Optional variables:
     CURATOR_WAIT_TIME     — seconds to accumulate changes before dumping files (default: 10)
     CURATOR_EXPIRY_CHECK_INTERVAL — seconds between expired-item cleanup runs (default: 3600)
     CURATOR_DATA_DIR      — directory where list files are written (default: /data)
+    CURATOR_STRICT_VALIDATION — when true, enforce strict per-type value validation
+                            (reject malformed domains/urls/emails/hashes/...). Default false:
+                            values are accepted as-is (only whitespace-trimmed) to allow
+                            URL/email fragments common in reputation lists. ip/cidr types are
+                            always validated regardless, since they are stored in a native
+                            PostgreSQL CIDR column.
 
 Module-level constants (intentionally not env-driven):
     DIFF_RETENTION_DAYS   — soft-deleted items younger than this are kept so daily/monthly
@@ -36,6 +42,7 @@ class Settings(BaseSettings):
     wait_time: int = 10
     expiry_check_interval: int = 3600
     data_dir: str = "/data"
+    strict_validation: bool = False
 
 
 @lru_cache(maxsize=1)

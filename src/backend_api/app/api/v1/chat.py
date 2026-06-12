@@ -31,7 +31,7 @@ from src.backend_api.app.schemas.pagination import PaginatedResponse, Pagination
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.backend_api.app.api.deps import get_tenant_context
@@ -855,7 +855,7 @@ async def patch_folder(
         folder.is_active = payload.is_active
         # Symmetric cascade to the folder's conversations.
         await db.execute(
-            GSageTenantSession.__table__.update()
+            update(GSageTenantSession)
             .where(
                 GSageTenantSession.folder_id == folder.id,
                 GSageTenantSession.org_id == ctx.org_id,

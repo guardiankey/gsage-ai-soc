@@ -146,12 +146,21 @@ _VALIDATORS = {
 }
 
 
-def validate_value(collection_type: str, raw_value: str) -> str:
+def validate_value(collection_type: str, raw_value: str, *, strict: bool = True) -> str:
     """Validate and normalise *raw_value* for the given *collection_type*.
 
     Returns the canonical string form.  Raises ``ValueError`` on failure.
+
+    When ``strict`` is False the per-type format check is skipped and the value
+    is accepted as-is (only whitespace-trimmed). This allows reputation lists to
+    store fragments that would otherwise be rejected (partial URLs, sender
+    patterns, etc.). ``ip``/``cidr`` types are always validated regardless of
+    ``strict`` because they are persisted in a native PostgreSQL CIDR column
+    that rejects malformed input.
     """
     validator = _VALIDATORS.get(collection_type)
     if validator is None:
         raise ValueError(f"Unknown collection type: {collection_type!r}")
-    return validator(raw_value)
+    if strict or collection_type in CIDR_TYPES:
+        return validator(raw_value)
+    return raw_value.strip()
