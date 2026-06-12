@@ -74,6 +74,19 @@
     "createConvError": "会話の作成に失敗しました",
     "newConvDesc": "新しい会話にオプションのタイトルを入力してください。",
     "renameConvDesc": "この会話の新しいタイトルを入力してください。",
+    "untitled": "無題",
+    "newFolder": "新しいフォルダ",
+    "newFolderDesc": "新しいフォルダの名前を入力してください。",
+    "folderNamePlaceholder": "フォルダ名",
+    "renameFolder": "フォルダ名を変更",
+    "renameFolderDesc": "このフォルダの新しい名前を入力してください。",
+    "archiveFolderTitle": "フォルダをアーカイブ",
+    "archiveFolderDesc": "フォルダとその中のすべての会話がアーカイブされます。いつでも復元できます。",
+    "deleteFolderTitle": "フォルダを削除",
+    "deleteFolderDesc": "フォルダは完全に削除されます。中の会話は保持され、フォルダから移動されます。",
+    "moveToFolder": "フォルダへ移動",
+    "removeFromFolder": "フォルダから削除",
+    "noFolders": "フォルダがありません",
     "attachFile": "ファイルを添付",
     "removeAttachment": "添付を削除",
     "cancelAttachment": "アップロードをキャンセル",
@@ -92,7 +105,8 @@
     "mermaidStreamingHint": "メッセージ完了後にダイアグラムが表示されます",
     "mermaidCopySuccess": "ダイアグラムのソースをクリップボードにコピーしました",
     "mermaidCopyError": "ダイアグラムのソースのコピーに失敗しました",
-    "messageCopyError": "メッセージのコピーに失敗しました"
+    "messageCopyError": "メッセージのコピーに失敗しました",
+    "newConversationInFolder": "フォルダー内に新しい会話"
   },
   "knowledge": {
     "title": "ナレッジベース",
@@ -327,7 +341,9 @@
     "all": "すべて",
     "optional": "任意",
     "done": "完了",
-    "status": "ステータス"
+    "status": "ステータス",
+    "expand": "展開",
+    "collapse": "折りたたむ"
   },
   "approvalRules": {
     "title": "承認ルール",

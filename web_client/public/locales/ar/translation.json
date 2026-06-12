@@ -74,6 +74,19 @@
     "createConvError": "فشل في إنشاء المحادثة",
     "newConvDesc": "أدخل عنواناً اختيارياً للمحادثة الجديدة.",
     "renameConvDesc": "أدخل عنواناً جديداً لهذه المحادثة.",
+    "untitled": "بدون عنوان",
+    "newFolder": "مجلد جديد",
+    "newFolderDesc": "أدخل اسماً للمجلد الجديد.",
+    "folderNamePlaceholder": "اسم المجلد",
+    "renameFolder": "إعادة تسمية المجلد",
+    "renameFolderDesc": "أدخل اسماً جديداً لهذا المجلد.",
+    "archiveFolderTitle": "أرشفة المجلد",
+    "archiveFolderDesc": "سيتم أرشفة المجلد وجميع المحادثات الموجودة بداخله. يمكنك استعادتها في أي وقت.",
+    "deleteFolderTitle": "حذف المجلد",
+    "deleteFolderDesc": "سيتم حذف المجلد نهائياً. سيتم الاحتفاظ بمحادثاته ونقلها خارج المجلد.",
+    "moveToFolder": "نقل إلى مجلد",
+    "removeFromFolder": "إزالة من المجلد",
+    "noFolders": "لا توجد مجلدات",
     "attachFile": "إرفاق ملف",
     "removeAttachment": "إزالة المرفق",
     "cancelAttachment": "إلغاء الرفع",
@@ -92,7 +105,8 @@
     "mermaidStreamingHint": "سيتم عرض المخطط عند اكتمال الرسالة",
     "mermaidCopySuccess": "تم نسخ مصدر المخطط إلى الحافظة",
     "mermaidCopyError": "فشل نسخ مصدر المخطط",
-    "messageCopyError": "فشل نسخ الرسالة"
+    "messageCopyError": "فشل نسخ الرسالة",
+    "newConversationInFolder": "محادثة جديدة في المجلد"
   },
   "knowledge": {
     "title": "قاعدة المعرفة",
@@ -327,7 +341,9 @@
     "all": "الكل",
     "optional": "اختياري",
     "done": "تم",
-    "status": "الحالة"
+    "status": "الحالة",
+    "expand": "توسيع",
+    "collapse": "طي"
   },
   "approvalRules": {
     "title": "قواعد الموافقة",

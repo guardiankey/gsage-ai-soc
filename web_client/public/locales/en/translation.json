@@ -74,6 +74,19 @@
     "createConvError": "Failed to create conversation",
     "newConvDesc": "Enter an optional title for the new conversation.",
     "renameConvDesc": "Enter a new title for this conversation.",
+    "untitled": "Untitled",
+    "newFolder": "New folder",
+    "newFolderDesc": "Enter a name for the new folder.",
+    "folderNamePlaceholder": "Folder name",
+    "renameFolder": "Rename folder",
+    "renameFolderDesc": "Enter a new name for this folder.",
+    "archiveFolderTitle": "Archive folder",
+    "archiveFolderDesc": "The folder and all conversations inside it will be archived. You can restore them at any time.",
+    "deleteFolderTitle": "Delete folder",
+    "deleteFolderDesc": "The folder will be permanently deleted. Its conversations will be kept and moved out of the folder.",
+    "moveToFolder": "Move to folder",
+    "removeFromFolder": "Remove from folder",
+    "noFolders": "No folders",
     "attachFile": "Attach file",
     "removeAttachment": "Remove attachment",
     "cancelAttachment": "Cancel upload",
@@ -92,7 +105,8 @@
     "mermaidStreamingHint": "Diagram will render when message is complete",
     "mermaidCopySuccess": "Diagram source copied to clipboard",
     "mermaidCopyError": "Failed to copy diagram source",
-    "messageCopyError": "Failed to copy message"
+    "messageCopyError": "Failed to copy message",
+    "newConversationInFolder": "New conversation in folder"
   },
   "knowledge": {
     "title": "Knowledge Base",
@@ -327,7 +341,9 @@
     "all": "All",
     "optional": "optional",
     "done": "Done",
-    "status": "Status"
+    "status": "Status",
+    "expand": "Expand",
+    "collapse": "Collapse"
   },
   "approvalRules": {
     "title": "Approval Rules",

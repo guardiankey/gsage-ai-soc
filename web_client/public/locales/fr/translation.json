@@ -74,6 +74,19 @@
     "createConvError": "Échec de la création de la conversation",
     "newConvDesc": "Entrez un titre optionnel pour la nouvelle conversation.",
     "renameConvDesc": "Entrez un nouveau titre pour cette conversation.",
+    "untitled": "Sans titre",
+    "newFolder": "Nouveau dossier",
+    "newFolderDesc": "Saisissez un nom pour le nouveau dossier.",
+    "folderNamePlaceholder": "Nom du dossier",
+    "renameFolder": "Renommer le dossier",
+    "renameFolderDesc": "Saisissez un nouveau nom pour ce dossier.",
+    "archiveFolderTitle": "Archiver le dossier",
+    "archiveFolderDesc": "Le dossier et toutes les conversations qu'il contient seront archivés. Vous pouvez les restaurer à tout moment.",
+    "deleteFolderTitle": "Supprimer le dossier",
+    "deleteFolderDesc": "Le dossier sera définitivement supprimé. Ses conversations seront conservées et sorties du dossier.",
+    "moveToFolder": "Déplacer vers un dossier",
+    "removeFromFolder": "Retirer du dossier",
+    "noFolders": "Aucun dossier",
     "attachFile": "Joindre un fichier",
     "removeAttachment": "Supprimer la pièce jointe",
     "cancelAttachment": "Annuler l'envoi",
@@ -92,7 +105,8 @@
     "mermaidStreamingHint": "Le diagramme sera rendu à la fin du message",
     "mermaidCopySuccess": "Code du diagramme copié dans le presse-papiers",
     "mermaidCopyError": "Échec de la copie du code du diagramme",
-    "messageCopyError": "Échec de la copie du message"
+    "messageCopyError": "Échec de la copie du message",
+    "newConversationInFolder": "Nouvelle conversation dans le dossier"
   },
   "knowledge": {
     "title": "Base de Connaissances",
@@ -327,7 +341,9 @@
     "all": "Tout",
     "optional": "optionnel",
     "done": "Terminé",
-    "status": "Statut"
+    "status": "Statut",
+    "expand": "Développer",
+    "collapse": "Réduire"
   },
   "approvalRules": {
     "title": "Règles d'Approbation",

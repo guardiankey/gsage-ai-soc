@@ -12,9 +12,10 @@ Usage
 -----
     cd /path/to/gsage-ai-soc
     source .venv/bin/activate
-    python limbo/debug_vllm_toolcalls.py                       # default: full
-    python limbo/debug_vllm_toolcalls.py --scenario small-prompt
-    python limbo/debug_vllm_toolcalls.py --scenario all          # run all
+    python scripts/debug_vllm_toolcalls.py                       # default: full
+    python scripts/debug_vllm_toolcalls.py --scenario small-prompt
+    python scripts/debug_vllm_toolcalls.py --scenario all          # run all
+    python scripts/debug_vllm_toolcalls.py --replay <dump.json>    # faithful replay
 
 Scenarios are designed so you can attribute the failure to one of:
 
@@ -44,7 +45,7 @@ from openai import OpenAI
 
 # Locate the project root so we can pull in the production system prompt
 # verbatim — otherwise we would be bisecting against a guess.  We try several
-# candidates so the script works whether it is run from the repo (limbo/…)
+# candidates so the script works whether it is run from the repo (scripts/…)
 # or copied into a container (e.g. /tmp/debug_vllm_toolcalls.py with the
 # code mounted under /app).
 _CANDIDATE_ROOTS = [
@@ -613,7 +614,11 @@ def run_replay(
     messages = _sanitize_messages_for_openai(raw_messages)
     tools = payload.get("tools") or []
     tool_choice = payload.get("tool_choice")
-    extra_body = payload.get("extra_body") or {}
+    # Raw extra_body as captured from the production request. We keep a
+    # pristine copy so the audit print can show what prod actually sent
+    # vs. what we end up sending after CLI overrides.
+    raw_extra_body = payload.get("extra_body")
+    extra_body: Dict[str, Any] = dict(raw_extra_body) if isinstance(raw_extra_body, dict) else {}
     # Extras captured from Agno's get_request_params() (temperature, top_p,
     # max_tokens, seed, response_format, service_tier, …).  These are the
     # parameters most likely to flip the model into a different output mode.
@@ -627,7 +632,6 @@ def run_replay(
         tool_choice = None  # mirror prod: omit tool_choice from the request
 
     if enable_thinking_override is not None:
-        extra_body = dict(extra_body)
         extra_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking_override}
 
     # Simulate production (Agno's VLLM with enable_thinking=None drops
@@ -657,8 +661,26 @@ def run_replay(
         [t.get("function", {}).get("name") or t.get("name") for t in tools],
     )
     _print_kv("tool_choice", tool_choice)
-    _print_kv("extra_body_keys", sorted(extra_body.keys()) if isinstance(extra_body, dict) else None)
-    _print_kv("extra_body", json.dumps(extra_body, ensure_ascii=False) if extra_body else None)
+    _print_kv(
+        "extra_body_in_dump",
+        json.dumps(raw_extra_body, ensure_ascii=False) if raw_extra_body else "null",
+    )
+    _print_kv("extra_body_effective_keys", sorted(extra_body.keys()) if isinstance(extra_body, dict) else None)
+    _print_kv(
+        "extra_body_effective",
+        json.dumps(extra_body, ensure_ascii=False) if extra_body else "{}",
+    )
+    # Big visible warning when CLI flags caused the replay to diverge from
+    # the production payload — replay fidelity is the whole point of this
+    # tool, so silent mutation must be flagged.
+    dump_norm = raw_extra_body if isinstance(raw_extra_body, dict) else {}
+    if extra_body != dump_norm:
+        print(
+            "  !! REPLAY DIVERGES FROM DUMP: extra_body was modified by CLI "
+            "flags (e.g. --enable-thinking / --no-extra-body). Pass "
+            "`--enable-thinking unset` (default) and omit `--no-extra-body` "
+            "for a bit-for-bit replay."
+        )
     _print_kv(
         "final_extras",
         json.dumps(final_extras, ensure_ascii=False) if final_extras else None,
@@ -716,8 +738,12 @@ def main() -> int:
     parser.add_argument(
         "--enable-thinking",
         choices=["true", "false", "unset"],
-        default="false",
-        help="chat_template_kwargs.enable_thinking; 'unset' omits the field.",
+        default="unset",
+        help=(
+            "chat_template_kwargs.enable_thinking override. Default 'unset' "
+            "keeps the dump's extra_body untouched (faithful replay). Use "
+            "'true'/'false' to deliberately diverge for bisection."
+        ),
     )
     parser.add_argument(
         "--no-stream",

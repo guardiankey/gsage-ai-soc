@@ -74,6 +74,19 @@
     "createConvError": "Falha ao criar conversa",
     "newConvDesc": "Informe um título opcional para a nova conversa.",
     "renameConvDesc": "Informe um novo título para esta conversa.",
+    "untitled": "Sem título",
+    "newFolder": "Nova pasta",
+    "newFolderDesc": "Informe um nome para a nova pasta.",
+    "folderNamePlaceholder": "Nome da pasta",
+    "renameFolder": "Renomear pasta",
+    "renameFolderDesc": "Informe um novo nome para esta pasta.",
+    "archiveFolderTitle": "Arquivar pasta",
+    "archiveFolderDesc": "A pasta e todas as conversas dentro dela serão arquivadas. Você pode restaurá-las a qualquer momento.",
+    "deleteFolderTitle": "Excluir pasta",
+    "deleteFolderDesc": "A pasta será excluída permanentemente. As conversas serão mantidas e removidas da pasta.",
+    "moveToFolder": "Mover para pasta",
+    "removeFromFolder": "Remover da pasta",
+    "noFolders": "Nenhuma pasta",
     "attachFile": "Anexar arquivo",
     "removeAttachment": "Remover anexo",
     "cancelAttachment": "Cancelar envio",
@@ -92,7 +105,8 @@
     "mermaidStreamingHint": "O diagrama será renderizado ao concluir a mensagem",
     "mermaidCopySuccess": "Código do diagrama copiado para a área de transferência",
     "mermaidCopyError": "Falha ao copiar o código do diagrama",
-    "messageCopyError": "Falha ao copiar a mensagem"
+    "messageCopyError": "Falha ao copiar a mensagem",
+    "newConversationInFolder": "Nova conversa nesta pasta"
   },
   "knowledge": {
     "title": "Base de Conhecimento",
@@ -326,7 +340,9 @@
     "all": "Todos",
     "optional": "opcional",
     "done": "Concluído",
-    "status": "Status"
+    "status": "Status",
+    "expand": "Expandir",
+    "collapse": "Recolher"
   },
   "approvalRules": {
     "title": "Regras de Aprovação",

@@ -27,6 +27,10 @@ class ConversationCreate(BaseModel):
         default="assistant",
         description="Logical agent to attach this conversation to.",
     )
+    folder_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="Optional folder to create this conversation in.",
+    )
 
 
 class ConversationPatch(BaseModel):
@@ -34,6 +38,14 @@ class ConversationPatch(BaseModel):
 
     title: Optional[str] = Field(default=None, max_length=500)
     is_active: Optional[bool] = None
+    folder_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="Assign to a folder, or null to move to the ungrouped section.",
+    )
+    clear_folder: bool = Field(
+        default=False,
+        description="If true, removes the conversation from its folder (folder_id -> NULL).",
+    )
 
 
 class ConversationOut(BaseModel):
@@ -43,7 +55,39 @@ class ConversationOut(BaseModel):
     agno_session_id: str
     title: Optional[str]
     is_active: bool
+    folder_id: Optional[uuid.UUID] = None
     agent_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Conversation folders
+# ---------------------------------------------------------------------------
+
+
+class FolderCreate(BaseModel):
+    """Request body for POST /orgs/{org_id}/chat/folders."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class FolderPatch(BaseModel):
+    """Request body for PATCH /orgs/{org_id}/chat/folders/{id}."""
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    is_active: Optional[bool] = None
+
+
+class FolderOut(BaseModel):
+    """Response schema for folder list / detail endpoints."""
+
+    id: uuid.UUID
+    name: str
+    is_active: bool
+    conversation_count: int = 0
     created_at: datetime
     updated_at: datetime
 

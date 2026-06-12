@@ -5,11 +5,21 @@ export interface Conversation {
   id: string
   title: string
   is_active: boolean
+  folder_id?: string | null
   agent_id: string
   created_at: string
   updated_at: string
   last_message_at?: string
   message_count?: number
+}
+
+export interface Folder {
+  id: string
+  name: string
+  is_active: boolean
+  conversation_count: number
+  created_at: string
+  updated_at: string
 }
 
 export interface PaginatedConversations {
@@ -94,10 +104,12 @@ export async function getConversation(orgId: string, convId: string): Promise<Co
 export async function createConversation(
   orgId: string,
   title?: string,
-  agentId = 'assistant'
+  agentId = 'assistant',
+  folderId?: string | null
 ): Promise<Conversation> {
   const payload: Record<string, string> = { agent_id: agentId }
   if (title) payload.title = title
+  if (folderId) payload.folder_id = folderId
   const response = await apiClient.post(`/v1/orgs/${orgId}/chat/conversations`, payload)
   return response.data
 }
@@ -105,7 +117,7 @@ export async function createConversation(
 export async function updateConversation(
   orgId: string,
   convId: string,
-  data: { title?: string; is_active?: boolean }
+  data: { title?: string; is_active?: boolean; folder_id?: string | null; clear_folder?: boolean }
 ): Promise<Conversation> {
   const response = await apiClient.patch(`/v1/orgs/${orgId}/chat/conversations/${convId}`, data)
   return response.data
@@ -113,6 +125,35 @@ export async function updateConversation(
 
 export async function deleteConversation(orgId: string, convId: string): Promise<void> {
   await apiClient.delete(`/v1/orgs/${orgId}/chat/conversations/${convId}`)
+}
+
+// ---------------------------------------------------------------------------
+// Conversation folders
+// ---------------------------------------------------------------------------
+
+export async function listFolders(orgId: string, activeOnly = true): Promise<Folder[]> {
+  const response = await apiClient.get(`/v1/orgs/${orgId}/chat/folders`, {
+    params: { active: activeOnly },
+  })
+  return response.data
+}
+
+export async function createFolder(orgId: string, name: string): Promise<Folder> {
+  const response = await apiClient.post(`/v1/orgs/${orgId}/chat/folders`, { name })
+  return response.data
+}
+
+export async function updateFolder(
+  orgId: string,
+  folderId: string,
+  data: { name?: string; is_active?: boolean }
+): Promise<Folder> {
+  const response = await apiClient.patch(`/v1/orgs/${orgId}/chat/folders/${folderId}`, data)
+  return response.data
+}
+
+export async function deleteFolder(orgId: string, folderId: string): Promise<void> {
+  await apiClient.delete(`/v1/orgs/${orgId}/chat/folders/${folderId}`)
 }
 
 export interface MessageListResult {

@@ -15,6 +15,7 @@ from src.shared.models.api_key import GSageAPIKey
 
 # Session / agent run models
 from src.shared.models.tenant_session import GSageTenantSession
+from src.shared.models.conversation_folder import GSageConversationFolder
 from src.shared.models.agent_run import GSageAgentRun
 
 # Tool models
@@ -94,6 +95,7 @@ __all__ = [
     "gsage_group_permissions",
     # Sessions / runs
     "GSageTenantSession",
+    "GSageConversationFolder",
     "GSageAgentRun",
     # Tools
     "GSageTool",

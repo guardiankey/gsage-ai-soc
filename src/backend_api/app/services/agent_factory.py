@@ -925,6 +925,15 @@ def _build_model(org: Optional["GSageOrganization"] = None):
         # adapter installs a NoOp dialect and behaves as a transparent
         # passthrough (native tool_calls are forwarded untouched).
         from src.shared.llm.vllm_recovering import RecoveringToolCallVLLM
+        # Build kwargs dict so unset sampling params fall back to Agno's
+        # class-level defaults instead of being forced to None.
+        sampling_kwargs: dict[str, Any] = {}
+        if settings.vllm_temperature is not None:
+            sampling_kwargs["temperature"] = settings.vllm_temperature
+        if settings.vllm_top_p is not None:
+            sampling_kwargs["top_p"] = settings.vllm_top_p
+        if settings.vllm_presence_penalty is not None:
+            sampling_kwargs["presence_penalty"] = settings.vllm_presence_penalty
         return RecoveringToolCallVLLM(
             id=model_id,
             api_key=api_key,
@@ -932,6 +941,7 @@ def _build_model(org: Optional["GSageOrganization"] = None):
             tool_call_dialect=None if parser_mode in ("", "none") else parser_mode,
             force_non_streaming=force_non_streaming,
             enable_thinking=enable_thinking,
+            **sampling_kwargs,
         )
 
     # Default: Ollama

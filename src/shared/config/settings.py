@@ -158,10 +158,21 @@ class Settings(BaseSettings):
     # tools directly. Leave unset (None) to keep the model/server default.
     vllm_enable_thinking: bool | None = None
 
+    # ── Sampling params (override Agno's VLLM defaults) ───────────────────
+    # Agno's VLLM model defaults are tuned for creative writing
+    # (temperature=0.7, presence_penalty=1.5, top_p=0.8). For tool-calling
+    # workloads those values cause the model to "vary" the output format and
+    # narrate tool calls as markdown-fenced JSON instead of emitting native
+    # tool_calls.  These defaults are tighter and tool-call friendly; bump
+    # temperature for more creative tasks via env if needed.
+    vllm_temperature: float | None = 0.2
+    vllm_top_p: float | None = None
+    vllm_presence_penalty: float | None = 0.0
+
     # Diagnostic: when set to a writable directory path, every outgoing
     # request to vLLM is dumped as JSON (messages + tools + tool_choice +
     # extra_body) so it can be bit-for-bit replayed by
-    # ``limbo/debug_vllm_toolcalls.py --replay <file>`` for bisection.
+    # ``scripts/debug_vllm_toolcalls.py --replay <file>`` for bisection.
     # WARNING: dump files contain full prompts and history (PII).  Use only
     # in development; leave empty in production.
     vllm_debug_request_dump_path: str = ""

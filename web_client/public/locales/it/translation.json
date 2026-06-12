@@ -74,6 +74,19 @@
     "createConvError": "Errore nella creazione della conversazione",
     "newConvDesc": "Inserisci un titolo opzionale per la nuova conversazione.",
     "renameConvDesc": "Inserisci un nuovo titolo per questa conversazione.",
+    "untitled": "Senza titolo",
+    "newFolder": "Nuova cartella",
+    "newFolderDesc": "Inserisci un nome per la nuova cartella.",
+    "folderNamePlaceholder": "Nome della cartella",
+    "renameFolder": "Rinomina cartella",
+    "renameFolderDesc": "Inserisci un nuovo nome per questa cartella.",
+    "archiveFolderTitle": "Archivia cartella",
+    "archiveFolderDesc": "La cartella e tutte le conversazioni al suo interno verranno archiviate. Puoi ripristinarle in qualsiasi momento.",
+    "deleteFolderTitle": "Elimina cartella",
+    "deleteFolderDesc": "La cartella verrà eliminata definitivamente. Le sue conversazioni verranno mantenute e spostate fuori dalla cartella.",
+    "moveToFolder": "Sposta nella cartella",
+    "removeFromFolder": "Rimuovi dalla cartella",
+    "noFolders": "Nessuna cartella",
     "attachFile": "Allega file",
     "removeAttachment": "Rimuovi allegato",
     "cancelAttachment": "Annulla caricamento",
@@ -92,7 +105,8 @@
     "mermaidStreamingHint": "Il diagramma verrà visualizzato al termine del messaggio",
     "mermaidCopySuccess": "Codice del diagramma copiato negli appunti",
     "mermaidCopyError": "Impossibile copiare il codice del diagramma",
-    "messageCopyError": "Impossibile copiare il messaggio"
+    "messageCopyError": "Impossibile copiare il messaggio",
+    "newConversationInFolder": "Nuova conversazione nella cartella"
   },
   "knowledge": {
     "title": "Base di Conoscenza",
@@ -327,7 +341,9 @@
     "all": "Tutti",
     "optional": "opzionale",
     "done": "Fatto",
-    "status": "Stato"
+    "status": "Stato",
+    "expand": "Espandi",
+    "collapse": "Comprimi"
   },
   "approvalRules": {
     "title": "Regole di Approvazione",

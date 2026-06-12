@@ -14,6 +14,7 @@ from src.shared.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 if TYPE_CHECKING:
     from src.shared.models.agent_run import GSageAgentRun
     from src.shared.models.api_key import GSageAPIKey
+    from src.shared.models.conversation_folder import GSageConversationFolder
     from src.shared.models.email_thread import GSageEmailThread
     from src.shared.models.organization import GSageOrganization
     from src.shared.models.user import GSageUser
@@ -56,6 +57,13 @@ class GSageTenantSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         index=True,
         comment="Set when session is initiated via API key (service account)",
     )
+    folder_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("gsage_conversation_folders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Optional folder grouping this conversation. NULL = ungrouped.",
+    )
     agno_session_id: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -93,6 +101,10 @@ class GSageTenantSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     api_key: Mapped[Optional[GSageAPIKey]] = relationship(
         "GSageAPIKey",
         back_populates="tenant_sessions",
+    )
+    folder: Mapped[Optional["GSageConversationFolder"]] = relationship(
+        "GSageConversationFolder",
+        back_populates="sessions",
     )
     agent_runs: Mapped[List[GSageAgentRun]] = relationship(
         "GSageAgentRun",

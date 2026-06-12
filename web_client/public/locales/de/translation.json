@@ -74,6 +74,19 @@
     "createConvError": "Fehler beim Erstellen der Unterhaltung",
     "newConvDesc": "Gib einen optionalen Titel für die neue Unterhaltung ein.",
     "renameConvDesc": "Gib einen neuen Titel für diese Unterhaltung ein.",
+    "untitled": "Ohne Titel",
+    "newFolder": "Neuer Ordner",
+    "newFolderDesc": "Gib einen Namen für den neuen Ordner ein.",
+    "folderNamePlaceholder": "Ordnername",
+    "renameFolder": "Ordner umbenennen",
+    "renameFolderDesc": "Gib einen neuen Namen für diesen Ordner ein.",
+    "archiveFolderTitle": "Ordner archivieren",
+    "archiveFolderDesc": "Der Ordner und alle darin enthaltenen Unterhaltungen werden archiviert. Du kannst sie jederzeit wiederherstellen.",
+    "deleteFolderTitle": "Ordner löschen",
+    "deleteFolderDesc": "Der Ordner wird dauerhaft gelöscht. Seine Unterhaltungen bleiben erhalten und werden aus dem Ordner entfernt.",
+    "moveToFolder": "In Ordner verschieben",
+    "removeFromFolder": "Aus Ordner entfernen",
+    "noFolders": "Keine Ordner",
     "attachFile": "Datei anhängen",
     "removeAttachment": "Anhang entfernen",
     "cancelAttachment": "Upload abbrechen",
@@ -92,7 +105,8 @@
     "mermaidStreamingHint": "Das Diagramm wird nach Abschluss der Nachricht gerendert",
     "mermaidCopySuccess": "Diagrammquelle in die Zwischenablage kopiert",
     "mermaidCopyError": "Diagrammquelle konnte nicht kopiert werden",
-    "messageCopyError": "Nachricht konnte nicht kopiert werden"
+    "messageCopyError": "Nachricht konnte nicht kopiert werden",
+    "newConversationInFolder": "Neue Unterhaltung im Ordner"
   },
   "knowledge": {
     "title": "Wissensdatenbank",
@@ -327,7 +341,9 @@
     "all": "Alle",
     "optional": "optional",
     "done": "Fertig",
-    "status": "Status"
+    "status": "Status",
+    "expand": "Erweitern",
+    "collapse": "Einklappen"
   },
   "approvalRules": {
     "title": "Genehmigungsregeln",

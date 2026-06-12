@@ -8,8 +8,12 @@ Routes
 - ``POST   /orgs/{org_id}/chat/conversations``            — create conversation
 - ``GET    /orgs/{org_id}/chat/conversations``            — list conversations (paged)
 - ``GET    /orgs/{org_id}/chat/conversations/{conv_id}``  — conversation detail
-- ``PATCH  /orgs/{org_id}/chat/conversations/{conv_id}``  — rename / archive
+- ``PATCH  /orgs/{org_id}/chat/conversations/{conv_id}``  — rename / archive / move to folder
 - ``DELETE /orgs/{org_id}/chat/conversations/{conv_id}``  — soft-delete
+- ``POST   /orgs/{org_id}/chat/folders``                  — create folder
+- ``GET    /orgs/{org_id}/chat/folders``                  — list folders
+- ``PATCH  /orgs/{org_id}/chat/folders/{folder_id}``      — rename / archive (cascades)
+- ``DELETE /orgs/{org_id}/chat/folders/{folder_id}``      — delete folder (ungroups conversations)
 - ``GET    /orgs/{org_id}/chat/conversations/{conv_id}/messages``        — chat history
 - ``POST   /orgs/{org_id}/chat/conversations/{conv_id}/messages``        — send message
 - ``POST   /orgs/{org_id}/chat/conversations/{conv_id}/messages/stream`` — SSE stream
@@ -27,7 +31,7 @@ from src.backend_api.app.schemas.pagination import PaginatedResponse, Pagination
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.backend_api.app.api.deps import get_tenant_context
@@ -37,6 +41,9 @@ from src.backend_api.app.schemas.chat import (
     ConversationOut,
     ConversationPatch,
     ContinueRunRequest,
+    FolderCreate,
+    FolderOut,
+    FolderPatch,
     MessageMetadata,
     MessageOut,
     MessageTokenMetadata,
@@ -54,6 +61,7 @@ from src.shared.services.response_filter import (
 )
 from src.shared.models.approval_delegation import GSageApprovalDelegation
 from src.shared.models.background_task import GSageBackgroundTask, BackgroundTaskStatus
+from src.shared.models.conversation_folder import GSageConversationFolder
 from src.shared.models.organization import GSageOrganization
 from src.shared.models.tenant_session import GSageTenantSession
 from src.shared.models.user import GSageUser
@@ -110,6 +118,28 @@ async def _get_conv_or_404(
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
     return session
+
+
+async def _get_folder_or_404(
+    folder_id: uuid.UUID,
+    ctx: TenantContext,
+    db: AsyncSession,
+) -> GSageConversationFolder:
+    """Lookup a folder by id and validate tenant + owner.
+
+    Raises HTTP 404 if not found, or it belongs to a different org/user.
+    """
+    result = await db.execute(
+        select(GSageConversationFolder).where(
+            GSageConversationFolder.id == folder_id,
+            GSageConversationFolder.org_id == ctx.org_id,
+            GSageConversationFolder.user_id == ctx.user_id,
+        )
+    )
+    folder = result.scalar_one_or_none()
+    if folder is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
+    return folder
 
 
 def _extract_text(content) -> str:
@@ -550,11 +580,16 @@ async def create_conversation(
     conv_uuid = uuid.uuid4()
     agno_session_id = ctx.build_session_id("conv", str(conv_uuid))
 
+    # Validate the target folder (if any) belongs to the current org + user.
+    if payload.folder_id is not None:
+        await _get_folder_or_404(payload.folder_id, ctx, db)
+
     tenant_session = GSageTenantSession(
         org_id=ctx.org_id,
         user_id=ctx.user_id,
         agno_session_id=agno_session_id,
         title=payload.title,
+        folder_id=payload.folder_id,
     )
     db.add(tenant_session)
     await db.commit()
@@ -565,6 +600,7 @@ async def create_conversation(
         agno_session_id=tenant_session.agno_session_id,
         title=tenant_session.title,
         is_active=tenant_session.is_active,
+        folder_id=tenant_session.folder_id,
         agent_id=agent_id,
         created_at=tenant_session.created_at,
         updated_at=tenant_session.updated_at,
@@ -607,6 +643,7 @@ async def list_conversations(
             agno_session_id=s.agno_session_id,
             title=s.title,
             is_active=s.is_active,
+            folder_id=s.folder_id,
             created_at=s.created_at,
             updated_at=s.updated_at,
         )
@@ -638,6 +675,7 @@ async def get_conversation(
         agno_session_id=session.agno_session_id,
         title=session.title,
         is_active=session.is_active,
+        folder_id=session.folder_id,
         created_at=session.created_at,
         updated_at=session.updated_at,
     )
@@ -667,6 +705,12 @@ async def patch_conversation(
         session.title = payload.title
     if payload.is_active is not None:
         session.is_active = payload.is_active
+    if payload.clear_folder:
+        session.folder_id = None
+    elif payload.folder_id is not None:
+        # Validate the target folder belongs to the same org + user.
+        await _get_folder_or_404(payload.folder_id, ctx, db)
+        session.folder_id = payload.folder_id
 
     await db.commit()
     await db.refresh(session)
@@ -676,6 +720,7 @@ async def patch_conversation(
         agno_session_id=session.agno_session_id,
         title=session.title,
         is_active=session.is_active,
+        folder_id=session.folder_id,
         created_at=session.created_at,
         updated_at=session.updated_at,
     )
@@ -701,6 +746,147 @@ async def delete_conversation(
     ctx.require_permission("sessions:delete")
     session = await _get_conv_or_404(conv_id, ctx, db)
     session.is_active = False
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# 5b. Conversation folders
+# ---------------------------------------------------------------------------
+
+
+async def _folder_to_out(
+    folder: GSageConversationFolder,
+    db: AsyncSession,
+) -> FolderOut:
+    """Serialize a folder, counting its active conversations."""
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(GSageTenantSession)
+        .where(
+            GSageTenantSession.folder_id == folder.id,
+            GSageTenantSession.is_active == True,  # noqa: E712
+        )
+    )
+    conversation_count = int(count_result.scalar_one() or 0)
+    return FolderOut(
+        id=folder.id,
+        name=folder.name,
+        is_active=folder.is_active,
+        conversation_count=conversation_count,
+        created_at=folder.created_at,
+        updated_at=folder.updated_at,
+    )
+
+
+@router.post(
+    "/orgs/{org_id}/chat/folders",
+    response_model=FolderOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a conversation folder",
+)
+async def create_folder(
+    org_id: uuid.UUID,
+    payload: FolderCreate,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> FolderOut:
+    """Create a folder owned by the current user in this org."""
+    ctx.require_permission("sessions:read")
+    folder = GSageConversationFolder(
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        name=payload.name,
+    )
+    db.add(folder)
+    await db.commit()
+    await db.refresh(folder)
+    return await _folder_to_out(folder, db)
+
+
+@router.get(
+    "/orgs/{org_id}/chat/folders",
+    response_model=List[FolderOut],
+    summary="List the current user's conversation folders",
+)
+async def list_folders(
+    org_id: uuid.UUID,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    active_only: bool = Query(default=True, alias="active"),
+) -> List[FolderOut]:
+    """List folders owned by the current user, ordered by name."""
+    ctx.require_permission("sessions:read")
+    stmt = select(GSageConversationFolder).where(
+        GSageConversationFolder.org_id == ctx.org_id,
+        GSageConversationFolder.user_id == ctx.user_id,
+    )
+    if active_only:
+        stmt = stmt.where(GSageConversationFolder.is_active == True)  # noqa: E712
+    stmt = stmt.order_by(GSageConversationFolder.name.asc())
+
+    result = await db.execute(stmt)
+    folders = result.scalars().all()
+    return [await _folder_to_out(f, db) for f in folders]
+
+
+@router.patch(
+    "/orgs/{org_id}/chat/folders/{folder_id}",
+    response_model=FolderOut,
+    summary="Rename or archive a folder (cascades to its conversations)",
+)
+async def patch_folder(
+    org_id: uuid.UUID,
+    folder_id: uuid.UUID,
+    payload: FolderPatch,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> FolderOut:
+    """Rename and/or archive a folder.
+
+    Archiving (``is_active=false``) cascades: every conversation in the folder
+    is archived too. Un-archiving cascades symmetrically, restoring them.
+    """
+    ctx.require_permission("sessions:read")
+    folder = await _get_folder_or_404(folder_id, ctx, db)
+
+    if payload.name is not None:
+        folder.name = payload.name
+    if payload.is_active is not None and payload.is_active != folder.is_active:
+        folder.is_active = payload.is_active
+        # Symmetric cascade to the folder's conversations.
+        await db.execute(
+            GSageTenantSession.__table__.update()
+            .where(
+                GSageTenantSession.folder_id == folder.id,
+                GSageTenantSession.org_id == ctx.org_id,
+            )
+            .values(is_active=payload.is_active)
+        )
+
+    await db.commit()
+    await db.refresh(folder)
+    return await _folder_to_out(folder, db)
+
+
+@router.delete(
+    "/orgs/{org_id}/chat/folders/{folder_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a folder (conversations are moved to ungrouped)",
+)
+async def delete_folder(
+    org_id: uuid.UUID,
+    folder_id: uuid.UUID,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Hard-delete a folder. Its conversations keep existing but become ungrouped.
+
+    The ``folder_id`` FK uses ``ON DELETE SET NULL``, so conversations are
+    detached automatically rather than deleted.
+    """
+    ctx.require_permission("sessions:delete")
+    folder = await _get_folder_or_404(folder_id, ctx, db)
+    await db.delete(folder)
     await db.commit()
 
 
