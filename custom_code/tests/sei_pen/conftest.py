@@ -23,6 +23,8 @@ Write-test overrides (used by test_sei_write.py):
     SEI_TEST_TIPO_PROCESSO  Process type ID for processo.criar.
     SEI_TEST_HIPOTESE_LEGAL Legal hypothesis value for processo.criar.
     SEI_TEST_GRAU_SIGILO    Secrecy degree for processo.criar (often "").
+    SEI_TEST_ASSUNTO        Subject ID for processo.criar. When omitted, the test
+                            tries to discover one via processo.assunto_sugestao.
     SEI_TEST_PALAVRACHAVE   Keyword for usuario.pesquisar (defaults to username).
 """
 

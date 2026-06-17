@@ -11,6 +11,7 @@ Required permission: ``sei:write``
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import time
 import uuid
@@ -780,7 +781,6 @@ class SeiPenWriteTool(BaseTool):
                     secoes_arg = raw_secoes
                 elif isinstance(raw_secoes, str):
                     try:
-                        import json as _json
                         parsed = _json.loads(raw_secoes)
                     except _json.JSONDecodeError as exc:
                         raise HelperError(

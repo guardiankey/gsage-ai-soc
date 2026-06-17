@@ -35,9 +35,10 @@ import pytest
 import pytest_asyncio
 
 from src.shared.security.context import AgentContext
+from custom_code.tools.sei_pen.sei_read import SeiPenReadTool
 from custom_code.tools.sei_pen.sei_write import SeiPenWriteTool
 
-from .conftest import TEST_ID_SERIE, pick
+from .conftest import TEST_ID_SERIE, first_item, pick
 
 pytestmark = [
     pytest.mark.sei_live,
@@ -83,31 +84,63 @@ def _assert_success(result, operation: str) -> dict:
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def created_process(
-    write_tool: SeiPenWriteTool, agent_context: AgentContext, sei_config: dict
+    write_tool: SeiPenWriteTool,
+    read_tool: SeiPenReadTool,
+    agent_context: AgentContext,
+    sei_config: dict,
 ) -> dict:
     """Create a process once and share it across the write tests."""
     tipo_processo = os.getenv("SEI_TEST_TIPO_PROCESSO") or ""
     if not tipo_processo:
         pytest.skip("SEI_TEST_TIPO_PROCESSO is required to create a process")
 
-    # ``grauSigilo`` and ``hipoteseLegal`` are required params for
-    # processo.criar; the request builder rejects empty strings, so source
-    # them from the environment.
+    nivel_acesso = int(os.getenv("SEI_TEST_NIVEL_ACESSO") or 0)
+
+    # For non-public processes, SEI requires a legal hypothesis.
     hipotese_legal = os.getenv("SEI_TEST_HIPOTESE_LEGAL") or ""
-    grau_sigilo = os.getenv("SEI_TEST_GRAU_SIGILO")
-    if grau_sigilo is None:
-        pytest.skip("SEI_TEST_GRAU_SIGILO is required (use a valid value) ")
+    if nivel_acesso > 0 and not hipotese_legal:
+        pytest.skip(
+            "SEI_TEST_HIPOTESE_LEGAL is required when SEI_TEST_NIVEL_ACESSO > 0"
+        )
+
+    # Secrecy degree is only meaningful for sigiloso (nivelAcesso=2).
+    grau_sigilo = os.getenv("SEI_TEST_GRAU_SIGILO") or ""
+
+    # Some SEI installations require at least one subject (assunto) to create
+    # a process. Discover a valid subject for the chosen process type.
+    assuntos = os.getenv("SEI_TEST_ASSUNTO")
+    if not assuntos:
+        subject_res = await read_tool.execute(
+            agent_context=agent_context,
+            params={
+                "operation": "processo.assunto_sugestao",
+                "tipoProcedimento": tipo_processo,
+                "limit": 5,
+            },
+            config=sei_config,
+            state={},
+        )
+        if subject_res and subject_res.status == "success":
+            rec = first_item((subject_res.data or {}).get("result"))
+            assuntos = pick(rec, "idAssunto", "id")
+        if not assuntos:
+            pytest.skip(
+                f"no subject discovered for process type {tipo_processo}; "
+                "set SEI_TEST_ASSUNTO or check the SEI installation."
+            )
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    params = {
+    params: dict[str, Any] = {
         "operation": "processo.criar",
         "tipoProcesso": tipo_processo,
-        "nivelAcesso": 0,
-        "hipoteseLegal": hipotese_legal,
-        "grauSigilo": grau_sigilo,
+        "nivelAcesso": nivel_acesso,
+        "assuntos": assuntos,
         "especificacao": f"{TEST_TAG} processo {stamp}",
         "observacoes": f"{TEST_TAG} automated write test {stamp}",
     }
+    if nivel_acesso > 0:
+        params["hipoteseLegal"] = hipotese_legal
+        params["grauSigilo"] = grau_sigilo
     result = await _run(write_tool, agent_context, sei_config, params)
     data = _assert_success(result, "processo.criar")
 

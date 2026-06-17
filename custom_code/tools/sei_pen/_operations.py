@@ -12,6 +12,7 @@ ready to be passed to :meth:`SeiPenClient.request`.
 
 from __future__ import annotations
 
+import json
 from typing import Any, TypedDict
 
 
@@ -397,9 +398,11 @@ WRITE_OPERATIONS: dict[str, OperationDef] = {
             "tipoProcesso", "nivelAcesso", "hipoteseLegal", "grauSigilo",
             "assuntos", "interessados", "especificacao", "observacoes",
         ],
+        # hipoteseLegal is only required when nivelAcesso > 0; for public
+        # processes the SEI component expects the field to be absent/null.
         # grauSigilo is only meaningful for sigiloso (nivelAcesso=2); the server
         # treats an absent value as empty, so it must not be required here.
-        "required": ["tipoProcesso", "nivelAcesso", "hipoteseLegal"],
+        "required": ["tipoProcesso", "nivelAcesso"],
     },
     # Processo — alterar
     "processo.alterar": {
@@ -524,6 +527,30 @@ class BuildError(Exception):
     """Raised when required params are missing for a given operation."""
 
 
+def _json_id_list(value: Any) -> str:
+    """Convert a CSV ID string or list into the JSON array WSSEI expects.
+
+    The ``/processo/criar`` endpoint decodes ``assuntos`` and ``interessados``
+    with ``json_decode(..., true)`` and reads ``$item['id']``. Every other
+    write endpoint in this module accepts a plain comma-separated string.
+    This helper hides that inconsistency from callers.
+    """
+    if value is None or value == "":
+        return ""
+
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            return stripped
+        items = [v.strip() for v in value.split(",") if v.strip()]
+    else:
+        items = [value]
+
+    return json.dumps([{"id": item} for item in items])
+
+
 def build_request(
     operation: str,
     params: dict[str, Any],
@@ -581,6 +608,22 @@ def build_request(
                 f"Required param '{req}' is missing for operation '{operation}'"
             )
 
+    # hipoteseLegal is required for processo.criar only when the process is not
+    # public (nivelAcesso > 0).
+    if operation == "processo.criar":
+        nivel_acesso_raw = params.get("nivelAcesso")
+        try:
+            nivel_acesso = int(nivel_acesso_raw) if nivel_acesso_raw is not None else 0
+        except (TypeError, ValueError):
+            nivel_acesso = -1
+        if nivel_acesso > 0:
+            hipotese = params.get("hipoteseLegal")
+            if hipotese is None or hipotese == "":
+                raise BuildError(
+                    "Param 'hipoteseLegal' is required for operation 'processo.criar' "
+                    "when nivelAcesso > 0"
+                )
+
     # ── Build query-string dict ───────────────────────────────────────────────
     query: dict[str, Any] = {
         k: params[k]
@@ -594,5 +637,13 @@ def build_request(
         for k in op["form_params"]
         if k in params and params[k] is not None and params[k] != ""
     }
+
+    # The /processo/criar endpoint is inconsistent with the rest of the API:
+    # it json_decodes assuntos/interessados and expects [{"id": ...}].
+    if operation == "processo.criar":
+        if "assuntos" in form:
+            form["assuntos"] = _json_id_list(form["assuntos"])
+        if "interessados" in form:
+            form["interessados"] = _json_id_list(form["interessados"])
 
     return method, path, query, form
