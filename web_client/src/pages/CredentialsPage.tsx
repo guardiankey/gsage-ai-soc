@@ -555,7 +555,7 @@ function ExtraFieldsEditor({
                     : t('credentials.extraFieldValue')
                 }
                 className="flex-1"
-                type="password"
+                type="text"
                 autoComplete="off"
               />
               <Button

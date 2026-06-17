@@ -10,6 +10,16 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+async def _invalidate_tool_config_cache(org_id: uuid.UUID) -> None:
+    """Best-effort flush of the MCP server's cached tool config for an org."""
+    from src.shared.cache.permissions_cache import get_perm_redis_client  # noqa: PLC0415
+    from src.shared.cache.tool_config_cache import (  # noqa: PLC0415
+        invalidate_tool_config_cache,
+    )
+
+    await invalidate_tool_config_cache(get_perm_redis_client(), org_id)
+
+
 async def list_tool_configs(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -58,6 +68,7 @@ async def create_tool_config(
     db.add(tc)
     await db.commit()
     await db.refresh(tc)
+    await _invalidate_tool_config_cache(org_id)
     return _tool_config_to_dict(tc)
 
 
@@ -79,16 +90,23 @@ async def update_tool_config(
         .values(**values)
     )
     await db.commit()
-    return await get_tool_config(db, config_id)
+    updated = await get_tool_config(db, config_id)
+    if updated is not None and updated.get("org_id"):
+        await _invalidate_tool_config_cache(uuid.UUID(str(updated["org_id"])))
+    return updated
 
 
 async def delete_tool_config(db: AsyncSession, config_id: uuid.UUID) -> bool:
     from src.shared.models.tool_config import GSageToolConfig  # noqa: PLC0415
 
+    # Capture org_id before delete for cache invalidation.
+    existing = await get_tool_config(db, config_id)
     await db.execute(
         delete(GSageToolConfig).where(GSageToolConfig.id == config_id)
     )
     await db.commit()
+    if existing is not None and existing.get("org_id"):
+        await _invalidate_tool_config_cache(uuid.UUID(str(existing["org_id"])))
     return True
 
 

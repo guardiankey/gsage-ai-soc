@@ -105,6 +105,82 @@ class SeiPenError(Exception):
         self.status_code = status_code
 
 
+# ── Instructive error mapping ────────────────────────────────────────────────
+
+
+def instructive_hint(message: str, status_code: Optional[int], operation: str) -> Optional[str]:
+    """Return a remediation hint for a known WSSEI failure, or ``None``.
+
+    The SEI WSSEI module frequently returns terse, install-specific, or empty
+    error messages. This maps recognizable conditions to actionable guidance an
+    AI agent can follow (e.g. "call X first to obtain this ID").
+    """
+    msg = (message or "").lower()
+
+    # Server-side bug: missing column in the acompanhamento query.
+    if "id_usuario_gerador" in msg or "acompanhamento" in msg and "unknown column" in msg:
+        return (
+            "This SEI installation has a server-side bug in "
+            "'processo.listar_meus_acompanhamentos' (missing DB column). "
+            "Use sei_pen_read(operation='processo.listar', apenasMeus='S') instead."
+        )
+
+    # Server-side internal error on document-model listing.
+    if operation == "modelo_documento.listar" and (status_code == 500 or "infraexception" in msg):
+        return (
+            "SEI returned an internal error for 'modelo_documento.listar' on this "
+            "installation. Use sei_pen_read(operation='documento.tipo_pesquisar') "
+            "to discover document types/séries instead."
+        )
+
+    # Empty / generic error on document creation — usually a missing série or
+    # generating unit.
+    if operation in ("documento.cadastrar_interno", "documento.criar_com_conteudo"):
+        if not msg or "obrigat" in msg or "vazio" in msg or "empty" in msg:
+            return (
+                "Confirm 'idSerie' (list types with "
+                "sei_pen_read(operation='documento.tipo_pesquisar', filter='<name>')) "
+                "and that 'idUnidadeGeradoraProtocolo' is set (defaults to your unit)."
+            )
+
+    # Restricted/secret access requires a legal hypothesis.
+    if "hipotese" in msg or "hipótese" in msg:
+        return (
+            "Restricted/secret access requires a legal hypothesis. List options with "
+            "sei_pen_read(operation='hipotese_legal.pesquisar', nivelAcesso=1)."
+        )
+
+    # Unknown process type.
+    if "tipo" in msg and ("processo" in msg or "procedimento" in msg) and (
+        "inval" in msg or "encontrad" in msg or "not found" in msg
+    ):
+        return (
+            "Resolve the process type ID with "
+            "sei_pen_read(operation='processo.tipo_listar', filter='<name>') "
+            "before creating the process."
+        )
+
+    # Generic upstream errors — retry guidance.
+    if status_code in (500, 502, 503, 504):
+        return (
+            "SEI returned a transient upstream error. Retry shortly; if it persists, "
+            "the endpoint may be unavailable on this installation."
+        )
+    if status_code == 401:
+        return (
+            "Authentication failed. Verify your SEI 'sei_pen' credential (username, "
+            "password, orgao_id) in Settings → Credentials."
+        )
+    return None
+
+
+def with_hint(message: str, status_code: Optional[int], operation: str) -> str:
+    """Append an instructive hint to *message* when one is available."""
+    hint = instructive_hint(message, status_code, operation)
+    return f"{message} — Hint: {hint}" if hint else message
+
+
+
 # ── Client ───────────────────────────────────────────────────────────────────
 
 
@@ -316,7 +392,18 @@ class SeiPenClient:
                 ) from exc
 
             if not body.get("sucesso", True):
-                msg = body.get("mensagem") or body.get("message") or str(body)[:400]
+                raw_msg = body.get("mensagem") or body.get("message") or ""
+                if not str(raw_msg).strip():
+                    # SEI frequently returns sucesso:false with an empty
+                    # ``mensagem`` (and empty ``exception``) for not-found /
+                    # access-denied conditions. Surface a clearer message rather
+                    # than echoing the empty envelope.
+                    msg = (
+                        "SEI returned an error with no detail. The ID may not "
+                        "exist, or your unit/credential may lack access to it."
+                    )
+                else:
+                    msg = str(raw_msg)[:400]
                 raise SeiPenError(f"SEI-PEN API error: {msg}")
 
             return body

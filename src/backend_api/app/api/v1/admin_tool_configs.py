@@ -23,6 +23,8 @@ from src.backend_api.app.schemas.admin import (
     ToolConfigOut,
     ToolConfigUpdate,
 )
+from src.shared.cache.permissions_cache import get_perm_redis_client
+from src.shared.cache.tool_config_cache import invalidate_tool_config_cache
 from src.shared.models.tool_config import GSageToolConfig
 from src.shared.models.tool import GSageTool
 from src.shared.models.user_organization import GSageUserOrganization
@@ -139,6 +141,9 @@ async def create_tool_config(
     db.add(tc)
     await db.commit()
     await db.refresh(tc)
+    # Drop any stale config the MCP server may have cached for this org so
+    # the new values take effect immediately instead of after the TTL.
+    await invalidate_tool_config_cache(get_perm_redis_client(), org_id)
     return _tool_config_to_out(tc)
 
 
@@ -222,6 +227,9 @@ async def update_tool_config(
     tc.updated_by_user_id = ctx.user_id
     await db.commit()
     await db.refresh(tc)
+    # Drop any stale config the MCP server may have cached for this org so
+    # the edited values take effect immediately instead of after the TTL.
+    await invalidate_tool_config_cache(get_perm_redis_client(), org_id)
     return _tool_config_to_out(tc)
 
 
@@ -248,3 +256,5 @@ async def delete_tool_config(
 
     await db.delete(tc)
     await db.commit()
+    # Drop any stale config the MCP server may have cached for this org.
+    await invalidate_tool_config_cache(get_perm_redis_client(), org_id)

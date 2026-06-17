@@ -1007,6 +1007,23 @@ class ApprovalAwareMCPTools(MCPTools):
                     meta.get("credential_namespace") or tool.name
                 )
 
+        # ``list_tools`` only advertises core tools (to keep token usage low),
+        # so non-core / discoverable tools that require a user credential —
+        # e.g. the ``sei_pen`` family — are NOT present in the pre-scan above.
+        # Enumerate the full catalogue via the ``search_tools`` meta-tool
+        # (show_all=True) and merge their credential namespaces so the proxy
+        # entrypoint can resolve keychain credentials for discovered tools too.
+        try:
+            full_ns = await self._discover_credential_namespaces()
+        except Exception:  # pragma: no cover — never block agent startup
+            log.warning(
+                "Keychain: failed to enumerate non-core credential tools via "
+                "search_tools; discovered tools may report CREDENTIAL_MISSING",
+                exc_info=True,
+            )
+            full_ns = {}
+        credential_ns.update(full_ns)
+
         self._credential_namespace_by_tool = credential_ns
         if credential_ns:
             log.info(
@@ -1118,6 +1135,12 @@ class ApprovalAwareMCPTools(MCPTools):
             cred_required = (
                 tool_name in mcp_tools_instance._credential_namespace_by_tool
             )
+            log.debug(
+                "proxy: tool='%s' cred_required=%s known_credential_tools=%s",
+                tool_name,
+                cred_required,
+                sorted(mcp_tools_instance._credential_namespace_by_tool),
+            )
             if cred_required:
                 user_id = mcp_tools_instance._credential_user_id
                 if user_id is None:
@@ -1128,6 +1151,10 @@ class ApprovalAwareMCPTools(MCPTools):
                         )
                     )
                 cred_key = mcp_tools_instance._credential_namespace_by_tool[tool_name]
+                log.debug(
+                    "proxy: resolving keychain credential tool='%s' namespace='%s' user_id=%s",
+                    tool_name, cred_key, user_id,
+                )
                 # Late import to avoid circular dependencies at module load.
                 from src.backend_api.app.services import credentials_service  # noqa: PLC0415
                 from src.shared.database import _get_session_maker  # noqa: PLC0415
@@ -1153,7 +1180,6 @@ class ApprovalAwareMCPTools(MCPTools):
                     tool_name,
                     sorted(k for k, v in cred.items() if v is not None and k != "credential_id"),
                 )
-
             log.debug("proxy: calling MCP tool '%s' with params %s", tool_name, params)
             # Pass the configured per-tool timeout explicitly. Without this
             # the MCP SDK falls back to its 30s default, which is shorter
@@ -1285,6 +1311,48 @@ class ApprovalAwareMCPTools(MCPTools):
     # ------------------------------------------------------------------
     # Register run_discovered_tool + run_approved_tool
     # ------------------------------------------------------------------
+
+    async def _discover_credential_namespaces(self) -> dict[str, str]:
+        """Return a ``{tool_name: credential_namespace}`` map for *all* tools.
+
+        ``list_tools`` only exposes core tools, so discoverable (non-core)
+        tools that require a personal credential are invisible to the
+        metadata pre-scan in :meth:`build_tools`.  This calls the
+        ``search_tools`` meta-tool with ``show_all=True`` to enumerate every
+        tool the tenant is authorised to use and extracts the credential
+        namespace for those advertising ``requires_user_credentials``.
+        """
+        if self.session is None:
+            return {}
+
+        result = await self.session.call_tool("search_tools", {"show_all": True})
+        # Concatenate textual content parts into a single JSON document.
+        text_parts = [
+            getattr(part, "text", "")
+            for part in (result.content or [])
+            if getattr(part, "type", None) == "text"
+        ]
+        payload = json.loads("".join(text_parts) or "{}")
+        if payload.get("status") != "success":
+            log.debug(
+                "Keychain: search_tools enumeration returned non-success payload: %s",
+                payload.get("error"),
+            )
+            return {}
+
+        namespaces: dict[str, str] = {}
+        for tool in (payload.get("data") or {}).get("tools", []):
+            if not tool.get("requires_user_credentials"):
+                continue
+            name = tool.get("name")
+            if not name:
+                continue
+            namespaces[name] = tool.get("credential_namespace") or name
+        log.debug(
+            "Keychain: discovered %d credential-requiring tool(s) via search_tools",
+            len(namespaces),
+        )
+        return namespaces
 
     def _register_proxy_functions(self) -> None:
         """Add proxy Functions that let the LLM invoke non-core tools."""
@@ -1423,6 +1491,10 @@ def _build_mcp_tools(ctx: "TenantContext", gsage_session_id: Optional[uuid.UUID]
             header_provider=lambda: tenant_headers,
             timeout_seconds=settings.mcp_tool_timeout_seconds,
         )
+        # Capture the tenant user id so the proxy entrypoint can resolve the
+        # active per-user credential from the keychain for tools that declare
+        # ``requires_user_credentials`` (e.g. the ``sei_pen`` family).
+        toolkit._credential_user_id = ctx.user_id
         log.debug("MCPTools instance created successfully")
         return toolkit
     except Exception:

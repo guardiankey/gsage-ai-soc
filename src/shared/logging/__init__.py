@@ -276,6 +276,7 @@ def configure_logging(
         "openai.http_client",
         "urllib3.connectionpool",
         "urllib3",
+        "asyncio",
     ):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 

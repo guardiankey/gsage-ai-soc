@@ -127,9 +127,13 @@ READ_OPERATIONS: dict[str, OperationDef] = {
     },
     "processo.listar": {
         "method": "GET",
+        # NOTE: the WSSEI endpoint only honours these query params. ``tipo`` is a
+        # search-mode flag ('R' = received, 'G' = generated), NOT a process-type
+        # filter; ``usuario`` filters by the assignment user ID. There is no
+        # free-text filter on this endpoint.
         "path": "/processo/listar",
         "path_params": [],
-        "query_params": ["limit", "start", "filter", "id", "usuario", "tipo", "apenasMeus"],
+        "query_params": ["limit", "start", "id", "usuario", "tipo", "apenasMeus"],
         "form_params": [],
         "required": [],
     },
@@ -210,6 +214,137 @@ READ_OPERATIONS: dict[str, OperationDef] = {
         "form_params": [],
         "required": ["usuario"],
     },
+    # Hipótese Legal
+    "hipotese_legal.pesquisar": {
+        "method": "GET",
+        "path": "/hipoteseLegal/pesquisar",
+        "path_params": [],
+        "query_params": ["limit", "start", "filter", "id", "nivelAcesso"],
+        "form_params": [],
+        "required": ["nivelAcesso"],
+    },
+    # ── Reference / lookup discovery ─────────────────────────────────────────
+    # Process types (id + name). Resolve ``tipoProcesso`` by name.
+    "processo.tipo_listar": {
+        "method": "GET",
+        "path": "/processo/tipo/listar",
+        "path_params": [],
+        "query_params": ["id", "filter", "favoritos", "start", "limit"],
+        "form_params": [],
+        "required": [],
+    },
+    # Document types / séries (id + name). Resolve ``idSerie`` by name.
+    "documento.tipo_pesquisar": {
+        "method": "GET",
+        "path": "/documento/tipo/pesquisar",
+        "path_params": [],
+        "query_params": ["id", "filter", "favoritos", "aplicabilidade", "start", "limit"],
+        "form_params": [],
+        "required": [],
+    },
+    # Séries available for external documents.
+    "serie.externo_pesquisar": {
+        "method": "GET",
+        "path": "/serie/externo/pesquisar",
+        "path_params": [],
+        "query_params": ["limit", "start", "id", "filter"],
+        "form_params": [],
+        "required": [],
+    },
+    # Suggested subjects for a process type.
+    "processo.assunto_sugestao": {
+        "method": "GET",
+        "path": "/processo/assunto/sugestao/{tipoProcedimento}/listar",
+        "path_params": ["tipoProcedimento"],
+        "query_params": ["limit", "start", "id", "filter"],
+        "form_params": [],
+        "required": ["tipoProcedimento"],
+    },
+    # Suggested subjects for a série.
+    "documento.assunto_sugestao": {
+        "method": "GET",
+        "path": "/documento/assunto/sugestao/{serie}/listar",
+        "path_params": ["serie"],
+        "query_params": ["limit", "start", "id", "filter"],
+        "form_params": [],
+        "required": ["serie"],
+    },
+    # Interested parties / recipients lookup.
+    "contato.pesquisar": {
+        "method": "GET",
+        "path": "/contato/pesquisar",
+        "path_params": [],
+        "query_params": ["filter", "idGrupoContato", "id", "limit", "start"],
+        "form_params": [],
+        "required": [],
+    },
+    # ── Document content prerequisites ───────────────────────────────────────
+    # List a document's sections + last version (needed before writing content).
+    # ``id`` is the internal document ID.
+    "documento.secao_listar": {
+        "method": "GET",
+        "path": "/documento/secao/listar",
+        "path_params": [],
+        "query_params": ["id"],
+        "form_params": [],
+        "required": ["id"],
+    },
+    # ── Process history / movement ───────────────────────────────────────────
+    # Andamentos of a process (id, usuário, data, hora, unidade, informação).
+    # Source for "tempo parado na caixa" (idle-time) computation.
+    "atividade.listar": {
+        "method": "GET",
+        "path": "/atividade/listar",
+        "path_params": [],
+        "query_params": ["procedimento", "limit", "start"],
+        "form_params": [],
+        "required": ["procedimento"],
+    },
+    # Related processes.
+    "processo.relacionamentos": {
+        "method": "GET",
+        "path": "/processo/{protocolo}/relacionamentos",
+        "path_params": ["protocolo"],
+        "query_params": [],
+        "form_params": [],
+        "required": ["protocolo"],
+    },
+    # Interested parties attached to a process.
+    "processo.interessados_listar": {
+        "method": "GET",
+        "path": "/processo/{protocolo}/interessados/listar",
+        "path_params": ["protocolo"],
+        "query_params": ["limit", "start"],
+        "form_params": [],
+        "required": ["protocolo"],
+    },
+    # Units where the process is/was open.
+    "processo.unidades_listar": {
+        "method": "GET",
+        "path": "/processo/listar/unidades/{protocolo}",
+        "path_params": ["protocolo"],
+        "query_params": [],
+        "form_params": [],
+        "required": ["protocolo"],
+    },
+    # Acknowledgement (ciência) history of a process.
+    "processo.ciencia_listar": {
+        "method": "GET",
+        "path": "/processo/{protocolo}/ciencia/listar",
+        "path_params": ["protocolo"],
+        "query_params": ["limit", "start"],
+        "form_params": [],
+        "required": ["protocolo"],
+    },
+    # Suspensions (sobrestamentos) of a process.
+    "processo.sobrestamento_listar": {
+        "method": "GET",
+        "path": "/processo/listar/sobrestamento/{protocolo}",
+        "path_params": ["protocolo"],
+        "query_params": ["unidade"],
+        "form_params": [],
+        "required": ["protocolo"],
+    },
 }
 
 # ── Write operations ──────────────────────────────────────────────────────────
@@ -232,6 +367,7 @@ WRITE_OPERATIONS: dict[str, OperationDef] = {
         "query_params": [],
         "form_params": [
             "idSerie", "observacao", "nivelAcesso",
+            "idUnidadeGeradoraProtocolo",
             "assuntos", "interessados", "idHipoteseLegal",
             "protocoloDocumentoModelo", "descricao", "destinatarios",
         ],
@@ -245,6 +381,7 @@ WRITE_OPERATIONS: dict[str, OperationDef] = {
         "query_params": [],
         "form_params": [
             "observacao", "nivelAcesso",
+            "idUnidadeGeradoraProtocolo",
             "assuntos", "interessados", "idHipoteseLegal",
             "descricao", "destinatarios",
         ],
@@ -260,7 +397,9 @@ WRITE_OPERATIONS: dict[str, OperationDef] = {
             "tipoProcesso", "nivelAcesso", "hipoteseLegal", "grauSigilo",
             "assuntos", "interessados", "especificacao", "observacoes",
         ],
-        "required": ["tipoProcesso", "nivelAcesso", "hipoteseLegal", "grauSigilo"],
+        # grauSigilo is only meaningful for sigiloso (nivelAcesso=2); the server
+        # treats an absent value as empty, so it must not be required here.
+        "required": ["tipoProcesso", "nivelAcesso", "hipoteseLegal"],
     },
     # Processo — alterar
     "processo.alterar": {
@@ -273,7 +412,108 @@ WRITE_OPERATIONS: dict[str, OperationDef] = {
             "assuntos", "interessados", "especificacao",
             "observacao", "idHipoteseLegal",
         ],
-        "required": ["protocolo", "idTipoProcesso", "nivelAcesso", "grauSigilo"],
+        # grauSigilo only matters for sigiloso (nivelAcesso=2); server defaults
+        # absent to empty, so it is not strictly required.
+        "required": ["protocolo", "idTipoProcesso", "nivelAcesso"],
+    },
+    # ── Document content ─────────────────────────────────────────────────────
+    # Write a document body. ``secoes`` is a JSON-encoded string of
+    # ``[{"id", "idSecaoModelo", "conteudo"}]`` (the WSSEI module json_decodes it).
+    "documento.secao_alterar": {
+        "method": "POST",
+        "path": "/documento/secao/alterar",
+        "path_params": [],
+        "query_params": [],
+        "form_params": ["documento", "versao", "secoes"],
+        "required": ["documento", "versao", "secoes"],
+    },
+    # ── Process tramitation / lifecycle ──────────────────────────────────────
+    # Send a process to one or more units. ``unidadesDestino`` is a CSV of unit IDs.
+    "processo.enviar": {
+        "method": "POST",
+        "path": "/processo/enviar",
+        "path_params": [],
+        "query_params": [],
+        "form_params": [
+            "numeroProcesso", "unidadesDestino", "sinManterAbertoUnidade",
+            "sinRemoverAnotacao", "sinEnviarEmailNotificacao",
+            "dataRetornoProgramado", "diasRetornoProgramado",
+            "sinDiasUteisRetornoProgramado", "sinReabrir",
+        ],
+        "required": ["numeroProcesso", "unidadesDestino"],
+    },
+    # Conclude a process in the current unit.
+    "processo.concluir": {
+        "method": "POST",
+        "path": "/processo/concluir",
+        "path_params": [],
+        "query_params": [],
+        "form_params": ["numeroProcesso"],
+        "required": ["numeroProcesso"],
+    },
+    # Reopen a concluded process.
+    "processo.reabrir": {
+        "method": "POST",
+        "path": "/processo/reabrir/{procedimento}",
+        "path_params": ["procedimento"],
+        "query_params": [],
+        "form_params": [],
+        "required": ["procedimento"],
+    },
+    # Assign a process to a user in the current unit.
+    "processo.atribuir": {
+        "method": "POST",
+        "path": "/processo/atribuir",
+        "path_params": [],
+        "query_params": [],
+        "form_params": ["numeroProcesso", "usuario"],
+        "required": ["numeroProcesso", "usuario"],
+    },
+    # Remove the assignment of a process.
+    "processo.remover_atribuicao": {
+        "method": "POST",
+        "path": "/processo/{protocolo}/remover/atribuicao",
+        "path_params": ["protocolo"],
+        "query_params": [],
+        "form_params": [],
+        "required": ["protocolo"],
+    },
+    # Schedule a programmed return (deadline) for a process.
+    # ``dtProgramada`` is dd/MM/yyyy.
+    "processo.agendar_retorno": {
+        "method": "POST",
+        "path": "/processo/agendar/retorno/programado",
+        "path_params": [],
+        "query_params": [],
+        "form_params": ["unidade", "dtProgramada", "usuario", "atividadeEnvio"],
+        "required": ["unidade", "dtProgramada"],
+    },
+    # Suspend (sobrestar) a process, optionally relating it to another.
+    "processo.sobrestar": {
+        "method": "POST",
+        "path": "/processo/{protocolo}/sobrestar/processo",
+        "path_params": ["protocolo"],
+        "query_params": [],
+        "form_params": ["protocoloDestino", "motivo"],
+        "required": ["protocolo"],
+    },
+    # Cancel a process suspension.
+    "processo.cancelar_sobrestamento": {
+        "method": "POST",
+        "path": "/processo/{protocolo}/cancelar/sobrestamento",
+        "path_params": ["protocolo"],
+        "query_params": [],
+        "form_params": [],
+        "required": ["protocolo"],
+    },
+    # Create an interested party (contato).
+    "contato.criar": {
+        "method": "POST",
+        "path": "/contato/criar",
+        "path_params": [],
+        "query_params": [],
+        "form_params": ["nome"],
+        "required": ["nome"],
     },
 }
 

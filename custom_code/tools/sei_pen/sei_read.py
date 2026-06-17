@@ -16,13 +16,24 @@ from typing import ClassVar, Optional
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.shared.security.context import AgentContext
 
-from custom_code.tools.sei_pen._client import SeiPenClient, SeiPenError, resolve_base_url
+from custom_code.tools.sei_pen._client import (
+    SeiPenClient,
+    SeiPenError,
+    resolve_base_url,
+    with_hint,
+)
+from custom_code.tools.sei_pen._helpers import HelperError, ver_documento_completo
 from custom_code.tools.sei_pen._operations import BuildError, READ_OPERATIONS, build_request
 
 log = logging.getLogger(__name__)
 
+# High-level helper operations (orchestrate multiple WSSEI calls into one).
+READ_HELPER_OPS = (
+    "documento.ver_completo",
+)
+
 # Sorted list of all read operation IDs for the params schema enum
-_READ_OP_IDS = sorted(READ_OPERATIONS.keys())
+_READ_OP_IDS = sorted(READ_OPERATIONS.keys()) + sorted(READ_HELPER_OPS)
 
 
 class SeiPenReadTool(BaseTool):
@@ -53,6 +64,8 @@ class SeiPenReadTool(BaseTool):
     | ``acompanhamento_especial.listar``     | List special tracking entries                         |
     | ``usuario.pesquisar``                  | Search users by keyword                               |
     | ``usuario.listar_unidades``            | List units accessible to a user                       |
+    | ``hipotese_legal.pesquisar``           | Search legal hypotheses by access level               |
+    | ``documento.ver_completo``             | High-level: metadata + rendered HTML + sections in one call |
 
     Permission: ``sei:read``
     """
@@ -80,7 +93,24 @@ class SeiPenReadTool(BaseTool):
         "kind": "basic",
         "required": ["username", "password"],
         "optional": [],
-        "description": "SEI-PEN username and password (login/sigla and senha).",
+        "extra_fields": {
+            "required": ["orgao_id"],
+            "optional": ["unidade_id"],
+            "properties": {
+                "orgao_id": (
+                    "SEI organ/agency numeric ID (e.g. '0' for the default organ)."
+                ),
+                "unidade_id": (
+                    "Default unit ID sent with every request to maintain "
+                    "session context."
+                ),
+            },
+        },
+        "description": (
+            "SEI-PEN username and password (login/sigla and senha). "
+            "Add 'orgao_id' (required) and 'unidade_id' (optional) as extra "
+            "fields of this credential."
+        ),
     }
 
     audit_field_mapping: ClassVar[dict] = {}
@@ -113,7 +143,8 @@ class SeiPenReadTool(BaseTool):
                     "Keyword filter. Optional for: unidade.pesquisar, "
                     "unidade.pesquisar_outras, unidade.pesquisar_texto_padrao, "
                     "processo.pesquisar_assunto, grupo_acompanhamento.listar, "
-                    "modelo_documento.listar_grupo, modelo_documento.listar, processo.listar."
+                    "modelo_documento.listar_grupo, modelo_documento.listar. "
+                    "Note: processo.listar does NOT support a text filter."
                 ),
             },
             "id": {
@@ -130,7 +161,7 @@ class SeiPenReadTool(BaseTool):
                 "type": "string",
                 "description": (
                     "Internal document ID (numeric). "
-                    "Required for: documento.visualizar."
+                    "Required for: documento.visualizar, documento.ver_completo."
                 ),
             },
             "protocolo": {
@@ -211,7 +242,12 @@ class SeiPenReadTool(BaseTool):
             # ── Process list filters ──────────────────────────────────────────
             "tipo": {
                 "type": "string",
-                "description": "Process type filter. Optional for: processo.listar.",
+                "enum": ["R", "G"],
+                "description": (
+                    "Search-mode flag for processo.listar (NOT a process-type "
+                    "filter): 'R' = received processes, 'G' = generated processes. "
+                    "Omit to list all. Optional for: processo.listar."
+                ),
             },
             "apenasMeus": {
                 "type": "string",
@@ -231,12 +267,68 @@ class SeiPenReadTool(BaseTool):
                 "type": "string",
                 "description": "Tracking group. Optional for: acompanhamento_especial.listar.",
             },
+            # ── Legal hypothesis search ───────────────────────────────────────
+            "nivelAcesso": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2,
+                "description": (
+                    "Access level filter: 0 = público, 1 = restrito, 2 = sigiloso. "
+                    "Required for: hipotese_legal.pesquisar."
+                ),
+            },
+            # ── Reference / discovery lookups ─────────────────────────────────
+            "favoritos": {
+                "type": "string",
+                "description": (
+                    "Return only favourite entries ('S'/'N'). "
+                    "Optional for: processo.tipo_listar, documento.tipo_pesquisar."
+                ),
+            },
+            "aplicabilidade": {
+                "type": "string",
+                "description": (
+                    "Comma-separated applicability filters for document types. "
+                    "Optional for: documento.tipo_pesquisar."
+                ),
+            },
+            "idGrupoContato": {
+                "type": "string",
+                "description": "Contact group ID. Optional for: contato.pesquisar.",
+            },
+            "tipoProcedimento": {
+                "type": "string",
+                "description": (
+                    "Process type ID. Required for: processo.assunto_sugestao."
+                ),
+            },
+            "serie": {
+                "type": "string",
+                "description": (
+                    "Document type (série) ID. Required for: documento.assunto_sugestao."
+                ),
+            },
             # ── Session unit override ─────────────────────────────────────────
             "unidade": {
                 "type": "string",
                 "description": (
                     "Unit ID to override the default session unit context for this "
                     "specific request. Useful when querying data from a different unit."
+                ),
+            },
+            # ── High-level helper params (documento.ver_completo) ─────────────
+            "incluir_visualizacao": {
+                "type": "boolean",
+                "description": (
+                    "Whether to include the rendered HTML view in the result. "
+                    "Optional for: documento.ver_completo (default: true)."
+                ),
+            },
+            "incluir_secoes": {
+                "type": "boolean",
+                "description": (
+                    "Whether to include the structured editable sections in the result. "
+                    "Optional for: documento.ver_completo (default: true)."
                 ),
             },
         },
@@ -269,16 +361,8 @@ class SeiPenReadTool(BaseTool):
                     "Example: http://sei.myorg.gov.br/sei/modulos/wssei/controlador_ws.php/api/v2"
                 ),
             },
-            "orgao_id": {
-                "type": "string",
-                "description": "SEI organ/agency numeric ID (e.g. '0' for the default organ).",
-            },
-            "unidade_id": {
-                "type": "string",
-                "description": "Default unit ID sent with every request to maintain session context.",
-            },
         },
-        "required": ["orgao_id"],
+        "required": [],
         "additionalProperties": False,
     }
     config_defaults: ClassVar[dict] = {}
@@ -314,7 +398,9 @@ class SeiPenReadTool(BaseTool):
         user_creds = agent_context.user_credentials.get("sei_pen") or {}
         usuario: str = (user_creds.get("username") or "").strip()
         senha: str = (user_creds.get("password") or "").strip()
-        orgao_id: str = str(config.get("orgao_id", "")).strip()
+        extra: dict = user_creds.get("extra_fields") or {}
+        orgao_id: str = str(extra.get("orgao_id", "") or "").strip()
+        unidade_id: Optional[str] = str(extra.get("unidade_id", "") or "").strip() or None
         if not usuario or not senha:
             return self._failure(
                 "CREDENTIAL_MISSING",
@@ -324,8 +410,62 @@ class SeiPenReadTool(BaseTool):
             )
         if not orgao_id:
             return self._failure(
-                "CONFIG_ERROR",
-                "Tool config must include 'orgao_id'.",
+                "CREDENTIAL_MISSING",
+                "SEI-PEN credential must include an 'orgao_id' extra field. "
+                "Edit your 'sei_pen' credential in Settings → Credentials and "
+                "add 'orgao_id' (and optionally 'unidade_id') as extra fields.",
+            )
+
+        # ── Build the REST client (needed for both helpers and single-call) ──
+        client = SeiPenClient(
+            base_url=base_url,
+            usuario=usuario,
+            senha=senha,
+            orgao_id=orgao_id,
+            unidade_id=unidade_id,
+            timeout=float(self.timeout_seconds),
+        )
+        unidade_override: Optional[str] = params.get("unidade")
+
+        # ── High-level helper operations (orchestrate multiple WSSEI calls) ──
+        if operation in READ_HELPER_OPS:
+            try:
+                helper_result = await self._run_helper(
+                    operation=operation,
+                    params=params,
+                    client=client,
+                    unidade_override=unidade_override,
+                )
+            except HelperError as exc:
+                return self._failure(
+                    "INVALID_PARAMS",
+                    str(exc),
+                    execution_time_ms=round((time.perf_counter() - t0) * 1000),
+                )
+            except SeiPenError as exc:
+                log.warning(
+                    "sei_pen_read: helper=%s error=%s", operation, exc, exc_info=True
+                )
+                retryable = (
+                    exc.status_code in (429, 500, 502, 503, 504)
+                    if exc.status_code
+                    else False
+                )
+                return self._failure(
+                    "SEI_API_ERROR",
+                    with_hint(str(exc), exc.status_code, operation),
+                    retryable=retryable,
+                )
+
+            elapsed_ms = round((time.perf_counter() - t0) * 1000)
+            log.info(
+                "sei_pen_read: helper=%s status=success elapsed_ms=%d",
+                operation,
+                elapsed_ms,
+            )
+            return self._success(
+                {"operation": operation, "result": helper_result},
+                execution_time_ms=elapsed_ms,
             )
 
         # ── Build request ─────────────────────────────────────────────────────
@@ -335,16 +475,6 @@ class SeiPenReadTool(BaseTool):
             return self._failure("INVALID_PARAMS", str(exc))
 
         # ── Execute API call ──────────────────────────────────────────────────
-        client = SeiPenClient(
-            base_url=base_url,
-            usuario=usuario,
-            senha=senha,
-            orgao_id=orgao_id,
-            unidade_id=config.get("unidade_id"),
-            timeout=float(self.timeout_seconds),
-        )
-        unidade_override: Optional[str] = params.get("unidade")
-
         try:
             response = await client.request(
                 method,
@@ -357,10 +487,16 @@ class SeiPenReadTool(BaseTool):
             log.warning(
                 "sei_pen_read: operation=%s error=%s", operation, exc, exc_info=True
             )
-            retryable = exc.status_code in (429, 500, 502, 503, 504) if exc.status_code else True
+            # HTTP 429/5xx are transient; an API-level rejection (no HTTP status,
+            # e.g. not-found / invalid ID) will not fix itself on retry.
+            retryable = (
+                exc.status_code in (429, 500, 502, 503, 504)
+                if exc.status_code
+                else False
+            )
             return self._failure(
                 "SEI_API_ERROR",
-                str(exc),
+                with_hint(str(exc), exc.status_code, operation),
                 retryable=retryable,
             )
 
@@ -378,3 +514,33 @@ class SeiPenReadTool(BaseTool):
                 "sucesso": response.get("sucesso"),
             }
         )
+
+    # ── Helper dispatch ───────────────────────────────────────────────────────
+
+    async def _run_helper(
+        self,
+        *,
+        operation: str,
+        params: dict,
+        client: SeiPenClient,
+        unidade_override: Optional[str],
+    ) -> dict:
+        """Dispatch a high-level read helper by operation name."""
+        if operation == "documento.ver_completo":
+            documento = params.get("documento")
+            if not documento:
+                raise HelperError(
+                    "'documento' (internal document ID) is required for "
+                    "documento.ver_completo."
+                )
+            return await ver_documento_completo(
+                client=client,
+                unidade_override=unidade_override,
+                documento=str(documento),
+                incluir_visualizacao=bool(
+                    params.get("incluir_visualizacao", True)
+                ),
+                incluir_secoes=bool(params.get("incluir_secoes", True)),
+            )
+
+        raise HelperError(f"Unknown read helper operation: {operation}")

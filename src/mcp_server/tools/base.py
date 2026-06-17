@@ -913,7 +913,13 @@ class BaseTool(ABC):
 
         cached_raw = await redis_client.get(cache_key)
         if cached_raw is not None:
-            return json.loads(cached_raw)
+            cached_cfg = json.loads(cached_raw)
+            logger.debug(
+                "load_config: cache HIT tool=%s org=%s profile=%s keys=%s",
+                self.name, agent_context.org_id, profile_id,
+                list(cached_cfg.keys()) if isinstance(cached_cfg, dict) else type(cached_cfg).__name__,
+            )
+            return cached_cfg
 
         # Cache miss — query DB.  When a namespace is declared we fetch
         # both rows in one query and merge in lookup order.
@@ -927,6 +933,11 @@ class BaseTool(ABC):
         rows = {row.tool_name: row for row in result.scalars().all()}
 
         if not rows:
+            logger.debug(
+                "load_config: cache MISS, NO DB rows tool=%s org=%s profile=%s "
+                "lookup_keys=%s — tool will use config_defaults/env only",
+                self.name, agent_context.org_id, profile_id, lookup_keys,
+            )
             return None  # Caller uses config_defaults
 
         # Merge in lookup order (base first, override last).  ``row.config``
@@ -941,6 +952,11 @@ class BaseTool(ABC):
                 merged.update(row_config)
 
         if not merged:
+            logger.warning(
+                "load_config: rows found but merged config EMPTY tool=%s org=%s "
+                "profile=%s found_rows=%s (decryption returned non-dict?)",
+                self.name, agent_context.org_id, profile_id, list(rows.keys()),
+            )
             return None
 
         # Validate against schema (basic required fields check)
@@ -953,6 +969,13 @@ class BaseTool(ABC):
                     self.name, agent_context.org_id, profile_id, missing,
                 )
                 return None
+
+        logger.debug(
+            "load_config: cache MISS, loaded from DB tool=%s org=%s profile=%s "
+            "found_rows=%s merged_keys=%s",
+            self.name, agent_context.org_id, profile_id,
+            list(rows.keys()), list(merged.keys()),
+        )
 
         # Cache the decrypted, merged config
         await redis_client.setex(cache_key, TOOL_CONFIG_CACHE_TTL, json.dumps(merged))
