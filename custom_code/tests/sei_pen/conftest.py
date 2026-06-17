@@ -166,11 +166,17 @@ def first_item(payload: Any) -> Optional[dict]:
 
 
 def pick(record: Optional[dict], *keys: str) -> Optional[str]:
-    """Return the first present, non-empty value among *keys* in *record*."""
+    """Return the first present, non-empty value among *keys* in *record*.
+
+    Matching is case-insensitive because the SEI WSSEI module is inconsistent:
+    e.g. ``processo.criar`` returns ``IdProcedimento`` / ``ProtocoloFormatado``
+    while other endpoints return ``idProcedimento`` / ``protocoloProcedimentoFormatado``.
+    """
     if not isinstance(record, dict):
         return None
+    lowered = {str(k).lower(): v for k, v in record.items()}
     for key in keys:
-        value = record.get(key)
+        value = lowered.get(key.lower())
         if value not in (None, "", []):
             return str(value)
     return None

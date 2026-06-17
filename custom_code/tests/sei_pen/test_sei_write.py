@@ -88,8 +88,15 @@ async def created_process(
     read_tool: SeiPenReadTool,
     agent_context: AgentContext,
     sei_config: dict,
+    sei_env,
 ) -> dict:
     """Create a process once and share it across the write tests."""
+    if not sei_env.unidade_id:
+        pytest.skip(
+            "SEI_UNIDADE_ID is required for write operations — SEI rejects "
+            "writes without a unit header. Set it in limbo/sei.sh."
+        )
+
     tipo_processo = os.getenv("SEI_TEST_TIPO_PROCESSO") or ""
     if not tipo_processo:
         pytest.skip("SEI_TEST_TIPO_PROCESSO is required to create a process")
@@ -141,30 +148,41 @@ async def created_process(
     if nivel_acesso > 0:
         params["hipoteseLegal"] = hipotese_legal
         params["grauSigilo"] = grau_sigilo
+    print(
+        f"\n[sei_write] processo.criar params: tipo={tipo_processo} "
+        f"nivel={nivel_acesso} assuntos={assuntos!r} "
+        f"unidade_id={sei_env.unidade_id!r} orgao_id={sei_env.orgao_id!r}"
+    )
     result = await _run(write_tool, agent_context, sei_config, params)
     data = _assert_success(result, "processo.criar")
 
     payload = data.get("result")
+    # processo.criar returns {"IdProcedimento", "ProtocoloFormatado"} (capitalized);
+    # ``pick`` is case-insensitive so the keys below cover both old and new spellings.
     protocolo = pick(
         payload if isinstance(payload, dict) else None,
+        "ProtocoloFormatado",
         "protocoloProcedimentoFormatado",
         "protocolo",
     )
     procedimento = pick(
         payload if isinstance(payload, dict) else None,
+        "IdProcedimento",
         "idProcedimento",
         "idProtocolo",
         "id",
     )
     print(
         f"\n[sei_write] created process: protocolo={protocolo} "
-        f"procedimento={procedimento} tipo={tipo_processo}"
+        f"procedimento={procedimento} tipo={tipo_processo} "
+        f"raw_payload_keys={sorted(payload.keys()) if isinstance(payload, dict) else None}"
     )
     return {
         "protocolo": protocolo,
         "procedimento": procedimento,
         "tipoProcesso": tipo_processo,
         "grauSigilo": grau_sigilo,
+        "assuntos": assuntos,
     }
 
 
@@ -221,7 +239,11 @@ async def test_processo_alterar(
     sei_config: dict,
     created_process: dict,
 ):
-    protocolo = created_process.get("protocolo") or created_process.get("procedimento")
+    # ``processo.alterar`` resolves the path as /processo/{protocolo}/alterar.
+    # The *formatted* protocol (e.g. ``Assefaz.000005/2026-80``) contains '/'
+    # and breaks the route; the internal numeric id (``procedimento``) is the
+    # safe identifier here.
+    protocolo = created_process.get("procedimento") or created_process.get("protocolo")
     if not protocolo:
         pytest.skip("no protocol available to update")
 
@@ -232,6 +254,10 @@ async def test_processo_alterar(
         "idTipoProcesso": created_process["tipoProcesso"],
         "nivelAcesso": 0,
         "grauSigilo": created_process["grauSigilo"],
+        # SEI's alterar endpoint validates ``assuntos`` again and refuses
+        # the update with "Nenhum assunto informado" if it is missing,
+        # even when the process already has subjects.
+        "assuntos": created_process["assuntos"],
         "especificacao": f"{TEST_TAG} processo alterado {stamp}",
     }
     result = await _run(write_tool, agent_context, sei_config, params)
@@ -266,6 +292,165 @@ async def test_documento_alterar_interno(
     _assert_success(result, "documento.alterar_interno")
 
 
+# ── Document content (sections) ──────────────────────────────────────────────
+
+
+async def test_documento_secao_listar(
+    read_tool: SeiPenReadTool,
+    agent_context: AgentContext,
+    sei_config: dict,
+    created_document: dict,
+):
+    """Low-level read of the document's editable sections."""
+    documento: Optional[str] = created_document.get("documento")
+    if not documento:
+        pytest.skip("no document id available to list sections")
+
+    result = await read_tool.execute(
+        agent_context=agent_context,
+        params={"operation": "documento.secao_listar", "id": documento},
+        config=sei_config,
+        state={},
+    )
+    data = _assert_success(result, "documento.secao_listar")
+    payload = data.get("result") or {}
+    assert isinstance(payload, dict), f"expected dict, got {type(payload).__name__}"
+    secoes = payload.get("secoes") or []
+    print(
+        f"\n[sei_write] secao_listar: doc={documento} "
+        f"versao={payload.get('ultimaVersaoDocumento')} count={len(secoes)}"
+    )
+    assert secoes, "newly-created document should expose at least one section"
+
+
+async def test_documento_ver_completo(
+    read_tool: SeiPenReadTool,
+    agent_context: AgentContext,
+    sei_config: dict,
+    created_document: dict,
+):
+    """High-level read helper — metadata + HTML + sections in one call."""
+    documento: Optional[str] = created_document.get("documento")
+    if not documento:
+        pytest.skip("no document id available")
+
+    result = await read_tool.execute(
+        agent_context=agent_context,
+        params={"operation": "documento.ver_completo", "documento": documento},
+        config=sei_config,
+        state={},
+    )
+    data = _assert_success(result, "documento.ver_completo")
+    payload = data.get("result") or {}
+    assert payload.get("documento") == documento
+    # Each branch may individually fail with a partial-error dict; we only
+    # require that the helper returned them (and not that all succeeded).
+    assert "metadados" in payload
+    assert "html_renderizado" in payload
+    assert "secoes" in payload
+    print(
+        f"\n[sei_write] ver_completo: doc={documento} "
+        f"versao={payload.get('versao')} secoes={len(payload.get('secoes') or [])}"
+    )
+
+
+async def test_documento_atualizar_conteudo_quick(
+    write_tool: SeiPenWriteTool,
+    agent_context: AgentContext,
+    sei_config: dict,
+    created_document: dict,
+):
+    """High-level write helper — overwrites the editable principal section."""
+    documento: Optional[str] = created_document.get("documento")
+    if not documento:
+        pytest.skip("no document id available")
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    params = {
+        "operation": "documento.atualizar_conteudo",
+        "documento": documento,
+        "conteudo_html": (
+            f"<p>{TEST_TAG} quick-mode update {stamp}</p>"
+        ),
+    }
+    result = await _run(write_tool, agent_context, sei_config, params)
+    data = _assert_success(result, "documento.atualizar_conteudo")
+    payload = data.get("result") or {}
+    print(
+        f"\n[sei_write] atualizar_conteudo (quick): doc={documento} "
+        f"v_antes={payload.get('versaoAnterior')} "
+        f"v_depois={payload.get('novaVersao')} "
+        f"secoes={payload.get('secoesAtualizadas')}"
+    )
+    assert payload.get("secoesAtualizadas", 0) >= 1
+
+
+async def test_documento_atualizar_conteudo_batch(
+    read_tool: SeiPenReadTool,
+    write_tool: SeiPenWriteTool,
+    agent_context: AgentContext,
+    sei_config: dict,
+    created_document: dict,
+):
+    """High-level write helper — batch update of every editable section."""
+    documento: Optional[str] = created_document.get("documento")
+    if not documento:
+        pytest.skip("no document id available")
+
+    # Discover the current editable sections through ver_completo so we exercise
+    # the matching logic (by id) rather than rewriting the principal blindly.
+    read_res = await read_tool.execute(
+        agent_context=agent_context,
+        params={
+            "operation": "documento.ver_completo",
+            "documento": documento,
+            "incluir_visualizacao": False,
+        },
+        config=sei_config,
+        state={},
+    )
+    read_data = _assert_success(read_res, "documento.ver_completo")
+    secoes_now = (read_data.get("result") or {}).get("secoes") or []
+    editable = [s for s in secoes_now if not s.get("somenteLeitura")]
+    if not editable:
+        pytest.skip("document has no editable sections to update in batch")
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    batch = [
+        {
+            "id": str(s["id"]),
+            "conteudo": f"<p>{TEST_TAG} batch #{idx} {stamp}</p>",
+        }
+        for idx, s in enumerate(editable, start=1)
+    ]
+
+    params = {
+        "operation": "documento.atualizar_conteudo",
+        "documento": documento,
+        "secoes": batch,
+    }
+    result = await _run(write_tool, agent_context, sei_config, params)
+    data = _assert_success(result, "documento.atualizar_conteudo")
+    payload = data.get("result") or {}
+    print(
+        f"\n[sei_write] atualizar_conteudo (batch): doc={documento} "
+        f"v_antes={payload.get('versaoAnterior')} "
+        f"v_depois={payload.get('novaVersao')} "
+        f"secoes={payload.get('secoesAtualizadas')}/{len(batch)}"
+    )
+    assert payload.get("secoesAtualizadas") == len(batch)
+
+
+@pytest.mark.xfail(
+    reason=(
+        "SEI requires the document to be signed before 'dar_ciencia' is "
+        "accepted. This suite does not sign documents (signing needs a "
+        "certificate/PIN), so the server legitimately rejects with 'O "
+        "Documento precisa ser assinado.' Re-enable when a signing step "
+        "is added to the fixture chain."
+    ),
+    strict=False,
+)
 async def test_documento_dar_ciencia(
     write_tool: SeiPenWriteTool,
     agent_context: AgentContext,

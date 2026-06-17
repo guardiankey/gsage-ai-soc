@@ -393,18 +393,57 @@ class SeiPenClient:
 
             if not body.get("sucesso", True):
                 raw_msg = body.get("mensagem") or body.get("message") or ""
+                raw_exc = body.get("exception") or body.get("exceptionDetails") or ""
                 if not str(raw_msg).strip():
                     # SEI frequently returns sucesso:false with an empty
-                    # ``mensagem`` (and empty ``exception``) for not-found /
-                    # access-denied conditions. Surface a clearer message rather
-                    # than echoing the empty envelope.
-                    msg = (
-                        "SEI returned an error with no detail. The ID may not "
-                        "exist, or your unit/credential may lack access to it."
-                    )
+                    # ``mensagem`` (and empty ``exception``). The most likely
+                    # cause depends on the HTTP verb: GET = ID not found /
+                    # access denied; POST = invalid/missing field, unit-
+                    # without-permission, or wrong reference IDs.
+                    if method.upper() == "POST":
+                        msg = (
+                            "SEI returned an error with no detail. Likely "
+                            "causes: an invalid/missing form field, a "
+                            "reference ID (e.g. tipoProcesso, idSerie, "
+                            "assuntos) that is not valid for your unit, or "
+                            "missing unit context (no 'unidade' header)."
+                        )
+                    else:
+                        msg = (
+                            "SEI returned an error with no detail. The ID "
+                            "may not exist, or your unit/credential may lack "
+                            "access to it."
+                        )
                 else:
                     msg = str(raw_msg)[:400]
-                raise SeiPenError(f"SEI-PEN API error: {msg}")
+                # Log the raw envelope and the request shape so callers can
+                # diagnose opaque server-side failures without rerunning with
+                # a packet capture. Form values are logged shallowly (keys +
+                # short value previews) to avoid dumping secrets or huge HTML
+                # bodies into the test output.
+                if data:
+                    safe_data = {
+                        k: (
+                            (v[:120] + "…") if isinstance(v, str) and len(v) > 120
+                            else v
+                        )
+                        for k, v in data.items()
+                    }
+                else:
+                    safe_data = None
+                log.warning(
+                    "SEI-PEN: sucesso:false on %s %s | body_keys=%s exception=%r "
+                    "sent_query=%s sent_form=%s",
+                    method,
+                    path,
+                    sorted(body.keys()),
+                    str(raw_exc)[:200],
+                    params,
+                    safe_data,
+                )
+                raise SeiPenError(
+                    f"SEI-PEN API error for {method} {path}: {msg}"
+                )
 
             return body
 
