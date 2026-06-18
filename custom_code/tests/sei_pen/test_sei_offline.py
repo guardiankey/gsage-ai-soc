@@ -18,7 +18,13 @@ import pytest
 
 from custom_code.tools.sei_pen import _dashboard as dash
 from custom_code.tools.sei_pen import _helpers as helpers
-from custom_code.tools.sei_pen._client import SeiPenError, instructive_hint, with_hint
+from custom_code.tools.sei_pen._client import (
+    SeiPenError,
+    _clean_error_text,
+    _is_list_endpoint,
+    instructive_hint,
+    with_hint,
+)
 from custom_code.tools.sei_pen._helpers import HelperError
 
 pytestmark = pytest.mark.unit
@@ -138,6 +144,81 @@ def test_with_hint_noop_when_no_mapping():
     msg = "some unrelated error"
     out = with_hint(msg, None, "processo.consultar")
     assert out == msg
+
+
+def test_instructive_hint_relacionamentos_404():
+    """404 on processo.relacionamentos → friendly 'no relationships' hint."""
+    hint = instructive_hint(
+        "Page Not Found", 404, "processo.relacionamentos"
+    )
+    assert hint and "no related process" in hint.lower()
+
+
+def test_instructive_hint_visualizar_empty():
+    """Empty visualizar → hint about using ver_completo."""
+    hint = instructive_hint(
+        "", None, "documento.visualizar"
+    )
+    assert hint and "ver_completo" in hint
+
+
+# ── _clean_error_text ────────────────────────────────────────────────────────
+
+
+def test_clean_error_text_strips_html_tags():
+    html = (
+        "<html><head><title>Slim Application Error</title>"
+        "<style>body{margin:0;padding:30px;font:12px/1.5 sans-serif}"
+        "h1{font-size:48px}</style></head>"
+        "<body><h1>Slim Application Error</h1>"
+        "<p>The application could not run.</p>"
+        "<h2>Details</h2>"
+        "<div><strong>Type:</strong> InfraException</div>"
+        "</body></html>"
+    )
+    cleaned = _clean_error_text(html)
+    assert "<" not in cleaned
+    assert "{" not in cleaned  # CSS stripped
+    assert "margin" not in cleaned.lower()  # CSS stripped
+    assert "Slim Application Error" in cleaned
+    assert "InfraException" in cleaned
+
+
+def test_clean_error_text_strips_numeric_entities():
+    assert "—" not in _clean_error_text("error&#8212;detail")
+    assert "—" not in _clean_error_text("error&mdash;detail")
+
+
+def test_clean_error_text_empty():
+    assert _clean_error_text("") == ""
+
+
+def test_clean_error_text_plain_text_passthrough():
+    assert _clean_error_text("Simple error message") == "Simple error message"
+
+
+def test_clean_error_text_truncates():
+    long_text = "x " * 500
+    result = _clean_error_text(long_text)
+    assert len(result) <= 400
+
+
+# ── _is_list_endpoint ────────────────────────────────────────────────────────
+
+
+def test_is_list_endpoint_true():
+    assert _is_list_endpoint("/atividade/listar") is True
+    assert _is_list_endpoint("/processo/listar") is True
+    assert _is_list_endpoint("/processo/pesquisar") is True
+    assert _is_list_endpoint("/documento/listar/123") is True
+    assert _is_list_endpoint("/documento/tipo/pesquisar") is True
+
+
+def test_is_list_endpoint_false():
+    assert _is_list_endpoint("/processo/123") is False
+    assert _is_list_endpoint("/processo/123/relacionamentos") is False
+    assert _is_list_endpoint("/documento/interno/consultar/123") is False
+    assert _is_list_endpoint("/autenticar") is False
 
 
 # ── ver_documento_completo (read helper) ──────────────────────────────────────
@@ -418,4 +499,726 @@ async def test_atualizar_requires_one_mode():
             unidade_override=None,
             documento="42",
         )
+
+
+# ── listar_processos_facil (read helper) ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_listar_processos_facil_basic():
+    """Default listing returns processes + pagination hints."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/listar"): {
+                "sucesso": True,
+                "mensagem": "",
+                "data": [
+                    {"id": "100", "protocolo": "TEST.000001/2025-01"},
+                    {"id": "101", "protocolo": "TEST.000002/2025-02"},
+                ],
+                "total": 2,
+            },
+        }
+    )
+    result = await helpers.listar_processos_facil(
+        client=client,  # type: ignore[arg-type]
+        unidade_override="42",
+        limit=10,
+        start=0,
+    )
+    assert result["limit"] == 10
+    assert result["start"] == 0
+    assert len(result["processos"]) == 2
+    assert result["processos"][0]["protocolo"] == "TEST.000001/2025-01"
+    assert result["filtros_aplicados"]["apenasMeus"] == "S"
+    assert result["paginacao"]["proxima"] is None  # 2 < 10, no next page
+    assert result["paginacao"]["anterior"] is None
+    assert not result["paginacao"]["tem_mais"]
+    assert any("Use 'start' to paginate" in h for h in result["hints"])
+
+
+@pytest.mark.asyncio
+async def test_listar_processos_facil_pagination_has_more():
+    """When results == limit, hints include next page offset."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/listar"): {
+                "sucesso": True,
+                "mensagem": "",
+                "data": [{"id": str(i), "protocolo": f"P-{i}"} for i in range(10)],
+                "total": 42,
+            },
+        }
+    )
+    result = await helpers.listar_processos_facil(
+        client=client,  # type: ignore[arg-type]
+        unidade_override=None,
+        limit=10,
+        start=0,
+    )
+    assert len(result["processos"]) == 10
+    assert result["paginacao"]["tem_mais"] is True
+    assert result["paginacao"]["proxima"] == 10
+    assert result["paginacao"]["anterior"] is None
+    assert any("next page" in h.lower() for h in result["hints"])
+
+
+@pytest.mark.asyncio
+async def test_listar_processos_facil_mid_page():
+    """When start > 0, both prev and next navigation are present."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/listar"): {
+                "sucesso": True,
+                "mensagem": "",
+                "data": [{"id": str(i), "protocolo": f"P-{i}"} for i in range(10)],
+                "total": 30,
+            },
+        }
+    )
+    result = await helpers.listar_processos_facil(
+        client=client,  # type: ignore[arg-type]
+        unidade_override=None,
+        limit=10,
+        start=10,
+    )
+    assert result["start"] == 10
+    assert result["paginacao"]["proxima"] == 20
+    assert result["paginacao"]["anterior"] == 0
+
+
+@pytest.mark.asyncio
+async def test_listar_processos_facil_empty():
+    """Empty results include hints about changing filters."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/listar"): {
+                "sucesso": True,
+                "mensagem": "",
+                "data": [],
+                "total": 0,
+            },
+        }
+    )
+    result = await helpers.listar_processos_facil(
+        client=client,  # type: ignore[arg-type]
+        unidade_override=None,
+        limit=10,
+        start=0,
+    )
+    assert result["processos"] == []
+    assert result["total"] == 0
+    assert any("No processes found" in h for h in result["hints"])
+
+
+@pytest.mark.asyncio
+async def test_listar_processos_facil_with_filters():
+    """Custom filters are reflected in filtros_aplicados."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/listar"): {
+                "sucesso": True,
+                "mensagem": "",
+                "data": [],
+                "total": 0,
+            },
+        }
+    )
+    result = await helpers.listar_processos_facil(
+        client=client,  # type: ignore[arg-type]
+        unidade_override=None,
+        limit=5,
+        start=0,
+        apenas_meus=False,
+        tipo="G",
+        usuario="j.silva",
+        id_unidade="110000965",
+    )
+    assert result["filtros_aplicados"]["apenasMeus"] == "N"
+    assert result["filtros_aplicados"]["tipo"] == "G"
+    assert result["filtros_aplicados"]["usuario"] == "j.silva"
+    assert result["filtros_aplicados"]["idUnidade"] == "110000965"
+
+
+# ── ver_processo_completo (read helper) ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_ver_processo_completo_full_run():
+    """Metadata + documents + per-doc metadata in one call."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/123"): _envelope(
+                {"idProcedimento": "123", "protocoloFormatado": "TEST.000001/2025-01"}
+            ),
+            ("GET", "/documento/listar/123"): _envelope(
+                [
+                    {"idDocumento": "5", "numero": "001"},
+                    {"idDocumento": "7", "numero": "002"},
+                ]
+            ),
+            ("GET", "/documento/interno/consultar/5"): _envelope(
+                {"idDocumento": "5", "numero": "001", "tipo": "Ofício"}
+            ),
+            ("GET", "/documento/interno/consultar/7"): _envelope(
+                {"idDocumento": "7", "numero": "002", "tipo": "Despacho"}
+            ),
+        }
+    )
+    result = await helpers.ver_processo_completo(
+        client=client,  # type: ignore[arg-type]
+        unidade_override=None,
+        protocolo="123",
+    )
+    assert result["protocolo"] == "123"
+    assert result["metadados"]["protocoloFormatado"] == "TEST.000001/2025-01"
+    assert result["total_documentos"] == 2
+    assert len(result["documentos"]) == 2
+    # Each document enriched with _metadados
+    assert result["documentos"][0]["_metadados"]["tipo"] == "Ofício"
+    assert result["documentos"][1]["_metadados"]["tipo"] == "Despacho"
+    # 1 (meta) + 1 (docs) + 2 (per-doc meta) = 4 calls
+    assert len(client.calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_ver_processo_completo_skip_documents():
+    """When incluir_documentos=False, only metadata is fetched."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/123"): _envelope({"idProcedimento": "123"}),
+        }
+    )
+    result = await helpers.ver_processo_completo(
+        client=client,  # type: ignore[arg-type]
+        unidade_override=None,
+        protocolo="123",
+        incluir_documentos=False,
+    )
+    assert result["protocolo"] == "123"
+    assert result["metadados"]["idProcedimento"] == "123"
+    assert "documentos" not in result
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_ver_processo_completo_skip_doc_metadata():
+    """When incluir_metadados_documentos=False, docs listed without enrichment."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/123"): _envelope({"idProcedimento": "123"}),
+            ("GET", "/documento/listar/123"): _envelope(
+                [{"idDocumento": "5", "numero": "001"}]
+            ),
+        }
+    )
+    result = await helpers.ver_processo_completo(
+        client=client,  # type: ignore[arg-type]
+        unidade_override=None,
+        protocolo="123",
+        incluir_metadados_documentos=False,
+    )
+    assert result["total_documentos"] == 1
+    assert "_metadados" not in result["documentos"][0]
+    assert len(client.calls) == 2  # meta + docs, no per-doc calls
+
+
+@pytest.mark.asyncio
+async def test_ver_processo_completo_doc_listing_failure():
+    """When doc listing fails, the error is surfaced, not thrown."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/123"): _envelope({"idProcedimento": "123"}),
+            ("GET", "/documento/listar/123"): SeiPenError(
+                "endpoint unavailable", status_code=503
+            ),
+        }
+    )
+    result = await helpers.ver_processo_completo(
+        client=client,  # type: ignore[arg-type]
+        unidade_override=None,
+        protocolo="123",
+    )
+    assert result["metadados"]["idProcedimento"] == "123"
+    assert result["documentos"] == []
+    assert "endpoint unavailable" in result["documentos_error"]
+
+
+@pytest.mark.asyncio
+async def test_ver_processo_completo_per_doc_meta_failure():
+    """When one doc's metadata fails, others are still enriched."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/123"): _envelope({"idProcedimento": "123"}),
+            ("GET", "/documento/listar/123"): _envelope(
+                [
+                    {"idDocumento": "5", "numero": "001"},
+                    {"idDocumento": "7", "numero": "002"},
+                ]
+            ),
+            ("GET", "/documento/interno/consultar/5"): _envelope({"tipo": "OK"}),
+            ("GET", "/documento/interno/consultar/7"): SeiPenError(
+                "not found", status_code=404
+            ),
+        }
+    )
+    result = await helpers.ver_processo_completo(
+        client=client,  # type: ignore[arg-type]
+        unidade_override=None,
+        protocolo="123",
+    )
+    assert result["documentos"][0]["_metadados"]["tipo"] == "OK"
+    assert "_metadados_error" in result["documentos"][1]
+    assert "not found" in result["documentos"][1]["_metadados_error"]
+
+
+@pytest.mark.asyncio
+async def test_ver_processo_completo_requires_protocolo():
+    client = _StubClient({})
+    with pytest.raises(HelperError, match="'protocolo'"):
+        await helpers.ver_processo_completo(
+            client=client,  # type: ignore[arg-type]
+            unidade_override=None,
+            protocolo="",
+        )
+
+
+# ── criar_processo_facil auto-fetch (write helper) ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_auto_fetch_types():
+    """When no tipo_processo_id or tipo_processo_nome, candidates are returned."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/tipo/listar"): _envelope(
+                [
+                    {"idTipoProcesso": "1", "nomeTipo": "Administrativo"},
+                    {"idTipoProcesso": "2", "nomeTipo": "Disciplinar"},
+                ]
+            ),
+        }
+    )
+    with pytest.raises(HelperError) as exc_info:
+        await helpers.criar_processo_facil(
+            client=client,  # type: ignore[arg-type]
+            base_url="http://test",
+            orgao_id="0",
+            org_id=None,
+            session=None,
+            unidade_override=None,
+            tipo_processo_nome=None,
+            tipo_processo_id=None,
+            nivel_acesso=0,
+            hipotese_nome=None,
+            hipotese_id=None,
+        )
+    assert "Process type is required" in str(exc_info.value)
+    assert len(exc_info.value.candidates) == 2
+    assert exc_info.value.candidates[0]["nome"] == "Administrativo"
+    assert exc_info.value.candidates[1]["nome"] == "Disciplinar"
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_auto_fetch_hipotese():
+    """When nivelAcesso > 0 and no hipotese, legal hypotheses are returned."""
+    client = _StubClient(
+        {
+            ("GET", "/hipoteseLegal/pesquisar"): _envelope(
+                [
+                    {"idHipoteseLegal": "10", "nome": "Sigilo Fiscal"},
+                    {"idHipoteseLegal": "20", "nome": "Segurança Nacional"},
+                ]
+            ),
+        }
+    )
+    with pytest.raises(HelperError) as exc_info:
+        await helpers.criar_processo_facil(
+            client=client,  # type: ignore[arg-type]
+            base_url="http://test",
+            orgao_id="0",
+            org_id=None,
+            session=None,
+            unidade_override=None,
+            tipo_processo_nome=None,
+            tipo_processo_id="1",
+            nivel_acesso=1,
+            hipotese_nome=None,
+            hipotese_id=None,
+        )
+    assert "legal hypothesis" in str(exc_info.value).lower()
+    assert len(exc_info.value.candidates) == 2
+    assert exc_info.value.candidates[0]["nome"] == "Sigilo Fiscal"
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_normal_flow():
+    """When tipo_processo_id is provided, normal creation proceeds (auto-selects single subject)."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/assunto/sugestao/1/listar"): _envelope(
+                [{"idAssunto": "100", "nome": "Material de Consumo"}]
+            ),
+            ("POST", "/processo/criar"): _envelope(
+                {"IdProcedimento": "999", "ProtocoloFormatado": "TEST.000001/2025-99"}
+            ),
+        }
+    )
+    result = await helpers.criar_processo_facil(
+        client=client,  # type: ignore[arg-type]
+        base_url="http://test",
+        orgao_id="0",
+        org_id=None,
+        session=None,
+        unidade_override=None,
+        tipo_processo_nome=None,
+        tipo_processo_id="1",
+        nivel_acesso=0,
+        hipotese_nome=None,
+        hipotese_id=None,
+    )
+    assert result["defaults_aplicados"]["nivelAcesso"] == "0 (público)"
+    assert "auto-selected: 100" in result["defaults_aplicados"]["assuntos"]
+    payload = result["result"]
+    assert payload["IdProcedimento"] == "999"
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_auto_select_single_subject():
+    """When exactly one subject is available, auto-select it without error."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/assunto/sugestao/47/listar"): _envelope(
+                [{"idAssunto": "200", "nome": "Administrativo"}]
+            ),
+            ("POST", "/processo/criar"): _envelope(
+                {"IdProcedimento": "777", "ProtocoloFormatado": "P-777"}
+            ),
+        }
+    )
+    result = await helpers.criar_processo_facil(
+        client=client,  # type: ignore[arg-type]
+        base_url="http://test",
+        orgao_id="0",
+        org_id=None,
+        session=None,
+        unidade_override=None,
+        tipo_processo_nome=None,
+        tipo_processo_id="47",
+        nivel_acesso=0,
+        hipotese_nome=None,
+        hipotese_id=None,
+    )
+    assert result["defaults_aplicados"]["assuntos"] == "auto-selected: 200"
+    # Verify the POST form included the auto-selected subject
+    posted = client.calls[-1]["data"]
+    assert posted["assuntos"] == "200"
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_multi_subject_returns_candidates():
+    """When multiple subjects exist, return them as candidates."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/assunto/sugestao/47/listar"): _envelope(
+                [
+                    {"idAssunto": "033.42", "nome": "MATERIAL DE CONSUMO"},
+                    {"idAssunto": "010.10", "nome": "SOLICITAÇÃO DE COMPRAS"},
+                ]
+            ),
+        }
+    )
+    with pytest.raises(HelperError) as exc_info:
+        await helpers.criar_processo_facil(
+            client=client,  # type: ignore[arg-type]
+            base_url="http://test",
+            orgao_id="0",
+            org_id=None,
+            session=None,
+            unidade_override=None,
+            tipo_processo_nome=None,
+            tipo_processo_id="47",
+            nivel_acesso=0,
+            hipotese_nome=None,
+            hipotese_id=None,
+        )
+    assert "assuntos" in str(exc_info.value).lower()
+    assert len(exc_info.value.candidates) == 2
+    assert exc_info.value.candidates[0]["nome"] == "MATERIAL DE CONSUMO"
+    assert "assuntos='033.42'" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_no_subjects_error():
+    """When no subjects exist for the process type, give a clear error."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/assunto/sugestao/99/listar"): _envelope([]),
+        }
+    )
+    with pytest.raises(HelperError) as exc_info:
+        await helpers.criar_processo_facil(
+            client=client,  # type: ignore[arg-type]
+            base_url="http://test",
+            orgao_id="0",
+            org_id=None,
+            session=None,
+            unidade_override=None,
+            tipo_processo_nome=None,
+            tipo_processo_id="99",
+            nivel_acesso=0,
+            hipotese_nome=None,
+            hipotese_id=None,
+        )
+    assert "no subjects were found" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_explicit_assuntos():
+    """When assuntos is explicitly provided, validate compatibility."""
+    # Subject "42" IS in the suggested list → OK
+    client = _StubClient(
+        {
+            ("GET", "/processo/assunto/sugestao/1/listar"): _envelope(
+                [
+                    {"idAssunto": "42", "nome": "Material de Consumo"},
+                    {"idAssunto": "99", "nome": "Outro"},
+                ]
+            ),
+            ("POST", "/processo/criar"): _envelope(
+                {"IdProcedimento": "555", "ProtocoloFormatado": "P-555"}
+            ),
+        }
+    )
+    result = await helpers.criar_processo_facil(
+        client=client,  # type: ignore[arg-type]
+        base_url="http://test",
+        orgao_id="0",
+        org_id=None,
+        session=None,
+        unidade_override=None,
+        tipo_processo_nome=None,
+        tipo_processo_id="1",
+        nivel_acesso=0,
+        hipotese_nome=None,
+        hipotese_id=None,
+        assuntos="42",
+    )
+    assert result["result"]["IdProcedimento"] == "555"
+    assert client.calls[-1]["data"]["assuntos"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_incompatible_subject():
+    """When the provided subject is not in the suggested list, return error with candidates."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/assunto/sugestao/1/listar"): _envelope(
+                [
+                    {"idAssunto": "10", "nome": "Administrativo"},
+                    {"idAssunto": "20", "nome": "Financeiro"},
+                ]
+            ),
+        }
+    )
+    with pytest.raises(HelperError) as exc_info:
+        await helpers.criar_processo_facil(
+            client=client,  # type: ignore[arg-type]
+            base_url="http://test",
+            orgao_id="0",
+            org_id=None,
+            session=None,
+            unidade_override=None,
+            tipo_processo_nome=None,
+            tipo_processo_id="1",
+            nivel_acesso=0,
+            hipotese_nome=None,
+            hipotese_id=None,
+            assuntos="252",  # NOT in the suggested list
+        )
+    assert "not compatible" in str(exc_info.value).lower()
+    assert len(exc_info.value.candidates) == 2
+    assert exc_info.value.candidates[0]["id"] == "10"
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_defaults_applied():
+    """When optional params are omitted, defaults_aplicados reflects them."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/assunto/sugestao/1/listar"): _envelope(
+                [{"idAssunto": "100", "nome": "Geral"}]
+            ),
+            ("POST", "/processo/criar"): _envelope(
+                {"IdProcedimento": "888", "ProtocoloFormatado": "P-888"}
+            ),
+        }
+    )
+    result = await helpers.criar_processo_facil(
+        client=client,  # type: ignore[arg-type]
+        base_url="http://test",
+        orgao_id="0",
+        org_id=None,
+        session=None,
+        unidade_override=None,
+        tipo_processo_nome=None,
+        tipo_processo_id="1",
+        nivel_acesso=0,
+        hipotese_nome=None,
+        hipotese_id=None,
+        especificacao=None,
+        observacoes=None,
+    )
+    defaults = result["defaults_aplicados"]
+    assert defaults["nivelAcesso"] == "0 (público)"
+    assert defaults["especificacao"] == "(vazio)"
+    assert defaults["observacoes"] == "(vazio)"
+    assert "auto-selected: 100" in defaults["assuntos"]
+
+
+# ── criar_documento_com_conteudo auto-fetch + ensure_ascii ───────────────────
+
+
+@pytest.mark.asyncio
+async def test_criar_documento_com_conteudo_auto_fetch_series():
+    """When no id_serie or serie_nome, document type candidates are returned."""
+    client = _StubClient(
+        {
+            ("GET", "/documento/tipo/pesquisar"): _envelope(
+                [
+                    {"idSerie": "306", "nomeSerie": "Memorando"},
+                    {"idSerie": "200", "nomeSerie": "Ofício"},
+                ]
+            ),
+        }
+    )
+    with pytest.raises(HelperError) as exc_info:
+        await helpers.criar_documento_com_conteudo(
+            client=client,  # type: ignore[arg-type]
+            base_url="http://test",
+            orgao_id="0",
+            org_id=None,
+            session=None,
+            unidade_override=None,
+            procedimento="100",
+            serie_nome=None,
+            id_serie=None,
+            nivel_acesso=0,
+            observacao="",
+            conteudo_html="<p>test</p>",
+            id_unidade_geradora=None,
+        )
+    assert "Document type" in str(exc_info.value)
+    assert len(exc_info.value.candidates) == 2
+    assert exc_info.value.candidates[0]["nome"] == "Memorando"
+
+
+@pytest.mark.asyncio
+async def test_criar_documento_com_conteudo_ensure_ascii():
+    """The secoes JSON sent to SEI uses ensure_ascii=True."""
+    client = _StubClient(
+        {
+            ("POST", "/documento/100/interno/criar"): _envelope(
+                {"idDocumento": "55", "protocoloDocumentoFormatado": "DOC-55"}
+            ),
+            ("GET", "/documento/secao/listar"): _envelope(
+                {
+                    "ultimaVersaoDocumento": "1",
+                    "secoes": [
+                        {
+                            "id": "10",
+                            "idSecaoModelo": "100",
+                            "PrincipalSecaoDocumento": "S",
+                            "somenteLeitura": "N",
+                            "conteudo": "",
+                        }
+                    ],
+                }
+            ),
+            ("POST", "/documento/secao/alterar"): _envelope("2"),
+        }
+    )
+    result = await helpers.criar_documento_com_conteudo(
+        client=client,  # type: ignore[arg-type]
+        base_url="http://test",
+        orgao_id="0",
+        org_id=None,
+        session=None,
+        unidade_override=None,
+        procedimento="100",
+        serie_nome=None,
+        id_serie="306",
+        nivel_acesso=0,
+        observacao="Test doc",
+        conteudo_html="<p>Conteúdo com acentuação</p>",
+        id_unidade_geradora="110000965",
+    )
+    assert result["idDocumento"] == "55"
+    assert result["defaults_aplicados"]["nivelAcesso"] == "0 (público)"
+    # Verify the posted secoes JSON uses ensure_ascii=True:
+    # non-ASCII chars like 'ú' and 'ç' become \uXXXX escapes.
+    posted = client.calls[-1]["data"]
+    secoes_json = posted["secoes"]
+    assert isinstance(secoes_json, str)
+    # ensure_ascii=True means no raw non-ASCII bytes in the JSON string
+    # 'ç' → \u00e7, 'ú' → \u00fa
+    assert "\\u00e7" in secoes_json or "\\u00fa" in secoes_json
+    # The raw chars should NOT appear
+    assert "ç" not in secoes_json
+    assert "ú" not in secoes_json
+
+
+@pytest.mark.asyncio
+async def test_criar_documento_com_conteudo_normal_flow():
+    """Full 3-step creation with id_serie provided directly."""
+    client = _StubClient(
+        {
+            ("POST", "/documento/100/interno/criar"): _envelope(
+                {"idDocumento": "55", "protocoloDocumentoFormatado": "DOC-55"}
+            ),
+            ("GET", "/documento/secao/listar"): _envelope(
+                {
+                    "ultimaVersaoDocumento": "1",
+                    "secoes": [
+                        {
+                            "id": "10",
+                            "idSecaoModelo": "100",
+                            "PrincipalSecaoDocumento": "S",
+                            "somenteLeitura": "N",
+                            "conteudo": "",
+                        },
+                        {
+                            "id": "11",
+                            "idSecaoModelo": "101",
+                            "PrincipalSecaoDocumento": "N",
+                            "somenteLeitura": "S",
+                            "conteudo": "read-only placeholder",
+                        },
+                    ],
+                }
+            ),
+            ("POST", "/documento/secao/alterar"): _envelope("2"),
+        }
+    )
+    result = await helpers.criar_documento_com_conteudo(
+        client=client,  # type: ignore[arg-type]
+        base_url="http://test",
+        orgao_id="0",
+        org_id=None,
+        session=None,
+        unidade_override=None,
+        procedimento="100",
+        serie_nome=None,
+        id_serie="306",
+        nivel_acesso=0,
+        observacao="Test doc",
+        conteudo_html="<p>Hello</p>",
+        id_unidade_geradora="110000965",
+    )
+    assert result["idDocumento"] == "55"
+    assert result["protocoloDocumentoFormatado"] == "DOC-55"
+    assert result["secoesAtualizadas"] == 1  # only the principal editable
+    assert result["defaults_aplicados"]["nivelAcesso"] == "0 (público)"
+    # 3 calls: criar + secao_listar + secao_alterar
+    assert len(client.calls) == 3
 

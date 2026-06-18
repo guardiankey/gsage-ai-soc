@@ -9,6 +9,7 @@ Required permission: ``sei:read``
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import ClassVar, Optional
@@ -22,7 +23,7 @@ from custom_code.tools.sei_pen._client import (
     resolve_base_url,
     with_hint,
 )
-from custom_code.tools.sei_pen._helpers import HelperError, ver_documento_completo
+from custom_code.tools.sei_pen._helpers import HelperError, listar_processos_facil, ver_documento_completo, ver_processo_completo
 from custom_code.tools.sei_pen._operations import BuildError, READ_OPERATIONS, build_request
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,8 @@ log = logging.getLogger(__name__)
 # High-level helper operations (orchestrate multiple WSSEI calls into one).
 READ_HELPER_OPS = (
     "documento.ver_completo",
+    "processo.listar_facil",
+    "processo.ver_completo",
 )
 
 # Sorted list of all read operation IDs for the params schema enum
@@ -55,6 +58,7 @@ class SeiPenReadTool(BaseTool):
     | ``processo.listar_acompanhamentos``    | List tracked processes for a group                    |
     | ``processo.pesquisar_geral``           | Full-text search across processes                     |
     | ``processo.listar``                    | List processes with optional filters                  |
+    | ``processo.listar_facil``               | Agent-friendly listing with smart defaults + hints     |
     | ``processo.consultar``                 | Retrieve full details of a process by protocol        |
     | ``processo.consultar_atribuicao``      | Retrieve assignment info of a process                 |
     | ``processo.consultar_acompanhamento``  | Retrieve tracking details for a process               |
@@ -66,6 +70,7 @@ class SeiPenReadTool(BaseTool):
     | ``usuario.listar_unidades``            | List units accessible to a user                       |
     | ``hipotese_legal.pesquisar``           | Search legal hypotheses by access level               |
     | ``documento.ver_completo``             | High-level: metadata + rendered HTML + sections in one call |
+    | ``processo.ver_completo``              | High-level: process metadata + documents with per-doc metadata |
 
     Permission: ``sei:read``
     """
@@ -169,7 +174,8 @@ class SeiPenReadTool(BaseTool):
                 "description": (
                     "Document or process protocol / internal ID. "
                     "Required for: documento.consultar_interno, processo.consultar, "
-                    "processo.consultar_atribuicao, processo.consultar_acompanhamento."
+                    "processo.consultar_atribuicao, processo.consultar_acompanhamento, "
+                    "processo.ver_completo."
                 ),
             },
             "procedimento": {
@@ -253,6 +259,21 @@ class SeiPenReadTool(BaseTool):
                 "type": "string",
                 "description": "Return only processes assigned to the current user ('S'/'N'). Optional for: processo.listar.",
             },
+            # ── High-level helper params (processo.listar_facil) ──────────
+            "apenas_meus": {
+                "type": "boolean",
+                "description": (
+                    "Show only the current user's processes. "
+                    "Optional for: processo.listar_facil (default: true)."
+                ),
+            },
+            "id_unidade": {
+                "type": "string",
+                "description": (
+                    "Filter by unit ID (numeric). "
+                    "Optional for: processo.listar_facil."
+                ),
+            },
             # ── Document model filters ────────────────────────────────────────
             "grupoProtocoloModelo": {
                 "type": "string",
@@ -329,6 +350,29 @@ class SeiPenReadTool(BaseTool):
                 "description": (
                     "Whether to include the structured editable sections in the result. "
                     "Optional for: documento.ver_completo (default: true)."
+                ),
+            },
+            # ── High-level helper params (processo.ver_completo) ──────────
+            "incluir_documentos": {
+                "type": "boolean",
+                "description": (
+                    "Whether to include the document listing in the result. "
+                    "Optional for: processo.ver_completo (default: true)."
+                ),
+            },
+            "incluir_metadados_documentos": {
+                "type": "boolean",
+                "description": (
+                    "Whether to fetch per-document metadata (one extra API call each). "
+                    "Optional for: processo.ver_completo (default: true)."
+                ),
+            },
+            "documento_limit": {
+                "type": "integer",
+                "minimum": 1,
+                "description": (
+                    "Max documents to return from the listing. "
+                    "Optional for: processo.ver_completo."
                 ),
             },
         },
@@ -437,9 +481,14 @@ class SeiPenReadTool(BaseTool):
                     unidade_override=unidade_override,
                 )
             except HelperError as exc:
+                msg = str(exc)
+                if exc.candidates:
+                    msg += "\n\nCandidates (use one of these ids):\n" + json.dumps(
+                        exc.candidates, ensure_ascii=False, indent=2
+                    )
                 return self._failure(
                     "INVALID_PARAMS",
-                    str(exc),
+                    msg,
                     execution_time_ms=round((time.perf_counter() - t0) * 1000),
                 )
             except SeiPenError as exc:
@@ -506,14 +555,37 @@ class SeiPenReadTool(BaseTool):
             operation,
             elapsed_ms,
         )
-        return self._success(
-            {
-                "operation": operation,
-                "result": response.get("data"),
-                "total": response.get("total"),
-                "sucesso": response.get("sucesso"),
-            }
-        )
+
+        result_data = response.get("data")
+
+        # Normalise null → [] for list/search operations so the agent always
+        # gets a consistent array shape (SEI sometimes returns null for empty
+        # results e.g. usuario.listar_unidades).
+        if result_data is None and operation.startswith(("usuario.", "unidade.", "processo.listar", "processo.pesquisar", "documento.listar", "documento.tipo_", "grupo_", "modelo_", "acompanhamento_", "atividade.", "hipotese_", "contato.", "serie.", "orgao.")):
+            result_data = []
+
+        # Special case: documento.visualizar may return an empty string
+        # for some document types / access levels. Append a hint so the
+        # agent knows about the ver_completo alternative.
+        hints = None
+        if operation == "documento.visualizar" and isinstance(result_data, str) and not result_data.strip():
+            hints = [
+                "Document visualization returned empty — this is a known SEI "
+                "quirk for some document types. Use "
+                "sei_pen_read(operation='documento.ver_completo', documento='<id>') "
+                "for metadata + rendered HTML + sections."
+            ]
+
+        result_payload: dict = {
+            "operation": operation,
+            "result": result_data,
+            "total": response.get("total"),
+            "sucesso": response.get("sucesso"),
+        }
+        if hints:
+            result_payload["hints"] = hints
+
+        return self._success(result_payload, execution_time_ms=elapsed_ms)
 
     # ── Helper dispatch ───────────────────────────────────────────────────────
 
@@ -541,6 +613,38 @@ class SeiPenReadTool(BaseTool):
                     params.get("incluir_visualizacao", True)
                 ),
                 incluir_secoes=bool(params.get("incluir_secoes", True)),
+            )
+
+        if operation == "processo.listar_facil":
+            return await listar_processos_facil(
+                client=client,
+                unidade_override=unidade_override,
+                limit=int(params.get("limit", 10) or 10),
+                start=int(params.get("start", 0) or 0),
+                apenas_meus=bool(params.get("apenas_meus", True)),
+                tipo=params.get("tipo"),
+                usuario=params.get("usuario"),
+                id_unidade=params.get("id_unidade"),
+            )
+
+        if operation == "processo.ver_completo":
+            protocolo = params.get("protocolo")
+            if not protocolo:
+                raise HelperError(
+                    "'protocolo' (process protocol / internal ID) is required for "
+                    "processo.ver_completo."
+                )
+            return await ver_processo_completo(
+                client=client,
+                unidade_override=unidade_override,
+                protocolo=str(protocolo),
+                incluir_documentos=bool(
+                    params.get("incluir_documentos", True)
+                ),
+                incluir_metadados_documentos=bool(
+                    params.get("incluir_metadados_documentos", True)
+                ),
+                documento_limit=params.get("documento_limit"),
             )
 
         raise HelperError(f"Unknown read helper operation: {operation}")

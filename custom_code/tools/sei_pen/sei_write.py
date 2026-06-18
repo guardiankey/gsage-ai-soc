@@ -617,9 +617,14 @@ class SeiPenWriteTool(BaseTool):
                     default_unit=unidade_override or unidade_id,
                 )
             except HelperError as exc:
+                msg = str(exc)
+                if exc.candidates:
+                    msg += "\n\nCandidates (use one of these ids):\n" + _json.dumps(
+                        exc.candidates, ensure_ascii=False, indent=2
+                    )
                 return self._failure(
                     "INVALID_PARAMS",
-                    str(exc),
+                    msg,
                     execution_time_ms=round((time.perf_counter() - t0) * 1000),
                 )
             except SeiPenError as exc:

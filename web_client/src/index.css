@@ -157,7 +157,7 @@
     word-break: break-word;
   }
   .prose-chat pre {
-    @apply bg-muted rounded-lg p-3 overflow-x-auto mb-3 text-xs max-w-full;
+    @apply bg-muted rounded-lg p-3 overflow-x-auto mb-3 text-xs max-w-full min-w-0;
   }
   .prose-chat pre code {
     @apply bg-transparent p-0;
@@ -180,10 +180,10 @@
      scrolls; the <table> keeps default table layout so columns stay
      aligned between rows. */
   .prose-chat-table-wrapper {
-    @apply mb-3 max-w-full overflow-x-auto;
+    @apply mb-3 max-w-full overflow-x-auto min-w-0;
   }
   .prose-chat-table-wrapper table {
-    @apply w-full text-xs border-collapse;
+    @apply w-full text-xs border-collapse table-fixed;
   }
   .prose-chat th {
     @apply bg-muted font-semibold text-left px-2 py-1 border border-border whitespace-nowrap;

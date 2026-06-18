@@ -20,6 +20,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Optional
+from urllib.parse import quote
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,7 +39,7 @@ NIVEL_ACESSO_LABELS: dict[int, str] = {
 # Candidate keys used to read an id/name from heterogeneous SEI list records.
 _ID_KEYS = (
     "idSerie", "idTipoProcedimento", "idTipoProcesso", "idHipoteseLegal",
-    "idUnidade", "idContato", "id",
+    "idUnidade", "idContato", "idAssunto", "id",
 )
 _NAME_KEYS = (
     "nome", "nomeSerie", "nomeTipo", "descricao", "sigla", "nomeUnidade",
@@ -191,6 +192,30 @@ def _extract_data(body: dict) -> Any:
     return body.get("data")
 
 
+async def _fetch_subjects(
+    *,
+    client: SeiPenClient,
+    tipo_procedimento: str,
+    unidade_override: Optional[str],
+) -> list[dict]:
+    """Fetch suggested subjects for a process type.
+
+    Calls ``GET /processo/assunto/sugestao/{tipo}/listar`` and returns the
+    list of subject records. Returns an empty list on any error (the caller
+    decides whether that's a hard failure).
+    """
+    try:
+        body = await client.request(
+            "GET",
+            f"/processo/assunto/sugestao/{tipo_procedimento}/listar",
+            params={"limit": 50, "start": 0},
+            unidade_override=unidade_override,
+        )
+    except SeiPenError:
+        return []
+    return _extract_data(body) if isinstance(_extract_data(body), list) else []
+
+
 async def criar_processo_facil(
     *,
     client: SeiPenClient,
@@ -215,9 +240,20 @@ async def criar_processo_facil(
     resolved_tipo = tipo_processo_id
     if not resolved_tipo:
         if not tipo_processo_nome:
+            # Auto-fetch the list so the agent immediately sees the options.
+            all_types = await _cache.load_tipos_processo(
+                client=client, base_url=base_url, orgao_id=orgao_id,
+                org_id=org_id, session=session,
+            )
+            candidates = [
+                {"id": _record_id(r), "nome": _record_name(r)}
+                for r in all_types[:25]
+            ]
             raise HelperError(
-                "Provide 'tipo_processo_id' or 'tipo_processo_nome'. List types with "
-                "sei_pen_read(operation='processo.tipo_listar')."
+                "Process type is required. Provide 'tipo_processo_id' or "
+                "'tipo_processo_nome'. To list all types manually use "
+                "sei_pen_read(operation='processo.tipo_listar').",
+                candidates,
             )
         resolved_tipo, candidates = await resolve_tipo_processo(
             client=client, base_url=base_url, orgao_id=orgao_id,
@@ -233,6 +269,22 @@ async def criar_processo_facil(
     # Resolve legal hypothesis when access is restricted/secret.
     resolved_hip = hipotese_id
     if nivel_acesso and nivel_acesso > 0 and not resolved_hip:
+        if not hipotese_nome:
+            # Auto-fetch so the agent immediately sees the options.
+            all_hip = await _cache.load_hipoteses(
+                client=client, base_url=base_url, orgao_id=orgao_id,
+                nivel_acesso=nivel_acesso, org_id=org_id, session=session,
+            )
+            candidates = [
+                {"id": _record_id(r), "nome": _record_name(r)}
+                for r in all_hip[:25]
+            ]
+            raise HelperError(
+                f"Access level {nivel_acesso} requires a legal hypothesis. "
+                "Provide 'hipotese_id' or 'hipotese_nome'. To list manually use "
+                "sei_pen_read(operation='hipotese_legal.pesquisar', nivelAcesso=N).",
+                candidates,
+            )
         resolved_hip, candidates = await resolve_hipotese(
             client=client, base_url=base_url, orgao_id=orgao_id,
             nivel_acesso=nivel_acesso, name=hipotese_nome,
@@ -245,6 +297,68 @@ async def criar_processo_facil(
                 candidates,
             )
 
+    # Resolve subjects (assuntos) — SEI requires at least one subject even
+    # though the WSSEI schema marks it optional. We always fetch the suggested
+    # subjects for the process type so we can:
+    #   a) auto-select when the caller doesn't provide one, or
+    #   b) validate that a caller-provided subject is compatible.
+    suggested = await _fetch_subjects(
+        client=client,
+        tipo_procedimento=resolved_tipo,
+        unidade_override=unidade_override,
+    )
+    valid_ids: set[str] = {
+        rid for r in suggested if (rid := _record_id(r))
+    }
+
+    resolved_assuntos = assuntos
+    if not resolved_assuntos:
+        # ── No subject provided → auto-select or ask ─────────────────────
+        if len(suggested) == 1:
+            resolved_assuntos = _record_id(suggested[0])
+            if resolved_assuntos:
+                log.info(
+                    "Auto-selected single subject '%s' (id=%s) for process type %s",
+                    _record_name(suggested[0]), resolved_assuntos, resolved_tipo,
+                )
+        elif suggested:
+            candidates = [
+                {"id": _record_id(r), "nome": _record_name(r)}
+                for r in suggested[:25]
+            ]
+            raise HelperError(
+                f"SEI requires at least one 'assuntos' (subject) to create a "
+                f"process. Multiple subjects are available for process type "
+                f"{resolved_tipo}. Pick one and pass 'assuntos' with its ID, "
+                f"e.g. assuntos='{candidates[0]['id']}' for '{candidates[0]['nome']}'. "
+                f"To list manually: "
+                f"sei_pen_read(operation='processo.assunto_sugestao', "
+                f"tipoProcedimento='{resolved_tipo}').",
+                candidates,
+            )
+        else:
+            raise HelperError(
+                f"SEI requires at least one 'assuntos' (subject) to create a "
+                f"process, but no subjects were found for process type "
+                f"{resolved_tipo}. Your SEI installation may not have subjects "
+                f"configured for this type. Try listing manually with "
+                f"sei_pen_read(operation='processo.assunto_sugestao', "
+                f"tipoProcedimento='{resolved_tipo}') or contact your SEI admin."
+            )
+    else:
+        # ── Subject provided → validate compatibility ────────────────────
+        if valid_ids and resolved_assuntos not in valid_ids:
+            candidates = [
+                {"id": _record_id(r), "nome": _record_name(r)}
+                for r in suggested[:25]
+            ]
+            raise HelperError(
+                f"Subject '{resolved_assuntos}' is not compatible with process "
+                f"type {resolved_tipo}. The valid subjects for this process "
+                f"type are listed below. Pick one and update 'assuntos'.",
+                candidates,
+            )
+
     form: dict[str, Any] = {
         "tipoProcesso": resolved_tipo,
         "nivelAcesso": nivel_acesso,
@@ -254,7 +368,7 @@ async def criar_processo_facil(
     for key, value in (
         ("especificacao", especificacao),
         ("interessados", interessados),
-        ("assuntos", assuntos),
+        ("assuntos", resolved_assuntos),
         ("observacoes", observacoes),
     ):
         if value not in (None, ""):
@@ -263,9 +377,19 @@ async def criar_processo_facil(
     body = await client.request(
         "POST", "/processo/criar", data=form, unidade_override=unidade_override
     )
+    defaults: dict[str, Any] = {}
+    if not especificacao:
+        defaults["especificacao"] = "(vazio)"
+    if not observacoes:
+        defaults["observacoes"] = "(vazio)"
+    if nivel_acesso == 0:
+        defaults["nivelAcesso"] = "0 (público)"
+    if not assuntos and resolved_assuntos:
+        defaults["assuntos"] = f"auto-selected: {resolved_assuntos}"
     return {
         "resolved": {"tipoProcesso": resolved_tipo, "hipoteseLegal": resolved_hip},
         "result": _extract_data(body),
+        "defaults_aplicados": defaults,
     }
 
 
@@ -297,9 +421,20 @@ async def criar_documento_com_conteudo(
     resolved_serie = id_serie
     if not resolved_serie:
         if not serie_nome:
+            # Auto-fetch so the agent immediately sees the options.
+            all_series = await _cache.load_series(
+                client=client, base_url=base_url, orgao_id=orgao_id,
+                unidade=unidade_override, org_id=org_id, session=session,
+            )
+            candidates = [
+                {"id": _record_id(r), "nome": _record_name(r)}
+                for r in all_series[:25]
+            ]
             raise HelperError(
-                "Provide 'id_serie' or 'serie_nome'. List document types with "
-                "sei_pen_read(operation='documento.tipo_pesquisar')."
+                "Document type (série) is required. Provide 'id_serie' or "
+                "'serie_nome'. To list all types manually use "
+                "sei_pen_read(operation='documento.tipo_pesquisar').",
+                candidates,
             )
         resolved_serie, candidates = await resolve_serie(
             client=client, base_url=base_url, orgao_id=orgao_id,
@@ -372,7 +507,9 @@ async def criar_documento_com_conteudo(
     alterar_form = {
         "documento": id_documento,
         "versao": versao,
-        "secoes": json.dumps(payload, ensure_ascii=False),
+        # IMPORTANT: ensure_ascii=True — EncodingMiddleware transcodes
+        # to ISO-8859-1 before json_decode; non-ASCII bytes break it.
+        "secoes": json.dumps(payload, ensure_ascii=True),
     }
     alterar_body = await client.request(
         "POST",
@@ -381,6 +518,14 @@ async def criar_documento_com_conteudo(
         unidade_override=unidade_override,
     )
 
+    defaults: dict[str, Any] = {}
+    if nivel_acesso == 0:
+        defaults["nivelAcesso"] = "0 (público)"
+    if observacao == "":
+        defaults["observacao"] = "(vazio)"
+    if id_unidade_geradora:
+        defaults["idUnidadeGeradoraProtocolo"] = id_unidade_geradora
+
     return {
         "idDocumento": id_documento,
         "protocoloDocumentoFormatado": created.get("protocoloDocumentoFormatado"),
@@ -388,6 +533,7 @@ async def criar_documento_com_conteudo(
         "versaoAnterior": versao,
         "novaVersao": _extract_data(alterar_body),
         "secoesAtualizadas": len(payload),
+        "defaults_aplicados": defaults,
     }
 
 
@@ -535,6 +681,184 @@ async def ver_documento_completo(
             result["versao"] = (
                 data.get("ultimaVersaoDocumento") if isinstance(data, dict) else None
             )
+
+    return result
+
+
+HINT_LISTAR_PROCESSOS = (
+    "Use 'start' to paginate (0-based offset). "
+    "Filter options: tipo='R' (received), tipo='G' (generated), "
+    "apenasMeus='S' (only your processes), apenasMeus='N' (all). "
+    "For full details call processo.ver_completo or processo.consultar "
+    "with the protocol from the listing."
+)
+
+
+async def listar_processos_facil(
+    *,
+    client: SeiPenClient,
+    unidade_override: Optional[str],
+    limit: int = 10,
+    start: int = 0,
+    apenas_meus: bool = True,
+    tipo: Optional[str] = None,
+    usuario: Optional[str] = None,
+    id_unidade: Optional[str] = None,
+) -> dict:
+    """Agent-friendly process listing with smart defaults and navigation hints.
+
+    Defaults to showing the current user's processes (``apenasMeus='S'``) with
+    a page size of 10. Returns structured hints so the AI agent can guide the
+    user naturally (pagination, filters, drill-down).
+    """
+    params: dict[str, Any] = {
+        "limit": str(limit),
+        "start": str(start),
+        "apenasMeus": "S" if apenas_meus else "N",
+    }
+    if tipo:
+        params["tipo"] = tipo
+    if usuario:
+        params["usuario"] = usuario
+    if id_unidade:
+        params["id"] = id_unidade
+
+    body = await client.request(
+        "GET",
+        "/processo/listar",
+        params=params,
+        unidade_override=unidade_override,
+    )
+    data = _extract_data(body)
+    processos = data if isinstance(data, list) else []
+    total_body = body.get("total")
+
+    has_more = len(processos) >= limit
+    next_start = start + limit if has_more else None
+    prev_start = max(0, start - limit) if start > 0 else None
+
+    hints = [HINT_LISTAR_PROCESSOS]
+    if has_more:
+        hints.append(
+            f"Showing {len(processos)} results (limit={limit}). "
+            f"There may be more. To see the next page use start={next_start}."
+        )
+    if not processos:
+        hints.append(
+            "No processes found with the current filters. "
+            "Try setting apenasMeus='N' (via apenas_meus=false) to see all "
+            "unit processes, or change tipo='G'/'R'."
+        )
+
+    return {
+        "processos": processos,
+        "total": total_body,
+        "limit": limit,
+        "start": start,
+        "filtros_aplicados": {
+            "apenasMeus": "S" if apenas_meus else "N",
+            **({"tipo": tipo} if tipo else {}),
+            **({"usuario": usuario} if usuario else {}),
+            **({"idUnidade": id_unidade} if id_unidade else {}),
+        },
+        "paginacao": {
+            "proxima": next_start,
+            "anterior": prev_start,
+            "tem_mais": has_more,
+        },
+        "hints": hints,
+    }
+
+
+async def ver_processo_completo(
+    *,
+    client: SeiPenClient,
+    unidade_override: Optional[str],
+    protocolo: str,
+    incluir_documentos: bool = True,
+    incluir_metadados_documentos: bool = True,
+    documento_limit: Optional[int] = None,
+) -> dict:
+    """Consolidated process view — metadata + document listing with per-doc metadata.
+
+    Runs up to 1 + N + N calls:
+    1. ``GET /processo/{protocolo}`` — process metadata.
+    2. ``GET /documento/listar/{protocolo}`` — list of documents (paginated).
+    3. For each document, ``GET /documento/interno/consultar/{id}`` — document metadata.
+
+    Each call is wrapped so that a failure in one branch does not lose the others.
+    """
+    if not protocolo:
+        raise HelperError("'protocolo' (process protocol / internal ID) is required.")
+
+    async def _safe(coro_fn):
+        try:
+            return await coro_fn()
+        except SeiPenError as exc:
+            return {"_error": str(exc), "_status_code": exc.status_code}
+
+    # 1) Process metadata.
+    async def _meta() -> Any:
+        body = await client.request(
+            "GET",
+            f"/processo/{quote(protocolo, safe='')}",
+            unidade_override=unidade_override,
+        )
+        return _extract_data(body)
+
+    result: dict[str, Any] = {
+        "protocolo": protocolo,
+        "metadados": await _safe(_meta),
+    }
+
+    # 2) Document listing.
+    if incluir_documentos:
+        async def _docs() -> Any:
+            params: dict[str, Any] = {}
+            if documento_limit is not None:
+                params["limit"] = documento_limit
+            body = await client.request(
+                "GET",
+                f"/documento/listar/{quote(protocolo, safe='')}",
+                params=params or None,
+                unidade_override=unidade_override,
+            )
+            return _extract_data(body)
+
+        docs_res = await _safe(_docs)
+
+        if isinstance(docs_res, dict) and "_error" in docs_res:
+            result["documentos"] = []
+            result["documentos_error"] = docs_res["_error"]
+        else:
+            docs_list = docs_res if isinstance(docs_res, list) else []
+            result["documentos"] = docs_list
+            result["total_documentos"] = len(docs_list)
+
+            # 3) Per-document metadata.
+            if incluir_metadados_documentos and docs_list:
+                async def _doc_meta(doc: dict) -> dict:
+                    doc_id = str(doc.get("idDocumento") or "")
+                    if not doc_id:
+                        return {**doc, "_metadados_error": "Missing idDocumento"}
+                    try:
+                        body = await client.request(
+                            "GET",
+                            f"/documento/interno/consultar/{doc_id}",
+                            unidade_override=unidade_override,
+                        )
+                        return {**doc, "_metadados": _extract_data(body)}
+                    except SeiPenError as exc:
+                        return {
+                            **doc,
+                            "_metadados_error": str(exc),
+                            "_status_code": exc.status_code,
+                        }
+
+                enriched = await asyncio.gather(
+                    *(_doc_meta(d) for d in docs_list)
+                )
+                result["documentos"] = enriched
 
     return result
 

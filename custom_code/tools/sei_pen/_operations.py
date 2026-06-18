@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, TypedDict
+from urllib.parse import quote
 
 
 class OperationDef(TypedDict):
@@ -596,7 +597,9 @@ def build_request(
             raise BuildError(
                 f"Required path param '{pp}' is missing for operation '{operation}'"
             )
-        path = path.replace("{" + pp + "}", str(value))
+        # URL-encode path param values so characters like '/' in formatted
+        # protocols (e.g. "Assefaz.000002/2026-46") don't break URL routing.
+        path = path.replace("{" + pp + "}", quote(str(value), safe=""))
 
     # ── Validate non-path required params ────────────────────────────────────
     for req in op["required"]:

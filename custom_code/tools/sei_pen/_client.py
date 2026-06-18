@@ -29,6 +29,47 @@ import httpx
 
 log = logging.getLogger(__name__)
 
+# ── HTML stripping for clean error messages ─────────────────────────────────
+
+import re as _re
+
+# Matches <style>...</style> and <script>...</script> blocks including content.
+_STYLE_SCRIPT_BLOCK_RE = _re.compile(
+    r"<(style|script)\b[^>]*>.*?</\1>", _re.DOTALL | _re.IGNORECASE
+)
+_HTML_TAG_RE = _re.compile(r"<[^>]*>")
+_HTML_ENTITY_RE = _re.compile(r"&(?:[a-zA-Z]+|#\d+);")
+
+
+def _clean_error_text(text: str) -> str:
+    """Strip HTML tags, CSS, JS, and entities from SEI error response bodies.
+
+    SEI's Slim Framework returns HTML error pages for 404/500. We extract
+    any meaningful text (e.g. ``InfraException``) and discard the markup,
+    CSS, and scripts so the raw HTML never leaks into tool error messages.
+    """
+    if not text:
+        return ""
+    # 1) Remove <style>…</style> and <script>…</script> blocks entirely
+    cleaned = _STYLE_SCRIPT_BLOCK_RE.sub(" ", text)
+    # 2) Remove remaining HTML tags
+    cleaned = _HTML_TAG_RE.sub(" ", cleaned)
+    # 3) Remove HTML entities (named like &amp; and numeric like &#8212;)
+    cleaned = _HTML_ENTITY_RE.sub("", cleaned)
+    # 4) Collapse whitespace and truncate
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:400]
+
+
+def _is_list_endpoint(path: str) -> bool:
+    """Return True if the path targets a list/search SEI endpoint."""
+    path_lower = path.lower()
+    return any(
+        keyword in path_lower
+        for keyword in ("listar", "pesquisar", "list")
+    )
+
+
 # ── Environment → base URL mapping ──────────────────────────────────────────
 
 _SEI_PATH = "/sei/modulos/wssei/controlador_ws.php/api/v2"
@@ -125,12 +166,46 @@ def instructive_hint(message: str, status_code: Optional[int], operation: str) -
             "Use sei_pen_read(operation='processo.listar', apenasMeus='S') instead."
         )
 
+    # Server-side internal error on process creation (InfraException).
+    # Common when the process type, subject, or unit configuration is
+    # inconsistent on the SEI installation — not a tool/proxy bug.
+    if operation in ("processo.criar", "processo.criar_facil") and (
+        status_code == 500 or "infraexception" in msg
+    ):
+        return (
+            "SEI threw an internal server error (InfraException) while "
+            "creating the process. This is a bug in the SEI installation, "
+            "not in your parameters. Possible causes: the process type may "
+            "require fields not provided by the WSSEI module, or the organ's "
+            "SEI configuration is incomplete. Try a different process type, "
+            "or contact your SEI administrator."
+        )
+
     # Server-side internal error on document-model listing.
     if operation == "modelo_documento.listar" and (status_code == 500 or "infraexception" in msg):
         return (
             "SEI returned an internal error for 'modelo_documento.listar' on this "
             "installation. Use sei_pen_read(operation='documento.tipo_pesquisar') "
             "to discover document types/séries instead."
+        )
+
+    # Process has no relationships (SEI returns 404 HTML page).
+    if operation == "processo.relacionamentos" and status_code == 404:
+        return (
+            "This process has no related processes (relacionamentos). "
+            "This is normal — not all processes are linked to others."
+        )
+
+    # Document visualization returns empty body (SEI quirk — may require
+    # a separate access token or the document type lacks a visual preview).
+    if operation == "documento.visualizar" and status_code is None and (
+        not msg or "empty" in msg or "non-json" in msg or "vazio" in msg
+    ):
+        return (
+            "The document visualization returned empty. This is a known SEI "
+            "quirk for some document types or access levels. Use "
+            "sei_pen_read(operation='documento.ver_completo', documento='<id>') "
+            "instead — it provides metadata + rendered HTML + sections."
         )
 
     # Empty / generic error on document creation — usually a missing série or
@@ -378,17 +453,22 @@ class SeiPenClient:
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as exc:
+                # Strip HTML from SEI Slim Framework error pages so the raw
+                # markup never leaks to the user / agent.
+                clean_body = _clean_error_text(exc.response.text)
+                detail = f": {clean_body}" if clean_body else ""
                 raise SeiPenError(
-                    f"SEI-PEN HTTP {exc.response.status_code} for {method} {path}: "
-                    f"{exc.response.text[:500]}",
+                    f"SEI-PEN HTTP {exc.response.status_code} for {method} {path}{detail}",
                     status_code=exc.response.status_code,
                 ) from exc
 
             try:
                 body: dict[str, Any] = resp.json()
             except Exception as exc:
+                clean_body = _clean_error_text(resp.text)
+                detail = f": {clean_body}" if clean_body else ""
                 raise SeiPenError(
-                    f"SEI-PEN: non-JSON response for {method} {path}: {resp.text[:300]}"
+                    f"SEI-PEN: non-JSON response for {method} {path}{detail}"
                 ) from exc
 
             if not body.get("sucesso", True):
@@ -400,6 +480,17 @@ class SeiPenClient:
                     # cause depends on the HTTP verb: GET = ID not found /
                     # access denied; POST = invalid/missing field, unit-
                     # without-permission, or wrong reference IDs.
+                    #
+                    # For list/search endpoints the empty response usually
+                    # means "no results" — return an empty list instead of
+                    # an error so the agent doesn't get stuck.
+                    if method.upper() == "GET" and _is_list_endpoint(path):
+                        log.info(
+                            "SEI-PEN: sucesso:false (empty) on list endpoint %s %s "
+                            "— treating as empty result",
+                            method, path,
+                        )
+                        return {"sucesso": True, "mensagem": "", "data": [], "total": 0}
                     if method.upper() == "POST":
                         msg = (
                             "SEI returned an error with no detail. Likely "
