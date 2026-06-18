@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { listMessages, subscribeConversationEvents, type Message, type MessageListResult } from '@/api/chat'
+import { listMessages, checkMessages, subscribeConversationEvents, type Message, type MessageListResult, type MessageCheck } from '@/api/chat'
 import { useAuth } from '@/contexts/AuthContext'
 import { MessageBubble } from './MessageBubble'
 import { StreamingMessage } from './StreamingMessage'
@@ -17,6 +17,7 @@ interface Props {
   streamError: string | null
   pendingApprovals: boolean
   hasActiveBgTasks: boolean
+  streamEndedAt: number
   onBgTasksResolved?: () => void
   onPendingApprovalsDetected?: (pending: boolean) => void
   pendingUserMessage: string | null
@@ -35,6 +36,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
     streamError,
     pendingApprovals,
     hasActiveBgTasks,
+    streamEndedAt,
     onBgTasksResolved,
     onPendingApprovalsDetected,
     pendingUserMessage,
@@ -47,15 +49,54 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
   const queryClient = useQueryClient()
   const bottomRef = useRef<HTMLDivElement>(null)
   const [prevMsgCount, setPrevMsgCount] = useState<number | null>(null)
+  const lastMessageIdRef = useRef<string | null>(null)
 
+  // Reset last-known message id when conversation changes.
+  useEffect(() => {
+    lastMessageIdRef.current = null
+    setPrevMsgCount(null)
+  }, [conversationId])
+
+  // ── Lightweight poll: only fetches last_message_id (cheap) ────────────
+  // When the id changes the full message list is invalidated below.
+  const shouldPoll = pendingApprovals || hasActiveBgTasks
+    || (streamEndedAt > 0 && (Date.now() - streamEndedAt) < 60_000)
+
+  const { data: checkData } = useQuery({
+    queryKey: ['messagesCheck', orgId, conversationId],
+    queryFn: () => checkMessages(orgId!, conversationId),
+    enabled: !!orgId && !!conversationId,
+    refetchInterval: shouldPoll ? 5000 : false,
+    // Never stale while polling — always fetch fresh.
+    staleTime: 0,
+  })
+
+  // When the last_message_id changes (new message arrived), invalidate
+  // the full message list so it refetches immediately.
+  // On first load we seed the ref without invalidating.
+  useEffect(() => {
+    const newId = checkData?.last_message_id ?? null
+    if (newId === null) return
+    if (lastMessageIdRef.current === null) {
+      // First load — seed, don't invalidate.
+      lastMessageIdRef.current = newId
+      return
+    }
+    if (newId !== lastMessageIdRef.current) {
+      lastMessageIdRef.current = newId
+      queryClient.invalidateQueries({
+        queryKey: ['messages', orgId, conversationId],
+      })
+    }
+  }, [checkData?.last_message_id, orgId, conversationId, queryClient])
+
+  // ── Full message list — fetched on mount / invalidation only ─────────
   const { data, isLoading } = useQuery({
     queryKey: ['messages', orgId, conversationId],
     queryFn: () => listMessages(orgId!, conversationId),
     enabled: !!orgId && !!conversationId,
-    refetchInterval: (query) => {
-      const needsPolling = query.state.data?.needsPolling ?? false
-      return (pendingApprovals || hasActiveBgTasks || needsPolling) ? 5000 : false
-    },
+    // No refetchInterval — updates are driven by the lightweight check
+    // query (above) and SSE events (below).
   })
 
   const messages = data?.messages

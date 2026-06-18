@@ -24,6 +24,7 @@ export default function ChatPage() {
   const [streamError, setStreamError] = useState<string | null>(null)
   const [pendingApprovals, setPendingApprovals] = useState(false)
   const [hasActiveBgTasks, setHasActiveBgTasks] = useState(false)
+  const [streamEndedAt, setStreamEndedAt] = useState(0)
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   // Tracks whether onPaused fired in the current stream (avoids stale closure reads).
@@ -46,6 +47,7 @@ export default function ChatPage() {
     setStreamError(null)
     setPendingApprovals(false)
     setHasActiveBgTasks(false)
+    setStreamEndedAt(0)
     setPendingUserMessage(null)
     pausedRef.current = false
     setSidebarOpen(false)
@@ -91,11 +93,13 @@ export default function ChatPage() {
           // reset effect (which may have fired when navigate() created a new conv).
           pausedRef.current = true
           setIsStreaming(false)
+          setStreamEndedAt(Date.now())
           setPendingApprovals(true)
           setPendingUserMessage(message)
         },
         onDone: (metadata: SendMessageResponse['metadata'], status?: 'error' | 'paused' | null) => {
           setIsStreaming(false)
+          setStreamEndedAt(Date.now())
           setHasActiveBgTasks(!!metadata?.has_active_bg_tasks)
           const wasPaused = pausedRef.current
           pausedRef.current = false
@@ -153,6 +157,7 @@ export default function ChatPage() {
           // the user sees the partial response. The next refetch (triggered
           // below) will surface the persisted error-status message.
           setIsStreaming(false)
+          setStreamEndedAt(Date.now())
           setStreamError(err)
           queryClient
             .invalidateQueries({ queryKey: ['messages', orgId, targetConvId] })
@@ -178,6 +183,7 @@ export default function ChatPage() {
   const handleAbort = useCallback(() => {
     abortControllerRef.current?.abort()
     setIsStreaming(false)
+    setStreamEndedAt(Date.now())
     setStreamingContent('')
     setPendingUserMessage(null)
   }, [])
@@ -219,6 +225,7 @@ export default function ChatPage() {
               streamError={streamError}
               pendingApprovals={pendingApprovals}
               hasActiveBgTasks={hasActiveBgTasks}
+              streamEndedAt={streamEndedAt}
               onBgTasksResolved={handleBgTasksResolved}
               onPendingApprovalsDetected={handlePendingApprovalsDetected}
               pendingUserMessage={pendingUserMessage}

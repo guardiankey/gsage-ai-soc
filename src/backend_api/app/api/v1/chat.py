@@ -51,6 +51,7 @@ from src.backend_api.app.schemas.chat import (
     SendMessageResponse,
 )
 from src.backend_api.app.services.agent_factory import AGENT_REGISTRY, DEFAULT_AGENT_ID, _fetch_tool_catalog, build_agent, load_interface_profiles
+from src.backend_api.app.services.agent_continuation import process_auto_approvals
 import logging
 
 from src.shared.database import get_db
@@ -354,99 +355,10 @@ async def _process_auto_approvals(
     ctx: TenantContext,
     db: AsyncSession,
 ) -> tuple[list[str], list[str]]:
-    """Partition pending approvals into auto-approved vs manual.
-
-    For each id flagged as auto-approve (DB toolconfig > env > default False),
-    immediately resolves the Agno approval row as ``approved`` and dispatches
-    the continuation Celery task — the same path used when a human clicks
-    "Approve" in the UI.
-
-    Returns ``(auto_ids, manual_ids)``. Auto-resolved ids should be excluded
-    from delegation processing and from the ``run_paused`` payload emitted
-    to the client.
-
-    Errors per approval are logged and the id is treated as manual to fail
-    safe (a human is still asked).
-    """
-    if not approval_ids:
-        return [], []
-
-    from src.backend_api.app.services.agent_factory import get_agno_db
-    from src.backend_api.app.services.tool_auto_approve import is_auto_approve
-
-    agno_db = get_agno_db()
-    auto_ids: list[str] = []
-    manual_ids: list[str] = []
-
-    for ap_id in approval_ids:
-        try:
-            ap_row = await agno_db.get_approval(ap_id)
-            if ap_row is None:
-                log.warning("auto_approve: approval %s not found in Agno DB", ap_id)
-                manual_ids.append(ap_id)
-                continue
-
-            tool_name: str = ap_row.get("tool_name") or "*"
-            tool_args: dict = dict(ap_row.get("tool_args") or {})
-            # Unwrap proxy tool names (run_discovered_tool / run_approved_tool)
-            if tool_name in ("run_discovered_tool", "run_approved_tool") and "tool_name" in tool_args:
-                tool_name = tool_args["tool_name"] or tool_name
-
-            enabled = await is_auto_approve(
-                org_id=ctx.org_id, tool_name=tool_name,
-            )
-            if not enabled:
-                manual_ids.append(ap_id)
-                continue
-
-            updated = await agno_db.update_approval(
-                ap_id,
-                expected_status="pending",
-                status="approved",
-                resolved_by=str(ctx.user_id),
-                resolved_at=int(datetime.now(timezone.utc).timestamp()),
-                resolution_data={
-                    "action": "approve",
-                    "auto_approved": True,
-                    "comment": "Auto-approved by tool config",
-                },
-            )
-            if updated is None:
-                log.warning(
-                    "auto_approve: update_approval returned None for ap=%s tool=%s",
-                    ap_id, tool_name,
-                )
-                manual_ids.append(ap_id)
-                continue
-
-            try:
-                from src.backend_api.app.tasks.agent_continuation import (  # noqa: PLC0415
-                    continue_after_approval_resolved,
-                )
-                cast(Any, continue_after_approval_resolved).delay(
-                    ap_id, str(ctx.org_id)
-                )
-            except Exception as cont_exc:
-                log.error(
-                    "auto_approve: failed to dispatch continuation ap=%s: %s",
-                    ap_id, cont_exc, exc_info=True,
-                )
-                # Continuation failed but the approval row is already
-                # resolved — leaving it in manual_ids would mislead the UI.
-                # Keep it in auto_ids and surface via logs.
-            auto_ids.append(ap_id)
-            log.info(
-                "auto-approval: tool=%s approval=%s org=%s user=%s",
-                tool_name, ap_id, ctx.org_id, ctx.user_id,
-            )
-        except Exception as exc:
-            log.error(
-                "auto_approve: unexpected error for ap=%s: %s",
-                ap_id, exc, exc_info=True,
-            )
-            manual_ids.append(ap_id)
-
-    return auto_ids, manual_ids
+    """Thin wrapper — delegates to the shared implementation in agent_continuation."""
+    return await process_auto_approvals(
+        approval_ids=approval_ids, ctx=ctx, db=db,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1104,6 +1016,73 @@ async def list_messages(
         pass  # best-effort; polling hints are not critical
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# 6b. Lightweight message-change check (polling-friendly)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/orgs/{org_id}/chat/conversations/{conv_id}/messages/check",
+    summary="Lightweight check for new messages (returns last-message-id only)",
+)
+async def check_messages(
+    org_id: uuid.UUID,
+    conv_id: uuid.UUID,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Return ``last_message_id`` so the frontend can poll cheaply.
+
+    The frontend compares this with a cached value; only when it changes
+    does it fetch the full ``GET /messages`` list.  This avoids pulling
+    the entire conversation history on every 5 s polling tick.
+    """
+    ctx.require_permission("sessions:read")
+    session = await _get_conv_or_404(conv_id, ctx, db)
+
+    from agno.db.base import SessionType
+    from agno.run import RunStatus
+    from src.backend_api.app.services.agent_factory import get_agno_db
+
+    agno_session = await get_agno_db().get_session(
+        session_id=session.agno_session_id,
+        session_type=SessionType.AGENT,
+    )
+
+    last_message_id: Optional[str] = None
+    message_count = 0
+
+    if agno_session is not None:
+        runs = list(getattr(agno_session, "runs", None) or [])
+        # Only top-level runs (exclude team-member sub-runs).
+        runs = [r for r in runs if getattr(r, "parent_run_id", None) is None]
+
+        message_count = sum(
+            1 for r in runs
+            if getattr(r, "status", None) != RunStatus.cancelled
+        )
+
+        # Find the id of the last user/assistant message in the last
+        # non-cancelled run.
+        for run in reversed(runs):
+            if getattr(run, "status", None) == RunStatus.cancelled:
+                continue
+            for msg in reversed(list(getattr(run, "messages", None) or [])):
+                role = getattr(msg, "role", None)
+                if role in ("user", "assistant"):
+                    mid = getattr(msg, "id", None)
+                    if mid is not None:
+                        last_message_id = str(mid)
+                        break
+            if last_message_id is not None:
+                break
+
+    return {
+        "last_message_id": last_message_id,
+        "message_count": message_count,
+    }
 
 
 # ---------------------------------------------------------------------------

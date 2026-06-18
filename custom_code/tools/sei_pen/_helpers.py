@@ -708,16 +708,25 @@ async def listar_processos_facil(
     """Agent-friendly process listing with smart defaults and navigation hints.
 
     Defaults to showing the current user's processes (``apenasMeus='S'``) with
-    a page size of 10. Returns structured hints so the AI agent can guide the
-    user naturally (pagination, filters, drill-down).
+    a page size of 10.  When *apenas_meus* is ``False`` (show all unit processes)
+    the helper automatically adds ``tipo='G'`` (generated processes) so the
+    listing is scoped to the unit's own processes rather than returning an
+    unfiltered (potentially empty) result set.
     """
+    # When the caller explicitly asks for "not only mine", default to
+    # generated processes so the listing is scoped meaningfully (matching
+    # the dashboard's _list_meus_processos default).
+    effective_tipo: Optional[str] = tipo
+    if not apenas_meus and not effective_tipo:
+        effective_tipo = "G"
+
     params: dict[str, Any] = {
         "limit": str(limit),
         "start": str(start),
         "apenasMeus": "S" if apenas_meus else "N",
     }
-    if tipo:
-        params["tipo"] = tipo
+    if effective_tipo:
+        params["tipo"] = effective_tipo
     if usuario:
         params["usuario"] = usuario
     if id_unidade:
@@ -746,8 +755,9 @@ async def listar_processos_facil(
     if not processos:
         hints.append(
             "No processes found with the current filters. "
-            "Try setting apenasMeus='N' (via apenas_meus=false) to see all "
-            "unit processes, or change tipo='G'/'R'."
+            "When apenas_meus=false, tipo='G' (generated) is applied "
+            "automatically. Override with tipo='R' for received processes, "
+            "or pass tipo explicitly to change the search mode."
         )
 
     return {
@@ -757,7 +767,7 @@ async def listar_processos_facil(
         "start": start,
         "filtros_aplicados": {
             "apenasMeus": "S" if apenas_meus else "N",
-            **({"tipo": tipo} if tipo else {}),
+            **({"tipo": effective_tipo} if effective_tipo else {}),
             **({"usuario": usuario} if usuario else {}),
             **({"idUnidade": id_unidade} if id_unidade else {}),
         },
@@ -838,9 +848,12 @@ async def ver_processo_completo(
             # 3) Per-document metadata.
             if incluir_metadados_documentos and docs_list:
                 async def _doc_meta(doc: dict) -> dict:
-                    doc_id = str(doc.get("idDocumento") or "")
+                    # /documento/listar/{proc} returns ``id`` (top-level) as the
+                    # internal document ID; /documento/interno/consultar/{id}
+                    # uses that same numeric ID in its path.
+                    doc_id = str(doc.get("id") or doc.get("idDocumento") or "")
                     if not doc_id:
-                        return {**doc, "_metadados_error": "Missing idDocumento"}
+                        return {**doc, "_metadados_error": "Missing id (document ID)"}
                     try:
                         body = await client.request(
                             "GET",

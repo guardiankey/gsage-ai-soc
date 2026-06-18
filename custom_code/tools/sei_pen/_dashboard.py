@@ -102,31 +102,49 @@ async def _resolve_unidade_info(
 ) -> dict:
     """Resolve unit name (sigla) for a given unit ID.
 
-    Tries to look up the unit via ``GET /unidade/pesquisar`` and match by
-    ``idUnidade``. Falls back to the raw ID when the name is unresolvable
-    (network error, unit not found, etc.).
+    Tries two endpoints in order:
+    1. ``GET /unidade/pesquisar?filter=<id>`` — text search by ID.
+    2. ``GET /unidade/pesquisar_outras?id=<id>`` — explicit ID lookup.
+
+    Falls back to the raw ID when the name is unresolvable.
     """
     target = unidade_override or unidade_id
     if not target:
         return {"id": "", "nome": ""}
 
-    try:
-        body = await client.request(
-            "GET",
-            "/unidade/pesquisar",
-            params={"filter": target, "limit": 10, "start": 0},
-            unidade_override=unidade_override,
-        )
-        unidades = _as_list(body.get("data"))
-        for u in unidades:
-            uid = str(u.get("idUnidade") or u.get("id") or "")
-            if uid == target:
-                nome = str(u.get("sigla") or u.get("descricao") or u.get("nome") or target)
-                return {"id": target, "nome": nome}
-        # Not found — fall back to the raw ID.
-        return {"id": target, "nome": target}
-    except SeiPenError:
-        return {"id": target, "nome": target}
+    async def _try_lookup(path: str, query: dict) -> Optional[str]:
+        try:
+            body = await client.request(
+                "GET", path, params=query,
+                unidade_override=unidade_override,
+            )
+            unidades = _as_list(body.get("data"))
+            for u in unidades:
+                uid = str(u.get("idUnidade") or u.get("id") or "")
+                if uid == target:
+                    return str(u.get("sigla") or u.get("descricao") or u.get("nome") or "")
+            return None
+        except SeiPenError:
+            return None
+
+    # 1) Text search (finds by substring match on sigla/descricao).
+    nome = await _try_lookup(
+        "/unidade/pesquisar",
+        {"filter": target, "limit": 10, "start": 0},
+    )
+    if nome:
+        return {"id": target, "nome": nome}
+
+    # 2) Explicit ID lookup (``id`` query param on the "outras" endpoint).
+    nome = await _try_lookup(
+        "/unidade/outras/pesquisar",
+        {"id": target, "limit": 5, "start": 0},
+    )
+    if nome:
+        return {"id": target, "nome": nome}
+
+    # Not found — fall back to the raw ID.
+    return {"id": target, "nome": target}
 
 
 async def _list_meus_processos(

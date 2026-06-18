@@ -178,7 +178,8 @@ class SeiPenReadTool(BaseTool):
                     "ID for detail lookup. Optional for: unidade.pesquisar_outras, "
                     "unidade.pesquisar_texto_padrao, processo.pesquisar_assunto, "
                     "grupo_acompanhamento.listar, modelo_documento.listar_grupo, "
-                    "modelo_documento.listar, processo.listar."
+                    "modelo_documento.listar, processo.listar, "
+                    "documento.secao_listar."
                 ),
             },
             # ── Document params ───────────────────────────────────────────────
@@ -202,7 +203,7 @@ class SeiPenReadTool(BaseTool):
                 "type": "string",
                 "description": (
                     "Process internal ID (numeric). "
-                    "Required for: documento.listar_em_processo."
+                    "Required for: documento.listar_em_processo, atividade.listar."
                 ),
             },
             # ── Process / tracking params ─────────────────────────────────────

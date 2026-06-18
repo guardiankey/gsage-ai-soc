@@ -180,6 +180,20 @@ export async function listMessages(
   }
 }
 
+export interface MessageCheck {
+  last_message_id: string | null
+  message_count: number
+}
+
+/** Lightweight poll — returns only the last message id so the UI can
+ *  decide whether to refetch the full message list. */
+export async function checkMessages(orgId: string, convId: string): Promise<MessageCheck> {
+  const response = await apiClient.get(
+    `/v1/orgs/${orgId}/chat/conversations/${convId}/messages/check`
+  )
+  return response.data
+}
+
 export async function sendMessage(
   orgId: string,
   convId: string,

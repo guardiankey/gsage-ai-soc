@@ -590,6 +590,7 @@ async def continue_after_approval(
     if getattr(run_output, "status", None) == RunStatus.paused:
         new_approval_ids = extract_approval_ids_from_run_output(run_output)
         if new_approval_ids:
+            # Create delegation records for the nested approval(s).
             await process_approval_delegations(
                 approval_ids=new_approval_ids,
                 ctx=ctx,
@@ -598,6 +599,19 @@ async def continue_after_approval(
                 agno_session_id=agno_session_id,
                 run_id=str(getattr(run_output, "run_id", "") or ""),
             )
+            # Auto-approve any that qualify and dispatch their Celery
+            # continuation tasks.  Without this step nested approvals
+            # would be orphaned — no one processes them.
+            auto_ids, manual_ids = await process_auto_approvals(
+                approval_ids=new_approval_ids,
+                ctx=ctx,
+                db=db,
+            )
+            if auto_ids:
+                log.info(
+                    "continue_after_approval: nested auto-approved ids=%s",
+                    auto_ids,
+                )
             try:
                 await db.commit()
             except Exception as exc:
@@ -616,6 +630,111 @@ async def continue_after_approval(
         approval_id, tenant_session.id, len(response_text),
     )
     return tenant_session, response_text
+
+
+# ---------------------------------------------------------------------------
+# Auto-approval processing (shared by SSE stream and nested continuations)
+# ---------------------------------------------------------------------------
+
+
+async def process_auto_approvals(
+    *,
+    approval_ids: list[str],
+    ctx: TenantContext,
+    db: AsyncSession,
+) -> tuple[list[str], list[str]]:
+    """Partition pending approvals into auto-approved vs manual.
+
+    For each id flagged as auto-approve (DB toolconfig > env > default False),
+    immediately resolves the Agno approval row as ``approved`` and dispatches
+    the continuation Celery task — the same path used when a human clicks
+    "Approve" in the UI.
+
+    Returns ``(auto_ids, manual_ids)``. Auto-resolved ids should be excluded
+    from delegation processing and from the ``run_paused`` payload emitted
+    to the client.
+
+    Errors per approval are logged and the id is treated as manual to fail
+    safe (a human is still asked).
+    """
+    if not approval_ids:
+        return [], []
+
+    from datetime import datetime, timezone as _tz
+    from typing import Any, cast
+
+    from src.backend_api.app.services.tool_auto_approve import is_auto_approve
+
+    agno_db = get_agno_db()
+    auto_ids: list[str] = []
+    manual_ids: list[str] = []
+
+    for ap_id in approval_ids:
+        try:
+            ap_row = await agno_db.get_approval(ap_id)
+            if ap_row is None:
+                log.warning("auto_approve: approval %s not found in Agno DB", ap_id)
+                manual_ids.append(ap_id)
+                continue
+
+            tool_name: str = ap_row.get("tool_name") or "*"
+            tool_args: dict = dict(ap_row.get("tool_args") or {})
+            # Unwrap proxy tool names (run_discovered_tool / run_approved_tool)
+            if tool_name in ("run_discovered_tool", "run_approved_tool") and "tool_name" in tool_args:
+                tool_name = tool_args["tool_name"] or tool_name
+
+            enabled = await is_auto_approve(
+                org_id=ctx.org_id, tool_name=tool_name,
+            )
+            if not enabled:
+                manual_ids.append(ap_id)
+                continue
+
+            updated = await agno_db.update_approval(
+                ap_id,
+                expected_status="pending",
+                status="approved",
+                resolved_by=str(ctx.user_id),
+                resolved_at=int(datetime.now(_tz.utc).timestamp()),
+                resolution_data={
+                    "action": "approve",
+                    "auto_approved": True,
+                    "comment": "Auto-approved by tool config",
+                },
+            )
+            if updated is None:
+                log.warning(
+                    "auto_approve: update_approval returned None for ap=%s tool=%s",
+                    ap_id, tool_name,
+                )
+                manual_ids.append(ap_id)
+                continue
+
+            try:
+                from src.backend_api.app.tasks.agent_continuation import (  # noqa: PLC0415
+                    continue_after_approval_resolved,
+                )
+                cast(Any, continue_after_approval_resolved).delay(
+                    ap_id, str(ctx.org_id)
+                )
+            except Exception as cont_exc:
+                log.error(
+                    "auto_approve: failed to dispatch continuation ap=%s: %s",
+                    ap_id, cont_exc, exc_info=True,
+                )
+            auto_ids.append(ap_id)
+            log.info(
+                "auto-approval: tool=%s approval=%s org=%s user=%s",
+                tool_name, ap_id, ctx.org_id, ctx.user_id,
+            )
+        except Exception as exc:
+            log.error(
+                "auto_approve: unexpected error for ap=%s: %s",
+                ap_id, exc, exc_info=True,
+            )
+            manual_ids.append(ap_id)
+
+    return auto_ids, manual_ids
 
 
 # ---------------------------------------------------------------------------

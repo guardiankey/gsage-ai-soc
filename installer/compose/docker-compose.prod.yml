@@ -247,6 +247,8 @@ services:
     env_file: .env
     extra_hosts:
       - "mail:host-gateway"
+    volumes:
+      - ${GSAGE_CUSTOM_CODE_PATH:-/opt/gsage/shared/custom_code}:/app/custom_code:ro
     command: >
       python -W ignore::DeprecationWarning -m celery -A src.backend_api.app.celery_app worker
       --queues=celery --concurrency=1 --loglevel=info -n default@%h
