@@ -14,6 +14,7 @@ found ``resolved_id`` is set; when zero or many match it is ``None`` and
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import json
 import logging
 import uuid
@@ -542,6 +543,33 @@ async def _noop() -> None:
     return None
 
 
+def _resolve_new_conteudo(
+    secoes: list[dict],
+    section: dict,
+    by_id: dict[str, dict],
+    by_modelo: dict[str, dict],
+) -> str:
+    """Find the new ``conteudo`` for *section* in the user-supplied *secoes* list.
+
+    Matching is by ``id`` first, then ``idSecaoModelo``.
+    """
+    sid = str(section.get("id", ""))
+    smodelo = str(section.get("idSecaoModelo", ""))
+    for item in secoes:
+        item_id = str(item.get("id", "")) if item.get("id") is not None else ""
+        item_modelo = (
+            str(item.get("idSecaoModelo", ""))
+            if item.get("idSecaoModelo") is not None
+            else ""
+        )
+        if item_id and item_id == sid:
+            return str(item["conteudo"])
+        if item_modelo and item_modelo == smodelo:
+            return str(item["conteudo"])
+    # Should not happen — caller guarantees a match.
+    return str(section.get("conteudo") or "")
+
+
 async def atualizar_documento_conteudo(
     *,
     client: SeiPenClient,
@@ -596,8 +624,12 @@ async def atualizar_documento_conteudo(
         if s.get("idSecaoModelo") is not None
     }
 
-    # 2) Resolve target sections.
-    payload: list[dict[str, Any]] = []
+    # 2) Build a full payload — SEI EditorRN::adicionarVersaoInternoControlado
+    #    REQUIRES exactly the same number of sections as in the database.
+    #    Sending a subset throws "Conteúdo do documento incompleto."
+    #    We must include every section, keeping the original content for
+    #    sections the caller did not touch.
+    changed: dict[str, None] = {}  # keys: str(id) or str(idSecaoModelo)
 
     if conteudo_html is not None:
         editable = [s for s in current if _is_editable(s)]
@@ -607,22 +639,16 @@ async def atualizar_documento_conteudo(
             raise HelperError(
                 f"Document {documento} has no editable section to write into."
             )
-        payload = [
-            {
-                "id": s.get("id"),
-                "idSecaoModelo": s.get("idSecaoModelo"),
-                "conteudo": conteudo_html,
-            }
-            for s in targets
-        ]
+        for s in targets:
+            changed[str(s.get("id"))] = None
     else:
-        for idx, item in enumerate(secoes or []):
+        assert secoes is not None
+        for idx, item in enumerate(secoes):
             if not isinstance(item, dict):
                 raise HelperError(
                     f"secoes[{idx}] must be an object with id/idSecaoModelo + conteudo."
                 )
-            conteudo = item.get("conteudo")
-            if conteudo is None:
+            if item.get("conteudo") is None:
                 raise HelperError(f"secoes[{idx}].conteudo is required.")
             ref_id = item.get("id")
             ref_modelo = item.get("idSecaoModelo")
@@ -641,22 +667,47 @@ async def atualizar_documento_conteudo(
                     f"secoes[{idx}] targets a read-only section "
                     f"(id={match.get('id')}); cannot be updated."
                 )
-            payload.append(
-                {
-                    "id": match.get("id"),
-                    "idSecaoModelo": match.get("idSecaoModelo"),
-                    "conteudo": str(conteudo),
-                }
+            changed[str(match.get("id"))] = None
+
+    # Build full payload: every section, original or new content.
+    # SEI's dataToUtf8 applies htmlspecialchars BEFORE utf8_encode on every
+    # read, so section content comes back with double-encoded HTML entities
+    # (e.g. &amp;lt; instead of &lt;).  Before sending untouched content
+    # back we must unescape it, or the stored value gets corrupted
+    # progressively at each roundtrip.
+    payload: list[dict[str, Any]] = []
+    for s in current:
+        sid = str(s.get("id"))
+        if sid in changed:
+            new_conteudo = (
+                str(conteudo_html)
+                if conteudo_html is not None
+                else _resolve_new_conteudo(secoes or [], s, by_id, by_modelo)
             )
+        else:
+            new_conteudo = _html.unescape(s.get("conteudo") or "")
+        payload.append(
+            {
+                "id": s.get("id"),
+                "idSecaoModelo": s.get("idSecaoModelo"),
+                "conteudo": new_conteudo,
+            }
+        )
 
     if not payload:
         raise HelperError("No sections to update after resolution.")
 
     # 3) Single batched alterar call.
+    # IMPORTANT: ensure_ascii=True — the SEI EncodingMiddleware transcodes
+    # the form body to ISO-8859-1 BEFORE json_decode runs; non-ASCII bytes
+    # break json_decode (PHP expects strict UTF-8). With ensure_ascii=True
+    # every non-ASCII char becomes a \uXXXX escape (pure ASCII), surviving
+    # the transcoding. The route itself converts back to ISO-8859-1 later
+    # via mb_convert_encoding.
     alterar_form = {
         "documento": documento,
         "versao": versao,
-        "secoes": json.dumps(payload, ensure_ascii=False),
+        "secoes": json.dumps(payload, ensure_ascii=True),
     }
     alterar_body = await client.request(
         "POST",
@@ -668,6 +719,6 @@ async def atualizar_documento_conteudo(
         "idDocumento": documento,
         "versaoAnterior": versao,
         "novaVersao": _extract_data(alterar_body),
-        "secoesAtualizadas": len(payload),
-        "ids": [p.get("id") for p in payload],
+        "secoesAtualizadas": len(changed),
+        "ids": list(changed.keys()),
     }

@@ -293,21 +293,24 @@ _CURRENT_SECTIONS = _envelope(
                 "idSecaoModelo": "100",
                 "PrincipalSecaoDocumento": "S",
                 "somenteLeitura": "N",
-                "conteudo": "<p>old principal</p>",
+                # dataToUtf8 double-encodes: & → &amp; on every read.
+                # The payload sent back must html.unescape this to prevent
+                # progressive corruption.
+                "conteudo": "&amp;lt;p&amp;gt;old principal&amp;lt;/p&amp;gt;",
             },
             {
                 "id": "11",
                 "idSecaoModelo": "101",
                 "PrincipalSecaoDocumento": "N",
                 "somenteLeitura": "N",
-                "conteudo": "<p>old extra</p>",
+                "conteudo": "&amp;lt;p&amp;gt;old extra&amp;lt;/p&amp;gt;",
             },
             {
                 "id": "12",
                 "idSecaoModelo": "102",
                 "PrincipalSecaoDocumento": "N",
                 "somenteLeitura": "S",
-                "conteudo": "<p>read only</p>",
+                "conteudo": "&amp;lt;p&amp;gt;read only&amp;lt;/p&amp;gt;",
             },
         ],
     }
@@ -328,15 +331,18 @@ async def test_atualizar_quick_mode_writes_principal():
         documento="42",
         conteudo_html="<p>new</p>",
     )
-    assert result["secoesAtualizadas"] == 1
+    assert result["secoesAtualizadas"] == 1  # only principal changed
     assert result["novaVersao"] == "6"
     posted = client.calls[-1]["data"]
     assert posted["documento"] == "42"
     assert posted["versao"] == "5"
     payload = json.loads(posted["secoes"])
-    assert len(payload) == 1
+    assert len(payload) == 3  # SEI requires ALL sections
     assert payload[0]["id"] == "10"
     assert payload[0]["conteudo"] == "<p>new</p>"
+    # untouched sections: html.unescape("&amp;lt;") → "&lt;"
+    assert payload[1]["conteudo"] == "&lt;p&gt;old extra&lt;/p&gt;"
+    assert payload[2]["conteudo"] == "&lt;p&gt;read only&lt;/p&gt;"
 
 
 @pytest.mark.asyncio
@@ -358,7 +364,8 @@ async def test_atualizar_batch_mode_multiple_sections():
     )
     assert result["secoesAtualizadas"] == 2
     payload = json.loads(client.calls[-1]["data"]["secoes"])
-    assert {p["id"] for p in payload} == {"10", "11"}
+    assert len(payload) == 3  # SEI requires ALL sections
+    assert {p["id"] for p in payload} == {"10", "11", "12"}
 
 
 @pytest.mark.asyncio
