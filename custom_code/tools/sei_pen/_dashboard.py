@@ -94,14 +94,64 @@ def _idle_bucket(days: int) -> str:
     return _BUCKET_STALE
 
 
+async def _resolve_unidade_info(
+    client: SeiPenClient,
+    unidade_id: str,
+    *,
+    unidade_override: Optional[str] = None,
+) -> dict:
+    """Resolve unit name (sigla) for a given unit ID.
+
+    Tries to look up the unit via ``GET /unidade/pesquisar`` and match by
+    ``idUnidade``. Falls back to the raw ID when the name is unresolvable
+    (network error, unit not found, etc.).
+    """
+    target = unidade_override or unidade_id
+    if not target:
+        return {"id": "", "nome": ""}
+
+    try:
+        body = await client.request(
+            "GET",
+            "/unidade/pesquisar",
+            params={"filter": target, "limit": 10, "start": 0},
+            unidade_override=unidade_override,
+        )
+        unidades = _as_list(body.get("data"))
+        for u in unidades:
+            uid = str(u.get("idUnidade") or u.get("id") or "")
+            if uid == target:
+                nome = str(u.get("sigla") or u.get("descricao") or u.get("nome") or target)
+                return {"id": target, "nome": nome}
+        # Not found — fall back to the raw ID.
+        return {"id": target, "nome": target}
+    except SeiPenError:
+        return {"id": target, "nome": target}
+
+
 async def _list_meus_processos(
-    client: SeiPenClient, *, unidade_override: Optional[str], limit: int
+    client: SeiPenClient,
+    *,
+    unidade_override: Optional[str],
+    limit: int,
+    tipo: Optional[str] = "G",
+    apenas_meus: bool = False,
 ) -> tuple[list[dict], bool]:
-    """Fetch the caller's open processes (apenasMeus='S'), capped."""
+    """Fetch the caller's open processes, capped.
+
+    Defaults to ``tipo='G'`` (generated processes) to match the most common
+    SEI usage where "my processes" means processes created by the unit.
+    ``apenas_meus=True`` switches to the stricter "assigned to me" filter.
+    """
+    params: dict[str, Any] = {"limit": limit, "start": 0}
+    if tipo:
+        params["tipo"] = tipo
+    if apenas_meus:
+        params["apenasMeus"] = "S"
     body = await client.request(
         "GET",
         "/processo/listar",
-        params={"apenasMeus": "S", "limit": limit, "start": 0},
+        params=params,
         unidade_override=unidade_override,
     )
     rows = _as_list(body.get("data"))
@@ -113,11 +163,14 @@ async def _list_meus_processos(
 
 
 async def meus_processos(
-    client: SeiPenClient, *, unidade_override: Optional[str] = None
+    client: SeiPenClient,
+    *,
+    unidade_override: Optional[str] = None,
+    tipo: Optional[str] = "G",
 ) -> dict:
-    """Open processes assigned to the caller in the current unit."""
+    """Open processes of the caller in the current unit."""
     rows, truncated = await _list_meus_processos(
-        client, unidade_override=unidade_override, limit=_MAX_PROCESSES
+        client, unidade_override=unidade_override, limit=_MAX_PROCESSES, tipo=tipo
     )
 
     sobrestados = retorno_prog = retorno_atraso = 0
@@ -173,6 +226,7 @@ async def prazos(
     *,
     unidade_override: Optional[str] = None,
     top_n: int = 20,
+    tipo: Optional[str] = "G",
 ) -> dict:
     """Idle time per process ("tempo parado na caixa").
 
@@ -181,7 +235,7 @@ async def prazos(
     days are computed as ``today − last activity date``.
     """
     rows, truncated = await _list_meus_processos(
-        client, unidade_override=unidade_override, limit=_MAX_PROCESSES
+        client, unidade_override=unidade_override, limit=_MAX_PROCESSES, tipo=tipo
     )
     probe = rows[:_MAX_ACTIVITY_PROBES]
     truncated = truncated or len(rows) > _MAX_ACTIVITY_PROBES
@@ -249,11 +303,14 @@ async def prazos(
 
 
 async def processos_por_tipo(
-    client: SeiPenClient, *, unidade_override: Optional[str] = None
+    client: SeiPenClient,
+    *,
+    unidade_override: Optional[str] = None,
+    tipo: Optional[str] = "G",
 ) -> dict:
     """Distribution of the caller's open processes across process types."""
     rows, truncated = await _list_meus_processos(
-        client, unidade_override=unidade_override, limit=_MAX_PROCESSES
+        client, unidade_override=unidade_override, limit=_MAX_PROCESSES, tipo=tipo
     )
     counts: Counter[str] = Counter()
     for r in rows:
@@ -273,7 +330,10 @@ async def processos_por_tipo(
 
 
 async def processos_por_assunto(
-    client: SeiPenClient, *, unidade_override: Optional[str] = None
+    client: SeiPenClient,
+    *,
+    unidade_override: Optional[str] = None,
+    tipo: Optional[str] = "G",
 ) -> dict:
     """Distribution of the caller's open processes across subjects.
 
@@ -281,7 +341,7 @@ async def processos_por_assunto(
     free-text specification (``descricao``) is used as a subject proxy.
     """
     rows, truncated = await _list_meus_processos(
-        client, unidade_override=unidade_override, limit=_MAX_PROCESSES
+        client, unidade_override=unidade_override, limit=_MAX_PROCESSES, tipo=tipo
     )
     counts: Counter[str] = Counter()
     for r in rows:

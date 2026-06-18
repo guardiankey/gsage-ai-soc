@@ -46,7 +46,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
   const { orgId } = useAuth()
   const queryClient = useQueryClient()
   const bottomRef = useRef<HTMLDivElement>(null)
-  const [prevMsgCount, setPrevMsgCount] = useState(0)
+  const [prevMsgCount, setPrevMsgCount] = useState<number | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['messages', orgId, conversationId],
@@ -80,13 +80,19 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
   // continuation appends a new assistant message — instead of waiting
   // for the 5 s polling cycle.  The 5 s polling remains as a fallback
   // if the SSE connection drops or the network is restrictive.
+  //
+  // We suppress events for 300 ms after our own stream ended (the
+  // backend emits a ``messages_updated`` right before closing the SSE
+  // stream; that event arrives within single-digit ms).  300 ms is
+  // enough to silence that duplicate while letting through the
+  // follow-up event from the Celery background-task continuation.
   useEffect(() => {
     if (!orgId || !conversationId) return
     const stop = subscribeConversationEvents(orgId, conversationId, () => {
       // Skip events that coincide with our own just-finished stream
       // (ChatPage.onDone already invalidates the messages query).
       if (isStreamingRef.current) return
-      if (Date.now() - streamEndedAtRef.current < 1500) return
+      if (Date.now() - streamEndedAtRef.current < 300) return
       queryClient.invalidateQueries({
         queryKey: ['messages', orgId, conversationId],
       })
@@ -102,10 +108,16 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
     }
   }, [data?.hasPendingApprovals, onPendingApprovalsDetected])
 
-  // When polling with active bg tasks, detect new messages and stop polling
+  // When polling with active bg tasks, detect new messages and stop polling.
+  // prevMsgCount starts as null and is seeded on first data load so the
+  // first message arrival during active bg tasks triggers resolution.
   useEffect(() => {
     const count = messages?.length ?? 0
-    if (hasActiveBgTasks && count > prevMsgCount && prevMsgCount > 0) {
+    if (prevMsgCount === null) {
+      setPrevMsgCount(count)
+      return
+    }
+    if (hasActiveBgTasks && count > prevMsgCount) {
       onBgTasksResolved?.()
     }
     setPrevMsgCount(count)

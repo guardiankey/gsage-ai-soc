@@ -23,7 +23,13 @@ from custom_code.tools.sei_pen._client import (
     resolve_base_url,
     with_hint,
 )
-from custom_code.tools.sei_pen._helpers import HelperError, listar_processos_facil, ver_documento_completo, ver_processo_completo
+from custom_code.tools.sei_pen._helpers import (
+    HelperError,
+    _resolve_protocolo,
+    listar_processos_facil,
+    ver_documento_completo,
+    ver_processo_completo,
+)
 from custom_code.tools.sei_pen._operations import BuildError, READ_OPERATIONS, build_request
 
 log = logging.getLogger(__name__)
@@ -34,6 +40,20 @@ READ_HELPER_OPS = (
     "processo.listar_facil",
     "processo.ver_completo",
 )
+
+# Operations whose ``protocolo`` parameter accepts a formatted SEI protocol
+# number (e.g. "000123.000002/2026-46") and needs transparent resolution
+# to a numeric internal ID via ``processo.pesquisar_geral``.
+_PROTOCOLO_OPS: set[str] = {
+    "processo.consultar",
+    "processo.consultar_atribuicao",
+    "processo.consultar_acompanhamento",
+    "processo.relacionamentos",
+    "processo.interessados_listar",
+    "processo.unidades_listar",
+    "processo.ciencia_listar",
+    "processo.sobrestamento_listar",
+}
 
 # Sorted list of all read operation IDs for the params schema enum
 _READ_OP_IDS = sorted(READ_OPERATIONS.keys()) + sorted(READ_HELPER_OPS)
@@ -471,6 +491,29 @@ class SeiPenReadTool(BaseTool):
         )
         unidade_override: Optional[str] = params.get("unidade")
 
+        # ── Resolve formatted protocol → numeric internal ID ──────────────────
+        if operation in _PROTOCOLO_OPS:
+            protocolo = params.get("protocolo")
+            if protocolo:
+                try:
+                    params["protocolo"] = await _resolve_protocolo(
+                        client,
+                        str(protocolo),
+                        unidade_override=unidade_override,
+                    )
+                except HelperError as exc:
+                    msg = str(exc)
+                    if exc.candidates:
+                        msg += "\n\nCandidates (use one of these ids):\n" + json.dumps(
+                            exc.candidates, ensure_ascii=False, indent=2
+                        )
+                    return self._failure(
+                        "INVALID_PARAMS",
+                        msg,
+                        execution_time_ms=round((time.perf_counter() - t0) * 1000),
+                    )
+            # Also resolve protocolo for processo.ver_completo (handled below).
+
         # ── High-level helper operations (orchestrate multiple WSSEI calls) ──
         if operation in READ_HELPER_OPS:
             try:
@@ -634,10 +677,16 @@ class SeiPenReadTool(BaseTool):
                     "'protocolo' (process protocol / internal ID) is required for "
                     "processo.ver_completo."
                 )
+            # Resolve formatted protocol → numeric ID before the multi-call chain.
+            protocolo = await _resolve_protocolo(
+                client,
+                str(protocolo),
+                unidade_override=unidade_override,
+            )
             return await ver_processo_completo(
                 client=client,
                 unidade_override=unidade_override,
-                protocolo=str(protocolo),
+                protocolo=protocolo,
                 incluir_documentos=bool(
                     params.get("incluir_documentos", True)
                 ),

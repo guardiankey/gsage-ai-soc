@@ -304,6 +304,13 @@ export function subscribeConversationEvents(
       }
       // Ignore ``connected`` and any other event types.
     },
+    onclose() {
+      // Server closed the connection cleanly.  fetch-event-source will
+      // NOT automatically retry on clean close without this handler.
+      // Throw so the library retries with backoff — the controller's
+      // abort() (called from cleanup) is the canonical way to stop.
+      throw new Error('SSE connection closed — retrying')
+    },
     onerror(err) {
       // Let fetch-event-source retry with backoff by NOT re-throwing.
       // The controller's abort() (called from cleanup) is the canonical

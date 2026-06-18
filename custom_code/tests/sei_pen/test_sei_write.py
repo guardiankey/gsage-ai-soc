@@ -240,7 +240,7 @@ async def test_processo_alterar(
     created_process: dict,
 ):
     # ``processo.alterar`` resolves the path as /processo/{protocolo}/alterar.
-    # The *formatted* protocol (e.g. ``Assefaz.000005/2026-80``) contains '/'
+    # The *formatted* protocol (e.g. ``000123.000005/2026-80``) contains '/'
     # and breaks the route; the internal numeric id (``procedimento``) is the
     # safe identifier here.
     protocolo = created_process.get("procedimento") or created_process.get("protocolo")

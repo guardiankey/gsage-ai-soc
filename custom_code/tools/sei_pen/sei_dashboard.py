@@ -132,6 +132,16 @@ class SeiPenDashboardTool(BaseTool):
                     "this request."
                 ),
             },
+            "tipo": {
+                "type": "string",
+                "enum": ["G", "R"],
+                "description": (
+                    "Search-mode flag for the /processo/listar endpoint: "
+                    "'G' = generated processes (default for dashboard views), "
+                    "'R' = received processes. "
+                    "Optional; defaults to 'G'."
+                ),
+            },
         },
         "additionalProperties": False,
     }
@@ -219,25 +229,29 @@ class SeiPenDashboardTool(BaseTool):
             timeout=float(self.timeout_seconds),
         )
         unidade_override: Optional[str] = params.get("unidade")
+        tipo: Optional[str] = params.get("tipo") or "G"
+        # Effective unit: explicit override → credential default → None
+        effective_unidade: Optional[str] = unidade_override or unidade_id
 
         try:
             if view == "meus_processos":
                 data = await views.meus_processos(
-                    client, unidade_override=unidade_override
+                    client, unidade_override=unidade_override, tipo=tipo
                 )
             elif view == "prazos":
                 data = await views.prazos(
                     client,
                     unidade_override=unidade_override,
                     top_n=int(params.get("top_n") or 20),
+                    tipo=tipo,
                 )
             elif view == "processos_por_tipo":
                 data = await views.processos_por_tipo(
-                    client, unidade_override=unidade_override
+                    client, unidade_override=unidade_override, tipo=tipo
                 )
             elif view == "processos_por_assunto":
                 data = await views.processos_por_assunto(
-                    client, unidade_override=unidade_override
+                    client, unidade_override=unidade_override, tipo=tipo
                 )
             elif view == "documentos_por_processo":
                 procedimento = params.get("procedimento")
@@ -273,9 +287,21 @@ class SeiPenDashboardTool(BaseTool):
                 execution_time_ms=round((time.perf_counter() - t0) * 1000),
             )
 
+        # ── Resolve unit name and attach to response ───────────────────────
+        if effective_unidade:
+            unidade_info = await views._resolve_unidade_info(
+                client,
+                effective_unidade,
+                unidade_override=unidade_override,
+            )
+        else:
+            unidade_info = {"id": "", "nome": ""}
+        data["unidade"] = unidade_info
+
         elapsed_ms = round((time.perf_counter() - t0) * 1000)
         log.info(
-            "sei_pen_dashboard: view=%s status=success elapsed_ms=%d", view, elapsed_ms
+            "sei_pen_dashboard: view=%s unidade=%s status=success elapsed_ms=%d",
+            view, effective_unidade, elapsed_ms,
         )
         return self._success(
             {"view": view, "data": data},

@@ -1046,3 +1046,145 @@ async def atualizar_documento_conteudo(
         "secoesAtualizadas": len(changed),
         "ids": list(changed.keys()),
     }
+
+
+# ── Protocol resolution (formatted → numeric ID) ────────────────────────────
+
+
+async def _resolve_protocolo(
+    client: SeiPenClient,
+    protocolo: str,
+    *,
+    unidade_override: Optional[str] = None,
+) -> str:
+    """Resolve a formatted SEI protocol to its numeric internal ID.
+
+    When *protocolo* is a pure integer it is returned as-is (already an
+    internal ID).  Otherwise a ``GET /processo/pesquisar`` call resolves the
+    formatted number (e.g. ``000123.000002/2026-46``) to the internal
+    ``idProcedimento``.
+
+    Returns the numeric ID string.
+
+    Raises :class:`HelperError` when the lookup returns zero or multiple
+    matches.
+    """
+    if not protocolo:
+        raise HelperError("'protocolo' is required.")
+
+    # Already a numeric internal ID — no resolution needed.
+    if protocolo.isdigit():
+        return protocolo
+
+    # Search by the formatted protocol number.
+    # ``/processo/pesquisar`` wraps results under ``resultado`` (flat list);
+    # ``/processo/listar`` uses ``data``.  Try both for robustness.
+    body = await client.request(
+        "GET",
+        "/processo/pesquisar",
+        params={
+            "palavrasChave": protocolo,
+            "limit": 30,
+            "start": 0,
+        },
+        unidade_override=unidade_override,
+    )
+    raw_data = body.get("resultado") or body.get("data")
+    if isinstance(raw_data, list):
+        rows = [r for r in raw_data if isinstance(r, dict)]
+    elif isinstance(raw_data, dict):
+        rows = [raw_data]
+    else:
+        rows = []
+
+    if not rows:
+        raise HelperError(
+            f"No process found for protocol '{protocolo}'. "
+            "Check the number or try processo.pesquisar_geral directly "
+            "with different keywords."
+        )
+
+    # ── Exact-match filter on ``protocoloFormatadoProcedimento`` ──────────
+    # SEI full-text search is broad — filter to rows whose formatted protocol
+    # matches the query exactly, then deduplicate by ``idProcedimento``.
+    norm_query = str(protocolo).strip()
+    exact: list[dict] = []
+    seen_ids: set[str] = set()
+    for r in rows:
+        proto = str(r.get("protocoloFormatadoProcedimento") or "").strip()
+        if proto == norm_query:
+            pid = str(r.get("idProcedimento") or "")
+            if pid and pid not in seen_ids:
+                seen_ids.add(pid)
+                exact.append(r)
+
+    # If the exact filter produces a single match, resolve immediately.
+    if len(exact) == 1:
+        numeric_id = str(exact[0].get("idProcedimento") or exact[0].get("id") or "")
+        if numeric_id:
+            return numeric_id
+
+    # ── Fall back to unfiltered rows (deduplicated) ──────────────────────
+    source = exact if exact else rows
+    # Deduplicate the fallback set as well.
+    if source is not exact:
+        deduped: list[dict] = []
+        seen_ids.clear()
+        for r in source:
+            pid = str(r.get("idProcedimento") or r.get("id") or "")
+            if pid and pid not in seen_ids:
+                seen_ids.add(pid)
+                deduped.append(r)
+        source = deduped
+
+    if not source:
+        raise HelperError(
+            f"No process found for protocol '{protocolo}'. "
+            "The search returned results but none matched the protocol "
+            "number exactly."
+        )
+
+    # ── Helper: extract flat or nested fields from a row ─────────────────
+    def _row_fields(r: dict) -> tuple[str, str, str]:
+        """Return (numeric_id, formatted_number, description) for a row."""
+        raw_attr = r.get("atributos")
+        attr = raw_attr if isinstance(raw_attr, dict) else {}
+        # /processo/pesquisar: flat idProcedimento, protocoloFormatadoProcedimento
+        # /processo/listar:   id, atributos.{idProcedimento, numero, descricao}
+        rid = str(
+            r.get("idProcedimento")
+            or r.get("id")
+            or attr.get("idProcedimento")
+            or ""
+        )
+        rnum = str(
+            r.get("protocoloFormatadoProcedimento")
+            or attr.get("numero")
+            or ""
+        )
+        rdesc = str(attr.get("descricao") or r.get("descricao") or "")[:120]
+        return rid, rnum, rdesc
+
+    if len(source) > 1:
+        candidates: list[dict] = []
+        for r in source[:10]:
+            rid, rnum, rdesc = _row_fields(r)
+            candidates.append({
+                "id": rid,
+                "numero": rnum,
+                "descricao": rdesc,
+            })
+        raise HelperError(
+            f"Multiple processes ({len(source)}) matched protocol "
+            f"'{protocolo}'. Use the numeric id from the candidates below.",
+            candidates=candidates,
+        )
+
+    # Exactly one match — extract the numeric id.
+    numeric_id, _, _ = _row_fields(source[0])
+    if not numeric_id:
+        raise HelperError(
+            f"Protocol '{protocolo}' resolved but the SEI response "
+            "contains no internal ID. This is a server-side anomaly."
+        )
+    return numeric_id

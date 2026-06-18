@@ -598,7 +598,7 @@ def build_request(
                 f"Required path param '{pp}' is missing for operation '{operation}'"
             )
         # URL-encode path param values so characters like '/' in formatted
-        # protocols (e.g. "Assefaz.000002/2026-46") don't break URL routing.
+        # protocols (e.g. "000123.000002/2026-46") don't break URL routing.
         path = path.replace("{" + pp + "}", quote(str(value), safe=""))
 
     # ── Validate non-path required params ────────────────────────────────────
