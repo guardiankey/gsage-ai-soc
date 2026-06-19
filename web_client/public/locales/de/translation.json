@@ -13,7 +13,8 @@
     "approvalRules": "Genehmigungsregeln",
     "datastores": "DataStores",
     "aiAgents": "KI-Agenten",
-    "admin": "Admin"
+    "admin": "Admin",
+    "prompts": "Prompt-Bibliothek"
   },
   "auth": {
     "signIn": "Anmelden",
@@ -106,7 +107,11 @@
     "mermaidCopySuccess": "Diagrammquelle in die Zwischenablage kopiert",
     "mermaidCopyError": "Diagrammquelle konnte nicht kopiert werden",
     "messageCopyError": "Nachricht konnte nicht kopiert werden",
-    "newConversationInFolder": "Neue Unterhaltung im Ordner"
+    "newConversationInFolder": "Neue Unterhaltung im Ordner",
+    "inputHintNewline": "Shift+Enter zum Senden · Enter für neue Zeile",
+    "promptLibrary": "Prompt-Bibliothek",
+    "enterSends": "Enter sendet Nachricht",
+    "enterNewline": "Enter fügt neue Zeile ein"
   },
   "knowledge": {
     "title": "Wissensdatenbank",
@@ -746,5 +751,64 @@
       "roleViewer": "Betrachter",
       "searchUsers": "Benutzer zum Hinzufügen suchen..."
     }
+  },
+  "prompts": {
+    "title": "Prompt-Bibliothek",
+    "subtitle": "Erstellen, organisieren und wiederverwenden von Prompt-Vorlagen",
+    "search": "Prompts durchsuchen...",
+    "noSearchResults": "Keine Prompts entsprechen Ihrer Suche",
+    "newPrompt": "Neuer Prompt",
+    "editPrompt": "Prompt bearbeiten",
+    "myPrompts": "Meine Prompts",
+    "myFavorites": "Favoriten",
+    "allPrompts": "Alle",
+    "personal": "Persönlich",
+    "department": "Abteilung",
+    "organization": "Organisation",
+    "scopeAll": "Alle",
+    "scopePersonal": "Persönlich",
+    "scopeDepartment": "Abteilung",
+    "scopeOrganization": "Organisation",
+    "noPrompts": "Noch keine Prompts. Erstellen Sie einen, um zu beginnen.",
+    "noFavorites": "Noch keine Favoriten. Klicken Sie auf den Stern, um einen hinzuzufügen.",
+    "confirmDelete": "Diesen Prompt löschen?",
+    "confirmDeleteDesc": "Diese Aktion kann nicht rückgängig gemacht werden. Der Prompt wird endgültig gelöscht.",
+    "createSuccess": "Prompt erstellt",
+    "createError": "Fehler beim Erstellen des Prompts",
+    "updateSuccess": "Prompt aktualisiert",
+    "updateError": "Fehler beim Aktualisieren des Prompts",
+    "deleteSuccess": "Prompt gelöscht",
+    "deleteError": "Fehler beim Löschen des Prompts",
+    "favoriteAdded": "Zu Favoriten hinzugefügt",
+    "favoriteRemoved": "Aus Favoriten entfernt",
+    "categoryCreated": "Kategorie erstellt",
+    "categoryCreateError": "Fehler beim Erstellen der Kategorie",
+    "categoryDeleteError": "Fehler beim Löschen der Kategorie",
+    "form": {
+      "title": "Titel",
+      "content": "Inhalt",
+      "description": "Kurzbeschreibung",
+      "category": "Kategorie",
+      "scope": "Sichtbarkeit",
+      "scopePersonal": "Nur ich",
+      "scopeDepartment": "Meine Abteilung",
+      "scopeOrganization": "Ganze Organisation",
+      "cancel": "Abbrechen",
+      "saving": "Speichern...",
+      "create": "Erstellen",
+      "update": "Speichern"
+    },
+    "categories": {
+      "title": "Kategorien",
+      "newCategory": "Neue Kategorie",
+      "noCategories": "Keine Kategorien",
+      "editCategory": "Kategorie bearbeiten",
+      "deleteTitle": "Kategorie löschen",
+      "deleteDesc": "Kategorie \"{{name}}\" löschen? Dies kann nicht rückgängig gemacht werden.",
+      "cannotDeleteNonEmpty": "Kategorie ist nicht leer. Entfernen Sie zuerst alle Prompts und Unterkategorien.",
+      "topLevel": "Keine (oberste Ebene)"
+    },
+    "categoryUpdated": "Kategorie aktualisiert",
+    "categoryUpdateError": "Fehler beim Aktualisieren der Kategorie"
   }
 }

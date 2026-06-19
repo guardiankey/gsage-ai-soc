@@ -26,6 +26,7 @@ const ProfilePage = lazy(() => import('@/pages/ProfilePage'))
 const ApiKeysPage = lazy(() => import('@/pages/ApiKeysPage'))
 const CredentialsPage = lazy(() => import('@/pages/CredentialsPage'))
 const DataStoresPage = lazy(() => import('@/pages/DataStoresPage'))
+const PromptLibraryPage = lazy(() => import('@/pages/PromptLibraryPage'))
 
 // Admin pages
 const AdminOrganizationPage = lazy(() => import('@/pages/admin/OrganizationPage'))
@@ -174,6 +175,14 @@ export default function App() {
                   element={
                     <Suspense fallback={<PageLoader />}>
                       <DataStoresPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/prompts"
+                  element={
+                    <Suspense fallback={<PageLoader />}>
+                      <PromptLibraryPage />
                     </Suspense>
                   }
                 />

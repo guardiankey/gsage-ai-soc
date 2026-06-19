@@ -27,6 +27,7 @@ from src.backend_api.app.api.v1 import (
     health,
     knowledge,
     org_settings,
+    prompts,
     scheduled_jobs,
     sessions,
 )
@@ -75,6 +76,11 @@ _org_router.include_router(background_tasks.router, prefix="/v1", tags=["Backgro
 _org_router.include_router(scheduled_jobs.router, prefix="/v1", tags=["Scheduled Jobs"])
 _org_router.include_router(approval_rules.router, prefix="/v1", tags=["Approval Rules"])
 _org_router.include_router(org_settings.router, prefix="/v1", tags=["Org Settings"])
+_org_router.include_router(
+    prompts.router,
+    prefix="/v1",
+    tags=["Prompts"],
+)
 _org_router.include_router(
     departments.router,
     prefix="/v1/orgs/{org_id}/depts",

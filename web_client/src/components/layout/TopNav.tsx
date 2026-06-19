@@ -2,17 +2,12 @@ import { Link, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   MessageSquare,
-  BookOpen,
   CheckSquare,
   Files,
-  Activity,
   Shield,
-  ShieldCheck,
   Menu,
   X,
   CalendarClock,
-  Database,
-  Settings,
 } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
@@ -26,14 +21,9 @@ import { usePendingApprovals } from '@/hooks/usePendingApprovals'
 
 const NAV_ITEMS = [
   { to: '/chat', labelKey: 'nav.chat', icon: MessageSquare, requiredPermission: 'sessions:read' },
-  { to: '/knowledge', labelKey: 'nav.knowledge', icon: BookOpen, requiredPermission: 'knowledge:read' },
   { to: '/approvals', labelKey: 'nav.approvals', icon: CheckSquare, requiredPermission: 'approvals:read' },
   { to: '/files', labelKey: 'nav.files', icon: Files, requiredPermission: 'files:upload' },
-  { to: '/tasks', labelKey: 'nav.tasks', icon: Activity, requiredPermission: 'agents:run' },
   { to: '/ai-agents', labelKey: 'nav.aiAgents', icon: CalendarClock, requiredPermission: 'scheduled_jobs:read' },
-  { to: '/approval-rules', labelKey: 'nav.approvalRules', icon: ShieldCheck, requiredPermission: 'approval_rules:read' },
-  { to: '/datastores', labelKey: 'nav.datastores', icon: Database, requiredPermission: 'datastores:read' },
-  { to: '/admin', labelKey: 'nav.admin', icon: Settings, requiredPermission: 'admin:access' },
 ]
 
 export function TopNav() {

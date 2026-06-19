@@ -13,7 +13,8 @@
     "approvalRules": "承認ルール",
     "datastores": "データストア",
     "aiAgents": "AIエージェント",
-    "admin": "管理"
+    "admin": "管理",
+    "prompts": "プロンプトライブラリ"
   },
   "auth": {
     "signIn": "サインイン",
@@ -106,7 +107,11 @@
     "mermaidCopySuccess": "ダイアグラムのソースをクリップボードにコピーしました",
     "mermaidCopyError": "ダイアグラムのソースのコピーに失敗しました",
     "messageCopyError": "メッセージのコピーに失敗しました",
-    "newConversationInFolder": "フォルダー内に新しい会話"
+    "newConversationInFolder": "フォルダー内に新しい会話",
+    "inputHintNewline": "Shift+Enterで送信 · Enterで改行",
+    "promptLibrary": "プロンプトライブラリ",
+    "enterSends": "Enterで送信",
+    "enterNewline": "Enterで改行"
   },
   "knowledge": {
     "title": "ナレッジベース",
@@ -746,5 +751,64 @@
       "roleViewer": "閲覧者",
       "searchUsers": "追加するユーザーを検索..."
     }
+  },
+  "prompts": {
+    "title": "プロンプトライブラリ",
+    "subtitle": "プロンプトテンプレートを作成、整理、再利用",
+    "search": "プロンプトを検索...",
+    "noSearchResults": "検索に一致するプロンプトはありません",
+    "newPrompt": "新規プロンプト",
+    "editPrompt": "プロンプトを編集",
+    "myPrompts": "マイプロンプト",
+    "myFavorites": "お気に入り",
+    "allPrompts": "すべて",
+    "personal": "個人",
+    "department": "部署",
+    "organization": "組織",
+    "scopeAll": "すべて",
+    "scopePersonal": "個人",
+    "scopeDepartment": "部署",
+    "scopeOrganization": "組織",
+    "noPrompts": "まだプロンプトがありません。作成して始めましょう。",
+    "noFavorites": "まだお気に入りがありません。スターアイコンをクリックして追加してください。",
+    "confirmDelete": "このプロンプトを削除しますか？",
+    "confirmDeleteDesc": "この操作は取り消せません。プロンプトは完全に削除されます。",
+    "createSuccess": "プロンプトを作成しました",
+    "createError": "プロンプトの作成に失敗しました",
+    "updateSuccess": "プロンプトを更新しました",
+    "updateError": "プロンプトの更新に失敗しました",
+    "deleteSuccess": "プロンプトを削除しました",
+    "deleteError": "プロンプトの削除に失敗しました",
+    "favoriteAdded": "お気に入りに追加しました",
+    "favoriteRemoved": "お気に入りから削除しました",
+    "categoryCreated": "カテゴリを作成しました",
+    "categoryCreateError": "カテゴリの作成に失敗しました",
+    "categoryDeleteError": "カテゴリの削除に失敗しました",
+    "form": {
+      "title": "タイトル",
+      "content": "内容",
+      "description": "簡単な説明",
+      "category": "カテゴリ",
+      "scope": "可視性",
+      "scopePersonal": "自分のみ",
+      "scopeDepartment": "自分の部署",
+      "scopeOrganization": "組織全体",
+      "cancel": "キャンセル",
+      "saving": "保存中...",
+      "create": "作成",
+      "update": "保存"
+    },
+    "categories": {
+      "title": "カテゴリ",
+      "newCategory": "新規カテゴリ",
+      "noCategories": "カテゴリがありません",
+      "editCategory": "カテゴリを編集",
+      "deleteTitle": "カテゴリを削除",
+      "deleteDesc": "カテゴリ「{{name}}」を削除しますか？この操作は取り消せません。",
+      "cannotDeleteNonEmpty": "カテゴリが空ではありません。先にすべてのプロンプトとサブカテゴリを削除してください。",
+      "topLevel": "なし（最上位）"
+    },
+    "categoryUpdated": "カテゴリを更新しました",
+    "categoryUpdateError": "カテゴリの更新に失敗しました"
   }
 }

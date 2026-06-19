@@ -36,6 +36,13 @@ from src.shared.models.channel_conversation import GSageChannelConversation
 # Knowledge base (stored in Weaviate)
 from src.shared.models.knowledge_base import GSageKnowledgeSource
 
+# Prompt library
+from src.shared.models.prompt import (
+    GSagePrompt,
+    GSagePromptCategory,
+    GSageUserPromptFavorite,
+)
+
 # Scheduled jobs
 from src.shared.models.scheduled_job import (
     GSageScheduledJob,

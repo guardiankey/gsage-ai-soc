@@ -25,6 +25,7 @@ _VIEWER_PERMISSIONS: frozenset[str] = frozenset(
         "sessions:read",
         "knowledge:read",
         "approvals:read",
+        "prompts:read",
     ]
 )
 
@@ -44,6 +45,7 @@ _MEMBER_PERMISSIONS: frozenset[str] = _VIEWER_PERMISSIONS | frozenset(
         "files:delete",
         "datastores:read",
         "network:analyze",
+        "prompts:write",
     ]
 )
 
@@ -62,6 +64,7 @@ _ADMIN_PERMISSIONS: frozenset[str] = _MEMBER_PERMISSIONS | frozenset(
         "files:delete:all",
         "datastores:write",
         "admin:access",
+        "prompts:manage",
     ]
 )
 

@@ -10,15 +10,16 @@ This guide covers everything you need to know to use the gSage AI web interface.
 2. [Navigation](#navigation)
 3. [Chat](#chat)
 4. [Knowledge Base](#knowledge-base)
-5. [Approvals](#approvals)
-6. [Files](#files)
-7. [Tasks](#tasks)
-8. [Scheduled Jobs](#scheduled-jobs)
-9. [Approval Rules](#approval-rules)
-10. [DataStores](#datastores)
-11. [Profile & Security](#profile--security)
-12. [API Keys](#api-keys)
-13. [Settings & Preferences](#settings--preferences)
+5. [Prompt Library](#prompt-library)
+6. [Approvals](#approvals)
+7. [Files](#files)
+8. [Tasks](#tasks)
+9. [Scheduled Jobs](#scheduled-jobs)
+10. [Approval Rules](#approval-rules)
+11. [DataStores](#datastores)
+12. [Profile & Security](#profile--security)
+13. [API Keys](#api-keys)
+14. [Settings & Preferences](#settings--preferences)
 
 ---
 
@@ -63,6 +64,7 @@ The top navigation bar provides access to all sections of the application:
 |------|---------|-------------|
 | 💬 | **Chat** | Conversational AI assistant |
 | 📖 | **Knowledge** | Knowledge base management |
+| 📚 | **Prompts** | Prompt template library |
 | ☑️ | **Approvals** | Tool execution approval requests |
 | 📁 | **Files** | Generated files and document templates |
 | 📊 | **Tasks** | Background task monitoring |
@@ -141,6 +143,53 @@ Upload files to be processed and added to the knowledge base:
    - **Failed** — an error occurred (details shown)
 
 The status updates automatically every few seconds.
+
+---
+
+## Prompt Library
+
+The Prompt Library lets you create, organize, and reuse prompt templates.
+Access it from the top navigation bar (📚 **Prompts**) or directly from the
+chat input via the library icon.
+
+### Browsing Prompts
+
+- **All tab** — view all prompts visible to you (personal + department + org).
+- **Personal / Department / Organization tabs** — filter by scope.
+- **Sidebar tree** — browse by category. Click a category to filter.
+- **Search bar** — type to search across title, description, and content.
+
+### Creating a Prompt
+
+1. Click **+ New Prompt**.
+2. Fill in:
+   - **Title** — a short, descriptive name.
+   - **Content** — the prompt text (up to 10,000 characters).
+   - **Description** — optional short description shown in lists.
+   - **Visibility** — who can see this prompt:
+     - *Only me* — personal use.
+     - *My department* — shared with your department.
+     - *Whole organization* — shared with everyone in the org.
+   - **Category** — optional folder for organization.
+3. Click **Create**.
+
+### Using a Prompt in Chat
+
+1. In the chat input area, click the **Library** icon (📚).
+2. Browse or search for a prompt in the modal.
+3. Click the prompt — its content fills the chat input.
+4. Edit the message as needed, then send.
+
+### Favorites
+
+- Click the **star** icon on any prompt card to add it to your favorites.
+- Use the ⭐ **Favorites** shortcut in the category tree or modal sidebar.
+
+### Chat Input Enhancements
+
+- **4-line input** — the message box is taller by default for longer prompts.
+- **Enter toggle** — click the ↵ icon to toggle whether Enter sends or adds a newline.
+- **Resizable** — drag the bottom-right corner to resize the input area.
 
 ---
 

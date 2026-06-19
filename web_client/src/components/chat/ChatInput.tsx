@@ -1,11 +1,12 @@
 import { useRef, useState, useCallback, useEffect, KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Send, Square, Paperclip, X, FileText, Loader2, AlertCircle } from 'lucide-react'
+import { Send, Square, Paperclip, X, FileText, Loader2, AlertCircle, Library, CornerDownLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import axios from 'axios'
+import { PromptModal } from '@/components/prompts/PromptModal'
 
 interface QueuedFile {
   /** Local UUID used as React key while the upload is in-flight. */
@@ -62,6 +63,8 @@ export function ChatInput({ onSend, onAbort, isStreaming, disabled, onUploadAtta
   const [value, setValue] = useState('')
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([])
   const [dragOver, setDragOver] = useState(false)
+  const [promptModalOpen, setPromptModalOpen] = useState(false)
+  const [enterSends, setEnterSends] = useState(true)
 
   // Any chip currently being uploaded → disables Send and the +file button
   const hasInFlightUpload = queuedFiles.some((f) => f.status === 'uploading')
@@ -94,8 +97,11 @@ export function ChatInput({ onSend, onAbort, isStreaming, disabled, onUploadAtta
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
+      if (enterSends) {
+        e.preventDefault()
+        handleSend()
+      }
+      // if enterSends is false, Enter adds a newline (default behavior)
     }
   }
 
@@ -318,16 +324,47 @@ export function ChatInput({ onSend, onAbort, isStreaming, disabled, onUploadAtta
         >
           <textarea
             ref={textareaRef}
-            rows={1}
+            rows={4}
             value={value}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             disabled={disabled || isStreaming}
             placeholder={t('chat.messagePlaceholder')}
-            className="flex-1 resize-none bg-transparent px-4 py-3 text-sm outline-none min-h-[44px] max-h-[200px] placeholder:text-muted-foreground"
+            className="flex-1 resize-y bg-transparent px-4 py-3 text-sm outline-none min-h-[96px] max-h-[300px] placeholder:text-muted-foreground"
           />
 
           <div className="flex items-center gap-1 pe-2 pb-2">
+            {/* Prompt library button */}
+            {!isStreaming && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                onClick={() => setPromptModalOpen(true)}
+                disabled={disabled}
+                title={t('chat.promptLibrary')}
+              >
+                <Library className="h-4 w-4" />
+              </Button>
+            )}
+
+            {/* Enter toggle */}
+            {!isStreaming && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className={cn(
+                  'h-8 w-8 rounded-full',
+                  enterSends ? 'text-muted-foreground' : 'text-primary',
+                )}
+                onClick={() => setEnterSends(!enterSends)}
+                disabled={disabled}
+                title={enterSends ? t('chat.enterSends') : t('chat.enterNewline')}
+              >
+                <CornerDownLeft className="h-4 w-4" />
+              </Button>
+            )}
+
             {/* Attachment button — only when upload handler provided and not streaming */}
             {onUploadAttachment && !isStreaming && (
               <>
@@ -379,7 +416,7 @@ export function ChatInput({ onSend, onAbort, isStreaming, disabled, onUploadAtta
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-2">
-          {t('chat.inputHint')}
+          {enterSends ? t('chat.inputHint') : t('chat.inputHintNewline')}
         </p>
 
         {/* Drag-and-drop overlay */}
@@ -389,6 +426,16 @@ export function ChatInput({ onSend, onAbort, isStreaming, disabled, onUploadAtta
             <p className="text-sm font-medium text-primary">{t('chat.dropFilesHere')}</p>
           </div>
         )}
+
+        {/* Prompt library modal */}
+        <PromptModal
+          open={promptModalOpen}
+          onOpenChange={setPromptModalOpen}
+          onSelectPrompt={(content) => {
+            setValue(content)
+            textareaRef.current?.focus()
+          }}
+        />
       </div>
     </div>
   )

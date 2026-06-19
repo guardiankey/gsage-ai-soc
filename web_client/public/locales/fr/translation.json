@@ -13,7 +13,8 @@
     "approvalRules": "Règles d'Approbation",
     "datastores": "DataStores",
     "aiAgents": "Agents IA",
-    "admin": "Admin"
+    "admin": "Admin",
+    "prompts": "Bibliothèque de Prompts"
   },
   "auth": {
     "signIn": "Se connecter",
@@ -106,7 +107,11 @@
     "mermaidCopySuccess": "Code du diagramme copié dans le presse-papiers",
     "mermaidCopyError": "Échec de la copie du code du diagramme",
     "messageCopyError": "Échec de la copie du message",
-    "newConversationInFolder": "Nouvelle conversation dans le dossier"
+    "newConversationInFolder": "Nouvelle conversation dans le dossier",
+    "inputHintNewline": "Maj+Entrée pour envoyer · Entrée pour nouvelle ligne",
+    "promptLibrary": "Bibliothèque de prompts",
+    "enterSends": "Entrée envoie le message",
+    "enterNewline": "Entrée ajoute une nouvelle ligne"
   },
   "knowledge": {
     "title": "Base de Connaissances",
@@ -746,5 +751,64 @@
       "roleViewer": "Observateur",
       "searchUsers": "Rechercher des utilisateurs à ajouter..."
     }
+  },
+  "prompts": {
+    "title": "Bibliothèque de Prompts",
+    "subtitle": "Créez, organisez et réutilisez des modèles de prompts",
+    "search": "Rechercher des prompts...",
+    "noSearchResults": "Aucun prompt ne correspond à votre recherche",
+    "newPrompt": "Nouveau Prompt",
+    "editPrompt": "Modifier le Prompt",
+    "myPrompts": "Mes Prompts",
+    "myFavorites": "Favoris",
+    "allPrompts": "Tous",
+    "personal": "Personnel",
+    "department": "Département",
+    "organization": "Organisation",
+    "scopeAll": "Tous",
+    "scopePersonal": "Personnel",
+    "scopeDepartment": "Département",
+    "scopeOrganization": "Organisation",
+    "noPrompts": "Pas encore de prompts. Créez-en un pour commencer.",
+    "noFavorites": "Pas encore de favoris. Cliquez sur l'étoile pour en ajouter un.",
+    "confirmDelete": "Supprimer ce prompt ?",
+    "confirmDeleteDesc": "Cette action est irréversible. Le prompt sera définitivement supprimé.",
+    "createSuccess": "Prompt créé",
+    "createError": "Erreur lors de la création du prompt",
+    "updateSuccess": "Prompt mis à jour",
+    "updateError": "Erreur lors de la mise à jour du prompt",
+    "deleteSuccess": "Prompt supprimé",
+    "deleteError": "Erreur lors de la suppression du prompt",
+    "favoriteAdded": "Ajouté aux favoris",
+    "favoriteRemoved": "Retiré des favoris",
+    "categoryCreated": "Catégorie créée",
+    "categoryCreateError": "Erreur lors de la création de la catégorie",
+    "categoryDeleteError": "Erreur lors de la suppression de la catégorie",
+    "form": {
+      "title": "Titre",
+      "content": "Contenu",
+      "description": "Description courte",
+      "category": "Catégorie",
+      "scope": "Visibilité",
+      "scopePersonal": "Moi seulement",
+      "scopeDepartment": "Mon département",
+      "scopeOrganization": "Toute l'organisation",
+      "cancel": "Annuler",
+      "saving": "Enregistrement...",
+      "create": "Créer",
+      "update": "Enregistrer"
+    },
+    "categories": {
+      "title": "Catégories",
+      "newCategory": "Nouvelle Catégorie",
+      "noCategories": "Aucune catégorie",
+      "editCategory": "Modifier la catégorie",
+      "deleteTitle": "Supprimer la catégorie",
+      "deleteDesc": "Supprimer la catégorie \"{{name}}\" ? Cette action est irréversible.",
+      "cannotDeleteNonEmpty": "La catégorie n'est pas vide. Supprimez d'abord tous les prompts et sous-catégories.",
+      "topLevel": "Aucune (racine)"
+    },
+    "categoryUpdated": "Catégorie mise à jour",
+    "categoryUpdateError": "Erreur lors de la mise à jour de la catégorie"
   }
 }

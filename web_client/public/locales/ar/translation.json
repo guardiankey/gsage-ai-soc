@@ -13,7 +13,8 @@
     "approvalRules": "قواعد الموافقة",
     "datastores": "مخازن البيانات",
     "aiAgents": "وكلاء الذكاء الاصطناعي",
-    "admin": "الإدارة"
+    "admin": "الإدارة",
+    "prompts": "مكتبة المطالبات"
   },
   "auth": {
     "signIn": "تسجيل الدخول",
@@ -106,7 +107,11 @@
     "mermaidCopySuccess": "تم نسخ مصدر المخطط إلى الحافظة",
     "mermaidCopyError": "فشل نسخ مصدر المخطط",
     "messageCopyError": "فشل نسخ الرسالة",
-    "newConversationInFolder": "محادثة جديدة في المجلد"
+    "newConversationInFolder": "محادثة جديدة في المجلد",
+    "inputHintNewline": "Shift+Enter للإرسال · Enter لسطر جديد",
+    "promptLibrary": "مكتبة المطالبات",
+    "enterSends": "Enter يرسل الرسالة",
+    "enterNewline": "Enter يضيف سطرًا جديدًا"
   },
   "knowledge": {
     "title": "قاعدة المعرفة",
@@ -746,5 +751,64 @@
       "roleViewer": "مشاهد",
       "searchUsers": "ابحث عن مستخدمين للإضافة..."
     }
+  },
+  "prompts": {
+    "title": "مكتبة المطالبات",
+    "subtitle": "إنشاء وتنظيم وإعادة استخدام قوالب المطالبات",
+    "search": "البحث في المطالبات...",
+    "noSearchResults": "لا توجد مطالبات تطابق بحثك",
+    "newPrompt": "مطالبة جديدة",
+    "editPrompt": "تعديل المطالبة",
+    "myPrompts": "مطالباتي",
+    "myFavorites": "المفضلة",
+    "allPrompts": "الكل",
+    "personal": "شخصي",
+    "department": "القسم",
+    "organization": "المؤسسة",
+    "scopeAll": "الكل",
+    "scopePersonal": "شخصي",
+    "scopeDepartment": "القسم",
+    "scopeOrganization": "المؤسسة",
+    "noPrompts": "لا توجد مطالبات بعد. أنشئ واحدة للبدء.",
+    "noFavorites": "لا توجد مفضلات بعد. انقر على أيقونة النجمة لإضافة واحدة.",
+    "confirmDelete": "حذف هذه المطالبة؟",
+    "confirmDeleteDesc": "لا يمكن التراجع عن هذا الإجراء. سيتم حذف المطالبة بشكل دائم.",
+    "createSuccess": "تم إنشاء المطالبة",
+    "createError": "فشل إنشاء المطالبة",
+    "updateSuccess": "تم تحديث المطالبة",
+    "updateError": "فشل تحديث المطالبة",
+    "deleteSuccess": "تم حذف المطالبة",
+    "deleteError": "فشل حذف المطالبة",
+    "favoriteAdded": "أضيفت إلى المفضلة",
+    "favoriteRemoved": "أزيلت من المفضلة",
+    "categoryCreated": "تم إنشاء الفئة",
+    "categoryCreateError": "فشل إنشاء الفئة",
+    "categoryDeleteError": "فشل حذف الفئة",
+    "form": {
+      "title": "العنوان",
+      "content": "المحتوى",
+      "description": "وصف قصير",
+      "category": "الفئة",
+      "scope": "الرؤية",
+      "scopePersonal": "أنا فقط",
+      "scopeDepartment": "قسمي",
+      "scopeOrganization": "المؤسسة بأكملها",
+      "cancel": "إلغاء",
+      "saving": "جاري الحفظ...",
+      "create": "إنشاء",
+      "update": "حفظ"
+    },
+    "categories": {
+      "title": "الفئات",
+      "newCategory": "فئة جديدة",
+      "noCategories": "لا توجد فئات",
+      "editCategory": "تعديل الفئة",
+      "deleteTitle": "حذف الفئة",
+      "deleteDesc": "حذف الفئة \"{{name}}\"؟ لا يمكن التراجع عن هذا الإجراء.",
+      "cannotDeleteNonEmpty": "الفئة ليست فارغة. قم بإزالة جميع المطالبات والفئات الفرعية أولاً.",
+      "topLevel": "بدون (المستوى الأعلى)"
+    },
+    "categoryUpdated": "تم تحديث الفئة",
+    "categoryUpdateError": "فشل تحديث الفئة"
   }
 }

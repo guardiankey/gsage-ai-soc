@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { LogOut, User, Key, KeyRound, ChevronDown, Building2, Layers } from 'lucide-react'
+import { LogOut, User, Key, KeyRound, ChevronDown, Building2, Layers, BookOpen, ShieldCheck, Database, Activity, Library, Settings } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -88,6 +88,56 @@ export function UserMenu() {
             <Link to="/credentials" className="flex items-center gap-2 cursor-pointer">
               <KeyRound className="h-4 w-4" />
               {t('nav.credentials')}
+            </Link>
+          </DropdownMenuItem>
+        )}
+
+        {/* Secondary navigation items */}
+        {hasPermission('knowledge:read') && (
+          <DropdownMenuItem asChild>
+            <Link to="/knowledge" className="flex items-center gap-2 cursor-pointer">
+              <BookOpen className="h-4 w-4" />
+              {t('nav.knowledge')}
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {hasPermission('approval_rules:read') && (
+          <DropdownMenuItem asChild>
+            <Link to="/approval-rules" className="flex items-center gap-2 cursor-pointer">
+              <ShieldCheck className="h-4 w-4" />
+              {t('nav.approvalRules')}
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {hasPermission('datastores:read') && (
+          <DropdownMenuItem asChild>
+            <Link to="/datastores" className="flex items-center gap-2 cursor-pointer">
+              <Database className="h-4 w-4" />
+              {t('nav.datastores')}
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {hasPermission('agents:run') && (
+          <DropdownMenuItem asChild>
+            <Link to="/tasks" className="flex items-center gap-2 cursor-pointer">
+              <Activity className="h-4 w-4" />
+              {t('nav.tasks')}
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {hasPermission('prompts:read') && (
+          <DropdownMenuItem asChild>
+            <Link to="/prompts" className="flex items-center gap-2 cursor-pointer">
+              <Library className="h-4 w-4" />
+              {t('nav.prompts')}
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {hasPermission('admin:access') && (
+          <DropdownMenuItem asChild>
+            <Link to="/admin" className="flex items-center gap-2 cursor-pointer">
+              <Settings className="h-4 w-4" />
+              {t('nav.admin')}
             </Link>
           </DropdownMenuItem>
         )}

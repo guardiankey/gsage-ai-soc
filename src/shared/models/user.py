@@ -17,6 +17,7 @@ from src.shared.security.encryption import get_encryption
 if TYPE_CHECKING:
     from src.shared.models.api_key import GSageAPIKey
     from src.shared.models.group import GSageGroup
+    from src.shared.models.prompt import GSagePrompt, GSageUserPromptFavorite
     from src.shared.models.tenant_session import GSageTenantSession
     from src.shared.models.trusted_device import GSageTrustedDevice
     from src.shared.models.user_department import GSageUserDepartment
@@ -177,6 +178,11 @@ class GSageUser(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+    favorite_prompts: Mapped[List["GSagePrompt"]] = relationship(
+        "GSagePrompt",
+        secondary="gsage_user_prompt_favorites",
+        back_populates="favorited_by",
     )
 
     # --- OTP properties ---
