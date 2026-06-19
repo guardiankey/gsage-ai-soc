@@ -107,14 +107,26 @@ async def is_auto_approve(
     key = (org_id, tool_name)
     cached = _cache.get(key)
     if cached is not None and cached[1] > now:
+        log.debug(
+            "is_auto_approve: cache HIT org=%s tool=%s → %s",
+            org_id, tool_name, cached[0],
+        )
         return cached[0]
 
     db_value = await _db_auto_approve(org_id=org_id, tool_name=tool_name)
     if db_value is not None:
         resolved = db_value
+        log.debug(
+            "is_auto_approve: DB resolved org=%s tool=%s → %s",
+            org_id, tool_name, resolved,
+        )
     else:
         env_value = _env_auto_approve(tool_name)
         resolved = env_value if env_value is not None else False
+        log.debug(
+            "is_auto_approve: ENV resolved org=%s tool=%s env=%s → %s",
+            org_id, tool_name, env_value, resolved,
+        )
 
     _cache[key] = (resolved, now + _CACHE_TTL_SECONDS)
     return resolved

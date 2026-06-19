@@ -845,8 +845,8 @@ async def list_messages(
     # or ``cancelled``, causing the user-visible chat to "lose" turns.
     out: list[MessageOut] = []
     runs = list(getattr(agno_session, "runs", None) or [])
-    # Skip runs that are part of team members and apply ``last_n`` here.
-    runs = [r for r in runs if getattr(r, "parent_run_id", None) is None]
+    # Include all runs — nested approval continuations create child runs
+    # that carry the final agent response and must be visible.
     if last_n is not None and last_n > 0:
         runs = runs[-last_n:]
 
@@ -897,6 +897,7 @@ async def list_messages(
                 "[BACKGROUND_TASKS_COMPLETED]" in content_str
                 or "[ATTACHED_FILES]" in content_str
                 or "[DEPARTMENT_CONTEXT]" in content_str
+                or "[SYSTEM_REPROMPT]" in content_str
             ):
                 import re as _re
                 content_str = _re.sub(
@@ -913,6 +914,12 @@ async def list_messages(
                 )
                 content_str = _re.sub(
                     r"\[DEPARTMENT_CONTEXT\].*?\[/DEPARTMENT_CONTEXT\]\s*---\s*",
+                    "",
+                    content_str,
+                    flags=_re.DOTALL,
+                )
+                content_str = _re.sub(
+                    r"\[SYSTEM_REPROMPT\].*?\[/SYSTEM_REPROMPT\]\s*---\s*",
                     "",
                     content_str,
                     flags=_re.DOTALL,
@@ -1056,8 +1063,7 @@ async def check_messages(
 
     if agno_session is not None:
         runs = list(getattr(agno_session, "runs", None) or [])
-        # Only top-level runs (exclude team-member sub-runs).
-        runs = [r for r in runs if getattr(r, "parent_run_id", None) is None]
+        # Include all runs — nested continuations create child runs.
 
         message_count = sum(
             1 for r in runs

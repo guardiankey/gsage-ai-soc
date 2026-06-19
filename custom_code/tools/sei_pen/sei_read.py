@@ -580,6 +580,22 @@ class SeiPenReadTool(BaseTool):
             log.warning(
                 "sei_pen_read: operation=%s error=%s", operation, exc, exc_info=True
             )
+            # processo.relacionamentos 404 → empty list (SEI returns 404
+            # instead of an empty array when the process has no relationships).
+            if operation == "processo.relacionamentos" and exc.status_code == 404:
+                elapsed_ms = round((time.perf_counter() - t0) * 1000)
+                return self._success(
+                    {
+                        "operation": operation,
+                        "result": [],
+                        "total": 0,
+                        "hints": [
+                            "This process has no related processes (relacionamentos). "
+                            "This is normal — not all processes are linked to others."
+                        ],
+                    },
+                    execution_time_ms=elapsed_ms,
+                )
             # HTTP 429/5xx are transient; an API-level rejection (no HTTP status,
             # e.g. not-found / invalid ID) will not fix itself on retry.
             retryable = (

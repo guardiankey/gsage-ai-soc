@@ -196,6 +196,34 @@ def instructive_hint(message: str, status_code: Optional[int], operation: str) -
             "This is normal — not all processes are linked to others."
         )
 
+    # Scheduled return / deadline: SEI may reject if the unit ID is invalid
+    # or the process is already concluded/archived.
+    if operation in ("processo.agendar_retorno", "processo.definir_prazo") and (
+        status_code == 500 or "infraexception" in msg
+    ):
+        return (
+            "SEI rejected the deadline scheduling. Common causes: the unit ID "
+            "('unidade') is invalid or not accessible, the process is already "
+            "concluded / archived, or the process is not open in the target "
+            "unit. Verify the unit ID with "
+            "sei_pen_read(operation='unidade.pesquisar') and confirm the "
+            "process is open in that unit."
+        )
+
+    # Process assignment: SEI returns "no detail" when the user has no
+    # linked units or the process is not open in the current unit.
+    if operation == "processo.atribuir" and (
+        not msg or "no detail" in msg or "sem detalhe" in msg.lower()
+    ):
+        return (
+            "SEI rejected the assignment with no detail. Common causes: "
+            "the user ('usuario') has no units linked in SEI (verify with "
+            "sei_pen_read(operation='usuario.listar_unidades', usuario='<sigla>')), "
+            "the process is not open in the current unit, or the user is "
+            "not active. Also confirm 'numeroProcesso' matches the formatted "
+            "protocol (e.g. '000123.000017/2026-12'), not the internal numeric ID."
+        )
+
     # Document visualization returns empty body (SEI quirk — may require
     # a separate access token or the document type lacks a visual preview).
     if operation == "documento.visualizar" and status_code is None and (

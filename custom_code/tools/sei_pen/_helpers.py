@@ -216,6 +216,29 @@ async def _fetch_subjects(
     return _extract_data(body) if isinstance(_extract_data(body), list) else []
 
 
+async def _fetch_global_subjects(
+    *,
+    client: SeiPenClient,
+    unidade_override: Optional[str],
+) -> list[dict]:
+    """Fetch all subjects in the SEI installation (global list).
+
+    Calls ``GET /processo/assunto/pesquisar`` and returns the subject records.
+    Used as fallback when a process type has no linked subjects.
+    """
+    try:
+        body = await client.request(
+            "GET",
+            "/processo/assunto/pesquisar",
+            params={"limit": 50, "start": 0},
+            unidade_override=unidade_override,
+        )
+    except SeiPenError:
+        return []
+    data = _extract_data(body)
+    return data if isinstance(data, list) else []
+
+
 async def criar_processo_facil(
     *,
     client: SeiPenClient,
@@ -337,27 +360,66 @@ async def criar_processo_facil(
                 candidates,
             )
         else:
+            # No subjects linked to this process type — try global fallback.
+            global_subjects = await _fetch_global_subjects(
+                client=client,
+                unidade_override=unidade_override,
+            )
+            if global_subjects:
+                candidates = [
+                    {"id": _record_id(r), "nome": _record_name(r)}
+                    for r in global_subjects[:25]
+                ]
+                raise HelperError(
+                    f"Process type {resolved_tipo} has no subjects configured, "
+                    f"but {len(global_subjects)} subjects exist globally in SEI. "
+                    f"Pick one and pass 'assuntos' with its ID, "
+                    f"e.g. assuntos='{candidates[0]['id']}' for '{candidates[0]['nome']}'. "
+                    f"Tip: some installations accept any subject regardless of "
+                    f"type linkage. To list manually: "
+                    f"sei_pen_read(operation='processo.pesquisar_assunto').",
+                    candidates,
+                )
             raise HelperError(
                 f"SEI requires at least one 'assuntos' (subject) to create a "
                 f"process, but no subjects were found for process type "
-                f"{resolved_tipo}. Your SEI installation may not have subjects "
-                f"configured for this type. Try listing manually with "
-                f"sei_pen_read(operation='processo.assunto_sugestao', "
-                f"tipoProcedimento='{resolved_tipo}') or contact your SEI admin."
+                f"{resolved_tipo} and no global subjects exist. "
+                f"Contact your SEI administrator to configure subjects."
             )
     else:
         # ── Subject provided → validate compatibility ────────────────────
         if valid_ids and resolved_assuntos not in valid_ids:
-            candidates = [
-                {"id": _record_id(r), "nome": _record_name(r)}
-                for r in suggested[:25]
-            ]
-            raise HelperError(
-                f"Subject '{resolved_assuntos}' is not compatible with process "
-                f"type {resolved_tipo}. The valid subjects for this process "
-                f"type are listed below. Pick one and update 'assuntos'.",
-                candidates,
+            # Also try global subjects — the provided ID might be valid globally.
+            global_subjects = await _fetch_global_subjects(
+                client=client,
+                unidade_override=unidade_override,
             )
+            global_ids = {
+                rid for r in global_subjects if (rid := _record_id(r))
+            }
+            if resolved_assuntos in global_ids:
+                # Subject exists globally; let it through with a warning logged.
+                log.warning(
+                    "Subject %s is not linked to process type %s but exists "
+                    "globally — sending anyway (SEI may or may not accept it).",
+                    resolved_assuntos, resolved_tipo,
+                )
+            else:
+                candidates = [
+                    {"id": _record_id(r), "nome": _record_name(r)}
+                    for r in (suggested[:25] if suggested else global_subjects[:25])
+                ]
+                source = (
+                    "suggested for this process type"
+                    if suggested else "available globally"
+                )
+                raise HelperError(
+                    f"Subject '{resolved_assuntos}' is not compatible with process "
+                    f"type {resolved_tipo} and was not found {source}. "
+                    f"The available subjects are listed below. "
+                    f"Pick one and update 'assuntos'.",
+                    candidates,
+                )
 
     form: dict[str, Any] = {
         "tipoProcesso": resolved_tipo,
@@ -511,12 +573,21 @@ async def criar_documento_com_conteudo(
         # to ISO-8859-1 before json_decode; non-ASCII bytes break it.
         "secoes": json.dumps(payload, ensure_ascii=True),
     }
-    alterar_body = await client.request(
-        "POST",
-        "/documento/secao/alterar",
-        data=alterar_form,
-        unidade_override=unidade_override,
-    )
+    try:
+        alterar_body = await client.request(
+            "POST",
+            "/documento/secao/alterar",
+            data=alterar_form,
+            unidade_override=unidade_override,
+        )
+    except SeiPenError as exc:
+        raise HelperError(
+            f"Document was created (id={id_documento}) but writing the content "
+            f"failed at the section-update step: {exc}. "
+            f"The document exists and can be edited separately with "
+            f"sei_pen_write(operation='documento.atualizar_conteudo', "
+            f"documento='{id_documento}', conteudo_html='...')."
+        ) from exc
 
     defaults: dict[str, Any] = {}
     if nivel_acesso == 0:
@@ -560,10 +631,19 @@ async def definir_prazo(
     atividade_envio: Optional[str] = None,
 ) -> dict:
     """Schedule a programmed return (deadline) for the process in a unit."""
-    target_unit = unidade or unidade_override
+    # Defensive: ensure unidade is a plain string (not a list, dict, etc.)
+    # and looks like a numeric SEI unit ID.
+    raw = unidade or unidade_override
+    if isinstance(raw, (list, dict)):
+        raise HelperError(
+            "'unidade' must be a string (numeric unit ID), "
+            f"got {type(raw).__name__}."
+        )
+    target_unit = str(raw).strip() if raw else ""
     if not target_unit:
         raise HelperError(
-            "Provide 'unidade' (target unit) or rely on the session unit override."
+            "Provide 'unidade' (target unit ID) or ensure your credential "
+            "has 'unidade_id' configured."
         )
     dt_programada = _compute_dt_programada(dias=dias, data=data)
     form: dict[str, Any] = {"unidade": target_unit, "dtProgramada": dt_programada}

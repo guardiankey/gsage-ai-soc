@@ -155,7 +155,8 @@ class SeiPenWriteTool(BaseTool):
                 "type": "string",
                 "description": (
                     "Process internal numeric ID. "
-                    "Required for: documento.cadastrar_interno."
+                    "Required for: documento.cadastrar_interno, "
+                    "documento.criar_com_conteudo, processo.reabrir."
                 ),
             },
             "documento": {
@@ -170,7 +171,7 @@ class SeiPenWriteTool(BaseTool):
                 "type": "string",
                 "description": (
                     "Process internal ID or formatted protocol. "
-                    "Required for: processo.alterar."
+                    "Required for: processo.alterar, processo.remover_atribuicao."
                 ),
             },
             # ── Document creation / update ────────────────────────────────────
@@ -324,7 +325,10 @@ class SeiPenWriteTool(BaseTool):
             "numeroProcesso": {
                 "type": "string",
                 "description": (
-                    "Formatted process number/protocol. "
+                    "Formatted process number/protocol (e.g. "
+                    "'000123.000017/2026-12'), NOT the internal numeric ID. "
+                    "Use the 'ProtocoloFormatado' value from processo.criar or "
+                    "processo.consultar. "
                     "Required for: processo.enviar, processo.concluir, processo.atribuir."
                 ),
             },
@@ -368,12 +372,6 @@ class SeiPenWriteTool(BaseTool):
                 "type": "string",
                 "description": (
                     "Reason text. Optional for: processo.sobrestar."
-                ),
-            },
-            "nome": {
-                "type": "string",
-                "description": (
-                    "Contact (interested party) name. Required for: contato.criar."
                 ),
             },
             "sinManterAbertoUnidade": {
@@ -599,6 +597,31 @@ class SeiPenWriteTool(BaseTool):
             timeout=float(self.timeout_seconds),
         )
         unidade_override: Optional[str] = params.get("unidade")
+
+        # ── Normalise processo.atribuir: accept ``procedimento`` as an ──────
+        # alternative to ``numeroProcesso`` (the formatted protocol).
+        if operation == "processo.atribuir":
+            proc = params.get("procedimento")
+            if proc and not params.get("numeroProcesso"):
+                params["numeroProcesso"] = str(proc)
+
+        # ── Normalise secoes: SEI EncodingMiddleware transcodes form body ───
+        # to ISO-8859-1.  Non-ASCII UTF-8 bytes get corrupted and break
+        # json_decode on the PHP side.  Re-encode with ensure_ascii=True so
+        # every non-ASCII char becomes a \\uXXXX escape (pure ASCII that
+        # survives the ISO-8859-1 round-trip).
+        if operation == "documento.secao_alterar":
+            raw = params.get("secoes")
+            if raw is not None:
+                if isinstance(raw, list):
+                    params["secoes"] = _json.dumps(raw, ensure_ascii=True)
+                elif isinstance(raw, str):
+                    try:
+                        parsed = _json.loads(raw)
+                        if isinstance(parsed, list):
+                            params["secoes"] = _json.dumps(parsed, ensure_ascii=True)
+                    except (_json.JSONDecodeError, TypeError):
+                        pass
 
         # ── High-level helper chains (name resolution / multi-call) ───────────
         if operation in HELPER_OPS:

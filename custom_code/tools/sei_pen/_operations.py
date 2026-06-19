@@ -470,8 +470,8 @@ WRITE_OPERATIONS: dict[str, OperationDef] = {
         "path": "/processo/atribuir",
         "path_params": [],
         "query_params": [],
-        "form_params": ["numeroProcesso", "usuario"],
-        "required": ["numeroProcesso", "usuario"],
+        "form_params": ["numeroProcesso", "procedimento", "usuario"],
+        "required": ["usuario"],
     },
     # Remove the assignment of a process.
     "processo.remover_atribuicao": {
@@ -509,15 +509,6 @@ WRITE_OPERATIONS: dict[str, OperationDef] = {
         "query_params": [],
         "form_params": [],
         "required": ["protocolo"],
-    },
-    # Create an interested party (contato).
-    "contato.criar": {
-        "method": "POST",
-        "path": "/contato/criar",
-        "path_params": [],
-        "query_params": [],
-        "form_params": ["nome"],
-        "required": ["nome"],
     },
 }
 

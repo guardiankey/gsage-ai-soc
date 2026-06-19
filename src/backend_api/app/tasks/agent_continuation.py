@@ -275,12 +275,21 @@ async def _async_continue_approval(approval_id: str, org_id: str) -> None:
     try:
         async with session_factory() as db:
             from src.backend_api.app.services.agent_continuation import continue_after_approval
+            from src.backend_api.app.services.agno_session_lock import (
+                publish_conversation_updated,
+            )
             from src.backend_api.app.services.channel_sender import deliver_response
 
             tenant_session, response_text = await continue_after_approval(
                 approval_id, uuid.UUID(org_id), db
             )
             await deliver_response(tenant_session, response_text, db)
+
+            # Notify SSE subscribers (web clients viewing the conversation) so
+            # they refetch immediately instead of waiting for the 5s poll.
+            await publish_conversation_updated(
+                tenant_session.id, reason="approval_resolved"
+            )
 
             log.info(
                 "continue_after_approval_resolved: delivered approval=%s session=%s source=%s",

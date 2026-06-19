@@ -586,9 +586,151 @@ async def continue_after_approval(
 
     response_text = _extract_text(getattr(run_output, "content", None))
 
+    # ── Diagnostic: log run_output status and requirements for nested HITL ──
+    _run_status = getattr(run_output, "status", None)
+    _run_reqs = getattr(run_output, "requirements", None) or []
+    log.debug(
+        "continue_after_approval: run_output status=%s requirements_count=%d "
+        "approval=%s",
+        _run_status, len(_run_reqs), approval_id,
+    )
+
+    # ── Re-run agent if it completed without responding to tool results ──
+    # When the LLM returns ``finish_reason: stop`` right after a tool
+    # result (no assistant text), the user sees nothing.  We probe the
+    # Agno session: if the last message is a ``tool`` role, the agent
+    # never replied — so we issue ONE follow-up arun() prompting it to
+    # analyse the results and present a response.
+    if (
+        getattr(run_output, "status", None) == RunStatus.completed
+        and response_text is not None
+    ):
+        try:
+            from agno.db.base import SessionType  # noqa: PLC0415
+
+            agno_session = await get_agno_db().get_session(
+                session_id=agno_session_id,
+                session_type=SessionType.AGENT,
+            )
+            if agno_session is not None:
+                runs = list(getattr(agno_session, "runs", None) or [])
+                if runs:
+                    last_run = runs[-1]
+                    msgs = list(getattr(last_run, "messages", None) or [])
+                    if msgs:
+                        last_msg = msgs[-1]
+                        if getattr(last_msg, "role", None) == "tool":
+                            log.info(
+                                "continue_after_approval: run completed but "
+                                "last message is tool — re-prompting agent "
+                                "approval=%s",
+                                approval_id,
+                            )
+                            follow_up = await agent.arun(
+                                "[SYSTEM_REPROMPT]\n"
+                                "The tool execution has completed. "
+                                "Please analyse the results and present "
+                                "your findings to the user in a clear, "
+                                "concise message.\n"
+                                "[/SYSTEM_REPROMPT]\n\n---\n"
+                            )
+                            await _safe_mcp_cleanup(agent)
+                            new_text = _extract_text(
+                                getattr(follow_up, "content", None)
+                            )
+                            if new_text and len(new_text) > len(response_text or ""):
+                                response_text = new_text
+
+                            # Re-prompt may trigger a new tool call that
+                            # requires approval.  Process it the same way
+                            # as the main paused check below.
+                            if getattr(follow_up, "status", None) == RunStatus.paused:
+                                _nested_ids = extract_approval_ids_from_run_output(follow_up)
+                                if not _nested_ids:
+                                    try:
+                                        pending_rows, _ = await get_agno_db().get_approvals(
+                                            status="pending", limit=50,
+                                        )
+                                        for row in pending_rows:
+                                            if row.get("session_id") == agno_session_id:
+                                                ap_id = row.get("id")
+                                                if ap_id:
+                                                    _nested_ids.append(str(ap_id))
+                                    except Exception:
+                                        pass
+                                if _nested_ids:
+                                    await process_approval_delegations(
+                                        approval_ids=_nested_ids,
+                                        ctx=ctx, db=db, org=org,
+                                        agno_session_id=agno_session_id,
+                                        run_id=str(getattr(follow_up, "run_id", "") or ""),
+                                    )
+                                    auto_ids, _ = await process_auto_approvals(
+                                        approval_ids=_nested_ids,
+                                        ctx=ctx, db=db,
+                                    )
+                                    if auto_ids:
+                                        log.info(
+                                            "continue_after_approval: re-prompt "
+                                            "nested auto-approved ids=%s",
+                                            auto_ids,
+                                        )
+                                    try:
+                                        await db.commit()
+                                    except Exception as exc:
+                                        log.warning(
+                                            "continue_after_approval: commit of "
+                                            "re-prompt delegations failed: %s", exc,
+                                        )
+                                    if not response_text:
+                                        response_text = (
+                                            "The approved action has been executed, "
+                                            "but an additional step requires human "
+                                            "approval before proceeding."
+                                        )
+        except Exception as exc:
+            log.warning(
+                "continue_after_approval: re-prompt after tool result "
+                "failed approval=%s: %s",
+                approval_id, exc,
+            )
+
     # Check if still paused (multi-step HITL)
     if getattr(run_output, "status", None) == RunStatus.paused:
         new_approval_ids = extract_approval_ids_from_run_output(run_output)
+        log.debug(
+            "continue_after_approval: paused check — extracted %d ids from "
+            "run_output.requirements approval=%s",
+            len(new_approval_ids), approval_id,
+        )
+        # Fallback: ``acontinue_run`` may not populate ``requirements`` on
+        # the RunOutput when the agent pauses during a continuation.  Query
+        # the Agno DB for ALL pending approvals in this session — the nested
+        # approval may be on a DIFFERENT run than the one passed to
+        # acontinue_run (Agno creates a new run for the continuation).
+        if not new_approval_ids:
+            try:
+                pending_rows, _ = await get_agno_db().get_approvals(
+                    status="pending",
+                    limit=50,
+                )
+                for row in pending_rows:
+                    if row.get("session_id") == agno_session_id:
+                        ap_id = row.get("id")
+                        if ap_id:
+                            new_approval_ids.append(str(ap_id))
+                if new_approval_ids:
+                    log.info(
+                        "continue_after_approval: resolved %d pending "
+                        "approvals via Agno DB fallback session=%s",
+                        len(new_approval_ids),
+                        agno_session_id,
+                    )
+            except Exception as exc:
+                log.warning(
+                    "continue_after_approval: Agno DB fallback query "
+                    "failed: %s", exc,
+                )
         if new_approval_ids:
             # Create delegation records for the nested approval(s).
             await process_approval_delegations(
@@ -621,6 +763,12 @@ async def continue_after_approval(
                 "The approved action has been executed, but an additional step "
                 "requires human approval before proceeding."
             )
+    else:
+        log.debug(
+            "continue_after_approval: run_output status is %s (not paused) — "
+            "skipping nested HITL check approval=%s",
+            getattr(run_output, "status", None), approval_id,
+        )
 
     if not response_text:
         response_text = "The approved action has been executed successfully."
@@ -703,12 +851,72 @@ async def process_auto_approvals(
                 },
             )
             if updated is None:
+                # The atomic status-guard failed — the row may not exist
+                # yet (Agno race) or its status is not "pending".  Check
+                # the current state before falling back.
+                current = await agno_db.get_approval(ap_id)
+                if current is None:
+                    log.warning(
+                        "auto_approve: approval %s not found after update "
+                        "returned None — Agno may not have committed yet",
+                        ap_id,
+                    )
+                    manual_ids.append(ap_id)
+                    continue
+                cur_status = current.get("status", "")
+                if cur_status == "approved":
+                    # Already approved (concurrent continuation won the race).
+                    # We still need to dispatch the continuation task — the
+                    # approval was marked "approved" but the tool hasn't
+                    # executed yet (that happens inside acontinue_run).
+                    log.info(
+                        "auto_approve: approval %s already approved by "
+                        "another process — dispatching continuation",
+                        ap_id,
+                    )
+                    try:
+                        from src.backend_api.app.tasks.agent_continuation import (  # noqa: PLC0415
+                            continue_after_approval_resolved,
+                        )
+                        cast(Any, continue_after_approval_resolved).delay(
+                            ap_id, str(ctx.org_id)
+                        )
+                    except Exception as cont_exc:
+                        log.error(
+                            "auto_approve: failed to dispatch continuation "
+                            "for already-approved ap=%s: %s",
+                            ap_id, cont_exc, exc_info=True,
+                        )
+                    auto_ids.append(ap_id)
+                    continue
                 log.warning(
-                    "auto_approve: update_approval returned None for ap=%s tool=%s",
-                    ap_id, tool_name,
+                    "auto_approve: update_approval returned None for ap=%s "
+                    "tool=%s current_status=%r — retrying without status guard",
+                    ap_id, tool_name, cur_status,
                 )
-                manual_ids.append(ap_id)
-                continue
+                # Retry without the expected_status check so the update
+                # succeeds even if Agno has already transitioned the row
+                # (e.g. "pending" → "pending" is a no-op but the column
+                # might have been set to a non-standard value by a race).
+                updated = await agno_db.update_approval(
+                    ap_id,
+                    status="approved",
+                    resolved_by=str(ctx.user_id),
+                    resolved_at=int(datetime.now(_tz.utc).timestamp()),
+                    resolution_data={
+                        "action": "approve",
+                        "auto_approved": True,
+                        "comment": "Auto-approved by tool config (retry without status guard)",
+                    },
+                )
+                if updated is None:
+                    log.warning(
+                        "auto_approve: retry also returned None for ap=%s — "
+                        "giving up",
+                        ap_id,
+                    )
+                    manual_ids.append(ap_id)
+                    continue
 
             try:
                 from src.backend_api.app.tasks.agent_continuation import (  # noqa: PLC0415

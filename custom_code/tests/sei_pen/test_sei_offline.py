@@ -950,10 +950,11 @@ async def test_criar_processo_facil_multi_subject_returns_candidates():
 
 @pytest.mark.asyncio
 async def test_criar_processo_facil_no_subjects_error():
-    """When no subjects exist for the process type, give a clear error."""
+    """When no subjects exist for the process type nor globally, give a clear error."""
     client = _StubClient(
         {
             ("GET", "/processo/assunto/sugestao/99/listar"): _envelope([]),
+            ("GET", "/processo/assunto/pesquisar"): _envelope([]),
         }
     )
     with pytest.raises(HelperError) as exc_info:
@@ -971,6 +972,40 @@ async def test_criar_processo_facil_no_subjects_error():
             hipotese_id=None,
         )
     assert "no subjects were found" in str(exc_info.value).lower()
+    assert "no global subjects" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_fallback_global_subjects():
+    """When the type has no subjects, return global subjects as candidates."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/assunto/sugestao/67/listar"): _envelope([]),
+            ("GET", "/processo/assunto/pesquisar"): _envelope(
+                [
+                    {"idAssunto": "2", "nome": "MATERIAL DE CONSUMO"},
+                    {"idAssunto": "10", "nome": "Administrativo"},
+                ]
+            ),
+        }
+    )
+    with pytest.raises(HelperError) as exc_info:
+        await helpers.criar_processo_facil(
+            client=client,  # type: ignore[arg-type]
+            base_url="http://test",
+            orgao_id="0",
+            org_id=None,
+            session=None,
+            unidade_override=None,
+            tipo_processo_nome=None,
+            tipo_processo_id="67",
+            nivel_acesso=0,
+            hipotese_nome=None,
+            hipotese_id=None,
+        )
+    assert "subjects exist globally" in str(exc_info.value).lower()
+    assert len(exc_info.value.candidates) == 2
+    assert exc_info.value.candidates[0]["id"] == "2"
 
 
 @pytest.mark.asyncio
@@ -1010,7 +1045,7 @@ async def test_criar_processo_facil_explicit_assuntos():
 
 @pytest.mark.asyncio
 async def test_criar_processo_facil_incompatible_subject():
-    """When the provided subject is not in the suggested list, return error with candidates."""
+    """When the provided subject is not in suggested nor global lists, error with candidates."""
     client = _StubClient(
         {
             ("GET", "/processo/assunto/sugestao/1/listar"): _envelope(
@@ -1018,6 +1053,9 @@ async def test_criar_processo_facil_incompatible_subject():
                     {"idAssunto": "10", "nome": "Administrativo"},
                     {"idAssunto": "20", "nome": "Financeiro"},
                 ]
+            ),
+            ("GET", "/processo/assunto/pesquisar"): _envelope(
+                [{"idAssunto": "10", "nome": "Administrativo"}]
             ),
         }
     )
@@ -1034,11 +1072,46 @@ async def test_criar_processo_facil_incompatible_subject():
             nivel_acesso=0,
             hipotese_nome=None,
             hipotese_id=None,
-            assuntos="252",  # NOT in the suggested list
+            assuntos="252",  # NOT in either list
         )
     assert "not compatible" in str(exc_info.value).lower()
-    assert len(exc_info.value.candidates) == 2
-    assert exc_info.value.candidates[0]["id"] == "10"
+    assert len(exc_info.value.candidates) >= 1
+
+
+@pytest.mark.asyncio
+async def test_criar_processo_facil_subject_in_global_but_not_linked():
+    """When subject is not linked to the type but exists globally, allow it with warning."""
+    client = _StubClient(
+        {
+            ("GET", "/processo/assunto/sugestao/1/listar"): _envelope(
+                [{"idAssunto": "10", "nome": "Administrativo"}]
+            ),
+            ("GET", "/processo/assunto/pesquisar"): _envelope(
+                [
+                    {"idAssunto": "2", "nome": "MATERIAL DE CONSUMO"},
+                    {"idAssunto": "10", "nome": "Administrativo"},
+                ]
+            ),
+            ("POST", "/processo/criar"): _envelope(
+                {"IdProcedimento": "777", "ProtocoloFormatado": "P-777"}
+            ),
+        }
+    )
+    result = await helpers.criar_processo_facil(
+        client=client,  # type: ignore[arg-type]
+        base_url="http://test",
+        orgao_id="0",
+        org_id=None,
+        session=None,
+        unidade_override=None,
+        tipo_processo_nome=None,
+        tipo_processo_id="1",
+        nivel_acesso=0,
+        hipotese_nome=None,
+        hipotese_id=None,
+        assuntos="2",  # Not linked to type 1, but exists globally → allowed
+    )
+    assert result["result"]["IdProcedimento"] == "777"
 
 
 @pytest.mark.asyncio
