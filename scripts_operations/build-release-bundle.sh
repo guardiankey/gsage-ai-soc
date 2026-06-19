@@ -141,6 +141,8 @@ touch "$STAGING/src/__init__.py"
 cp -r "$PROJECT_ROOT/scripts"        "$STAGING/scripts"
 cp -r "$PROJECT_ROOT/custom_code"    "$STAGING/custom_code"
 cp -r "$PROJECT_ROOT/knowledge_base" "$STAGING/knowledge_base"
+mkdir -p "$STAGING/enterprise"
+cp -r "$PROJECT_ROOT/src/mcp_server/tools/enterprise/." "$STAGING/enterprise/"
 
 # Docker assets referenced by the prod compose as bind mounts
 mkdir -p "$STAGING/docker/postgres" "$STAGING/docker/ollama"

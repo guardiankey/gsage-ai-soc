@@ -222,6 +222,7 @@ services:
     volumes:
       - ${GSAGE_DBS_PATH:-/opt/gsage/shared/dbs}:/app/dbs:ro
       - ${GSAGE_CUSTOM_CODE_PATH:-/opt/gsage/shared/custom_code}:/app/custom_code:ro
+      - ${GSAGE_ENTERPRISE_PATH:-/opt/gsage/shared/enterprise}:/app/src/mcp_server/tools/enterprise:ro
     command: >
       bash -c "python -W ignore::DeprecationWarning -m uvicorn src.mcp_server.main:app --host 0.0.0.0 --port 8001"
     networks:
@@ -273,6 +274,7 @@ services:
     volumes:
       - ${GSAGE_DBS_PATH:-/opt/gsage/shared/dbs}:/app/dbs:ro
       - ${GSAGE_CUSTOM_CODE_PATH:-/opt/gsage/shared/custom_code}:/app/custom_code:ro
+      - ${GSAGE_ENTERPRISE_PATH:-/opt/gsage/shared/enterprise}:/app/src/mcp_server/tools/enterprise:ro
     command: >
       python -W ignore::DeprecationWarning -m celery -A src.backend_api.app.celery_app worker
       --queues=tools --concurrency=2 --loglevel=info -n tools@%h

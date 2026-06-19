@@ -145,6 +145,9 @@ fi
 if [[ -z "$(ls -A "$SHARED_DIR/custom_code" 2>/dev/null || true)" && -d "$SCRIPT_DIR/custom_code" ]]; then
     cp -r "$SCRIPT_DIR/custom_code/." "$SHARED_DIR/custom_code/"
 fi
+if [[ -z "$(ls -A "$SHARED_DIR/enterprise" 2>/dev/null || true)" && -d "$SCRIPT_DIR/enterprise" ]]; then
+    cp -r "$SCRIPT_DIR/enterprise/." "$SHARED_DIR/enterprise/"
+fi
 
 # ── 4. Wizard (only on fresh install) ────────────────────────────────
 if [[ $UPGRADE_MODE -eq 0 || ! -f "$ENV_FILE" ]]; then
@@ -158,6 +161,7 @@ with open(sys.argv[1]) as f: print(json.load(f).get("registry","guardiankey"))
     export GSAGE_DBS_PATH="$SHARED_DIR/dbs"
     export GSAGE_KB_PATH="$SHARED_DIR/knowledge_base"
     export GSAGE_CUSTOM_CODE_PATH="$SHARED_DIR/custom_code"
+    export GSAGE_ENTERPRISE_PATH="$SHARED_DIR/enterprise"
 
     # Pre-flight port availability using the default the wizard will suggest.
     preflight::check_ports 8080 || {

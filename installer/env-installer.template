@@ -15,6 +15,7 @@ GSAGE_INSTALL_DIR=@@PROMPT:gsage_install_dir@@
 GSAGE_DBS_PATH=@@PROMPT:gsage_dbs_path@@
 GSAGE_KB_PATH=@@PROMPT:gsage_kb_path@@
 GSAGE_CUSTOM_CODE_PATH=@@PROMPT:gsage_custom_code_path@@
+GSAGE_ENTERPRISE_PATH=@@PROMPT_OPT:gsage_enterprise_path@@
 
 # ── Application ──────────────────────────────────────────────
 APP_ENV=production

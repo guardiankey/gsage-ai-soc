@@ -62,6 +62,7 @@ wizard::run() {
     WIZARD_ANS[gsage_dbs_path]="${GSAGE_DBS_PATH:-/opt/gsage/shared/dbs}"
     WIZARD_ANS[gsage_kb_path]="${GSAGE_KB_PATH:-/opt/gsage/shared/knowledge_base}"
     WIZARD_ANS[gsage_custom_code_path]="${GSAGE_CUSTOM_CODE_PATH:-/opt/gsage/shared/custom_code}"
+    WIZARD_ANS[gsage_enterprise_path]="${GSAGE_ENTERPRISE_PATH:-/opt/gsage/shared/enterprise}"
 
     echo "── Admin bootstrap ──"
     wizard::_ask       admin_email    "Admin email"                          "admin@example.com"
