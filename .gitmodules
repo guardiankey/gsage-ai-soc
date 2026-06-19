@@ -1,0 +1,3 @@
+[submodule "src/mcp_server/tools/enterprise"]
+	path = src/mcp_server/tools/enterprise
+	url = git@git-botsocmaster:gsage-ai/tools-enterprise.git
