@@ -30,6 +30,7 @@ import {
   useCreateCategory,
   useUpdateCategory,
   useDeleteCategory,
+  useSearchPrompts,
 } from '@/hooks/usePrompts'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Prompt, PromptCreatePayload, PromptCategory } from '@/api/prompts'
@@ -55,12 +56,32 @@ export default function PromptLibraryPage() {
   const pageSize = 20
 
   const { data: categories } = useCategories(orgId || undefined)
-  const { data: promptsData, isLoading: promptsLoading } = usePrompts(orgId || undefined, {
+
+  // Use search endpoint when query is present, list endpoint otherwise
+  const searchPayload = {
+    query: searchQuery || undefined,
+    scope: (scope || undefined) as 'personal' | 'department' | 'organization' | undefined,
+    category_id: categoryId || undefined,
+    page,
+    page_size: pageSize,
+  }
+  const isSearching = !!searchQuery
+
+  const { data: listData, isLoading: listLoading } = usePrompts(orgId || undefined, {
     scope: scope || undefined,
     category_id: categoryId || undefined,
     page,
     page_size: pageSize,
   })
+
+  const { data: searchData, isLoading: searchLoading } = useSearchPrompts(
+    orgId || undefined,
+    searchPayload,
+  )
+
+  // Use search results when searching, list results otherwise
+  const effectiveData = isSearching ? searchData : listData
+  const effectiveLoading = isSearching ? searchLoading : listLoading
   const { data: favsData, isLoading: favsLoading } = useFavorites(orgId || undefined, page, pageSize)
 
   const createCategoryMutation = useCreateCategory(orgId || undefined)
@@ -179,7 +200,7 @@ export default function PromptLibraryPage() {
     setFormOpen(true)
   }
 
-  const totalPages = calcTotalPages(promptsData?.total || 0, pageSize)
+  const totalPages = calcTotalPages(effectiveData?.total || 0, pageSize)
 
   return (
     <div className="flex h-full flex-col">
@@ -250,20 +271,20 @@ export default function PromptLibraryPage() {
             </TabsList>
 
             <TabsContent value="" className="flex-1 overflow-y-auto p-4">
-              {promptsLoading ? (
+              {effectiveLoading ? (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {Array.from({ length: 6 }).map((_, i) => (
                     <Skeleton key={i} className="h-24 rounded-lg" />
                   ))}
                 </div>
-              ) : !promptsData || promptsData.prompts.length === 0 ? (
+              ) : !effectiveData || effectiveData.prompts.length === 0 ? (
                 <div className="flex h-full items-center justify-center">
                   <p className="text-sm text-muted-foreground">{t('prompts.noPrompts')}</p>
                 </div>
               ) : (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {promptsData.prompts.map((p) => (
+                    {effectiveData.prompts.map((p) => (
                       <PromptCard
                         key={p.id}
                         prompt={p}
@@ -290,7 +311,7 @@ export default function PromptLibraryPage() {
             {['personal', 'department', 'organization'].map((s) => (
               <TabsContent key={s} value={s} className="flex-1 overflow-y-auto p-4">
                 {/* Content re-fetched via usePrompts with scope filter */}
-                {promptsLoading ? (
+                {effectiveLoading ? (
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {Array.from({ length: 3 }).map((_, i) => (
                       <Skeleton key={i} className="h-24 rounded-lg" />
@@ -298,7 +319,7 @@ export default function PromptLibraryPage() {
                   </div>
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {promptsData?.prompts.map((p) => (
+                    {effectiveData?.prompts.map((p) => (
                       <PromptCard
                         key={p.id}
                         prompt={p}

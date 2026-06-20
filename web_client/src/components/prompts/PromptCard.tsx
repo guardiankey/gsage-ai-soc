@@ -1,4 +1,5 @@
 import { Star } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { Prompt } from '@/api/prompts'
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function PromptCard({ prompt, onSelect, onToggleFavorite, onEdit, onDelete, compact }: Props) {
+  const { t } = useTranslation()
   const handleFavorite = (e: React.MouseEvent) => {
     e.stopPropagation()
     onToggleFavorite?.(prompt.id)
@@ -29,8 +31,8 @@ export function PromptCard({ prompt, onSelect, onToggleFavorite, onEdit, onDelet
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <h4 className="truncate text-sm font-medium">{prompt.title}</h4>
-          {!compact && prompt.description && (
-            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+          {prompt.description && (
+            <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
               {prompt.description}
             </p>
           )}
@@ -78,7 +80,7 @@ export function PromptCard({ prompt, onSelect, onToggleFavorite, onEdit, onDelet
               className="h-7 text-xs"
               onClick={(e) => { e.stopPropagation(); onEdit(prompt) }}
             >
-              Edit
+              {t('common.edit')}
             </Button>
           )}
           {onDelete && (
@@ -88,7 +90,7 @@ export function PromptCard({ prompt, onSelect, onToggleFavorite, onEdit, onDelet
               className="h-7 text-xs text-destructive"
               onClick={(e) => { e.stopPropagation(); onDelete(prompt.id) }}
             >
-              Delete
+              {t('common.delete')}
             </Button>
           )}
         </div>
