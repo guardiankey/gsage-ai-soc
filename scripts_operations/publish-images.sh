@@ -18,19 +18,36 @@
 #   gsage-curator         (curator/Dockerfile)      Reputation list service
 #
 # ── Usage ───────────────────────────────────────────────────────────────────
+#   # Development build (default) — tags images as <registry>/<image>:dev
+#   bash scripts_operations/publish-images.sh --registry docker.io/guardiankey
+#
+#   # Production release — tags with version from ./VERSION + :latest
 #   bash scripts_operations/publish-images.sh \
 #        --registry docker.io/guardiankey \
-#        --tag 0.1.0 \
-#        [--target backend_api,mcp_server,frontend] \
-#        [--no-latest] \
-#        [--push]
+#        --production
+#
+#   # Explicit tag override (always tags :latest unless --no-latest)
+#   bash scripts_operations/publish-images.sh \
+#        --registry docker.io/guardiankey \
+#        --tag 0.1.0
+#
+#   # Full example
+#   bash scripts_operations/publish-images.sh \
+#        --registry docker.io/guardiankey \
+#        --production \
+#        --target backend_api,mcp_server,frontend \
+#        --push
 #
 # Required:
 #   --registry <REG>     Registry namespace, e.g. docker.io/guardiankey
 #
 # Optional:
-#   --tag <TAG>          Version tag. Default: content of ./VERSION.
-#                        Also published as `latest` unless --no-latest.
+#   --production          Tag images with the version from ./VERSION and also
+#                         publish :latest.  Without this flag the default tag
+#                         is "dev" and :latest is NOT published (safety).
+#   --tag <TAG>          Explicit version tag.  Overrides both --production
+#                         and the default "dev".  Still publishes :latest
+#                         unless --no-latest.
 #   --target <list>      CSV of targets to build. Default: all runtime targets
 #                        (excludes dev-full). Valid: backend_api, worker_tools,
 #                        mcp_server, frontend, curator, dev-full.
@@ -61,6 +78,7 @@ REGISTRY=""
 TAG=""
 TARGETS_ARG=""
 PUSH=0
+PRODUCTION=0
 NO_LATEST=0
 # Use buildx by default (gives cache mounts, registry cache, parallel stages).
 # Override with --no-buildx for environments where buildx is unavailable.
@@ -120,35 +138,49 @@ image_build_context() {
 }
 
 usage() {
-    sed -n '1,52p' "$0" | sed -n 's/^# \{0,1\}//p'
+    sed -n '1,68p' "$0" | sed -n 's/^# \{0,1\}//p'
     exit "${1:-0}"
 }
 
 # ── Parse args ─────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --registry) REGISTRY="${2:-}"; shift 2 ;;
-        --tag)      TAG="${2:-}";      shift 2 ;;
-        --target)   TARGETS_ARG="${2:-}"; shift 2 ;;
-        --push)     PUSH=1; shift ;;
-        --no-latest) NO_LATEST=1; shift ;;
-        --no-buildx) USE_BUILDX=0; shift ;;
+        --registry)     REGISTRY="${2:-}"; shift 2 ;;
+        --tag)          TAG="${2:-}";      shift 2 ;;
+        --target)       TARGETS_ARG="${2:-}"; shift 2 ;;
+        --production)   PRODUCTION=1; shift ;;
+        --push)         PUSH=1; shift ;;
+        --no-latest)    NO_LATEST=1; shift ;;
+        --no-buildx)    USE_BUILDX=0; shift ;;
         --cache-registry) CACHE_REGISTRY="${2:-}"; shift 2 ;;
-        -h|--help)  usage 0 ;;
+        -h|--help)      usage 0 ;;
         *) echo "Unknown argument: $1" >&2; usage 1 ;;
     esac
 done
 
-# ── Validate ───────────────────────────────────────────────────────────────
-[[ -z "$REGISTRY" ]] && { echo "ERROR: --registry is required" >&2; usage 1; }
-
-# Default tag = content of VERSION file.
-if [[ -z "$TAG" ]]; then
+# ── Resolve tag ────────────────────────────────────────────────────────────
+# Priority: 1) explicit --tag, 2) --production → VERSION file, 3) default "dev".
+if [[ -n "$TAG" ]]; then
+    :  # explicit --tag — use as-is, latest is published (unless --no-latest)
+elif [[ $PRODUCTION -eq 1 ]]; then
     if [[ -f "$VERSION_FILE" ]]; then
         TAG="$(tr -d '[:space:]' < "$VERSION_FILE")"
     fi
+    [[ -z "$TAG" ]] && { echo "ERROR: VERSION file not found or empty" >&2; exit 1; }
+else
+    TAG="dev"
 fi
-[[ -z "$TAG" ]] && { echo "ERROR: --tag is required (or populate VERSION file)" >&2; usage 1; }
+
+# Safety: dev images must never be tagged :latest.
+# --production or explicit --tag imply intent to publish a release.
+if [[ "$TAG" == "dev" && $NO_LATEST -eq 0 ]]; then
+    echo "  ℹ  Tag is 'dev' — :latest will NOT be published (safety)." >&2
+    echo "     Use --production to publish a versioned release with :latest." >&2
+    NO_LATEST=1
+fi
+
+# ── Validate ───────────────────────────────────────────────────────────────
+[[ -z "$REGISTRY" ]] && { echo "ERROR: --registry is required" >&2; usage 1; }
 
 # strip trailing slash on registry
 REGISTRY="${REGISTRY%/}"
@@ -190,6 +222,11 @@ fi
 
 echo "══════════════════════════════════════════════════════════"
 echo "  Registry : $REGISTRY"
+if [[ $PRODUCTION -eq 1 ]]; then
+    echo "  Mode     : production (tag from VERSION file)"
+else
+    echo "  Mode     : development"
+fi
 echo "  Tag      : $TAG $([[ $NO_LATEST -eq 0 ]] && echo '+ latest')"
 echo "  Targets  : ${SELECTED[*]}"
 echo "  Push     : $([[ $PUSH -eq 1 ]] && echo 'yes' || echo 'no (build only)')"
@@ -254,8 +291,15 @@ for short in "${SELECTED[@]}"; do
             # Inline cache: layers are embedded in the image manifest itself.
             # Effective only when --push is used (cache lives in the registry image).
             build_args+=(--cache-to "type=inline,mode=max")
-            # Reuse layers from previously published image of this short name.
-            build_args+=(--cache-from "type=registry,ref=$latest_tag")
+            # Reuse layers from previously published image.
+            # Prefer :latest for cache (wider reuse across builds); fall back
+            # to the exact tag when :latest is not being published.
+            if [[ $NO_LATEST -eq 0 ]]; then
+                cache_from_ref="$latest_tag"
+            else
+                cache_from_ref="$full_tag"
+            fi
+            build_args+=(--cache-from "type=registry,ref=$cache_from_ref")
         fi
         # buildx: push and load are mutually exclusive. Push directly to skip the
         # local daemon round-trip (faster I/O); otherwise load into local docker.
@@ -299,8 +343,16 @@ if [[ $FAILED_PUSH -eq 1 ]]; then
 fi
 
 if [[ $PUSH -eq 1 ]]; then
-    echo "  Done. Images built and pushed to $REGISTRY."
+    if [[ $PRODUCTION -eq 1 ]]; then
+        echo "  Done. Production images ($TAG) built and pushed to $REGISTRY."
+    else
+        echo "  Done. Development images ($TAG) built and pushed to $REGISTRY."
+    fi
 else
-    echo "  Done. Images built locally. Re-run with --push to publish."
+    if [[ $PRODUCTION -eq 1 ]]; then
+        echo "  Done. Production images ($TAG) built locally. Re-run with --push to publish."
+    else
+        echo "  Done. Development images ($TAG) built locally. Re-run with --push to publish."
+    fi
 fi
 echo "══════════════════════════════════════════════════════════"

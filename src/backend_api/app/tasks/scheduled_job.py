@@ -128,8 +128,9 @@ def run_prompt_job(self, *, job_id: str, org_id: str | None = None, user_id: str
 
                 # HITL: if the run paused for approval, create delegations
                 if getattr(run_output, "status", None) == RunStatus.paused:
-                    from sqlalchemy.ext.asyncio import AsyncSession as AS, async_sessionmaker, create_async_engine
+                    from sqlalchemy.ext.asyncio import AsyncSession as AS, async_sessionmaker
                     from src.shared.config.settings import get_settings as _gs
+                    from src.shared.database import create_pooled_engine
                     from src.backend_api.app.services.approval_delegations import (
                         extract_approval_ids_from_run_output,
                         process_approval_delegations,
@@ -137,7 +138,7 @@ def run_prompt_job(self, *, job_id: str, org_id: str | None = None, user_id: str
                     from src.shared.models.organization import GSageOrganization
 
                     _settings = _gs()
-                    _engine = create_async_engine(_settings.database_url, pool_pre_ping=True)
+                    _engine = create_pooled_engine(_settings)
                     _sf = async_sessionmaker(_engine, expire_on_commit=False)
                     try:
                         async with _sf() as db:

@@ -73,7 +73,6 @@ def build_application(bot_token: str, profiles: list):
 async def handle_message(update: Any, context: Any) -> None:
     """Handle a single inbound Telegram text message."""
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
     from src.shared.config.settings import get_settings
     from src.shared.models.channel_conversation import GSageChannelConversation
@@ -132,8 +131,11 @@ async def handle_message(update: Any, context: Any) -> None:
     org_id = profile.org_id
 
     settings = get_settings()
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
-    AsyncSession_ = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    # Reuse the shared DB engine injected by TelegramWorker._sync_bots().
+    # A single pool serves all messages for this bot, eliminating per-message
+    # connection churn that could exhaust PostgreSQL's max_connections.
+    db_engine = context.bot_data["db_engine"]
+    AsyncSession_ = context.bot_data["db_session_factory"]
 
     # Tracks the persisted inbound message ID across transaction phases.
     # Set after Phase 1 commits so the error handler can mark it FAILED
@@ -487,10 +489,9 @@ async def handle_message(update: Any, context: Any) -> None:
         except Exception:
             pass
     finally:
-        # Cleanup MCP sessions BEFORE disposing the engine so the anyio
-        # cancel scope inside the MCP transport can unwind cleanly.
-        # Without this, a zombie httpx connection (CLOSE-WAIT on our
-        # side) pins the event loop at 100% CPU via _deliver_cancellation.
+        # Cleanup MCP sessions.  The shared DB engine is NOT disposed here
+        # — it lives for the lifetime of the bot Application and is managed
+        # by TelegramWorker._run().
         if agent is not None:
             try:
                 from src.shared.services.mcp_cleanup import cleanup_agent_mcp
@@ -498,4 +499,3 @@ async def handle_message(update: Any, context: Any) -> None:
                 await cleanup_agent_mcp(agent)
             except Exception:
                 logger.debug("MCP cleanup failed (ignored)", exc_info=True)
-        await engine.dispose()

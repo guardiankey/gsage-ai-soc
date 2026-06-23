@@ -28,9 +28,10 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Path, Request, status
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.shared.config.settings import get_settings
+from src.shared.database import create_pooled_engine
 from src.shared.models.interface_profile import GSageInterfaceProfile
 from src.teams_handler.graph_client import GraphClient
 from src.teams_handler.handler import handle_teams_turn
@@ -271,7 +272,7 @@ async def teams_messages_stream(
 async def _load_active_profile(profile_id: uuid.UUID) -> GSageInterfaceProfile:
     """Fetch the active Teams ``InterfaceProfile`` or raise 404."""
     settings = get_settings()
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    engine = create_pooled_engine(settings)
     SessionLocal = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )

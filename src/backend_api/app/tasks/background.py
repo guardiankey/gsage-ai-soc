@@ -69,9 +69,10 @@ async def _async_execute_background_tool(task_id: str) -> None:
     import uuid
 
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from src.shared.config.settings import get_settings
+    from src.shared.database import create_pooled_engine
     from src.shared.elasticsearch.client import ElasticsearchClient
     from src.shared.models.background_task import GSageBackgroundTask, BackgroundTaskStatus
     from src.shared.security.context import AgentContext
@@ -83,7 +84,7 @@ async def _async_execute_background_tool(task_id: str) -> None:
     settings = get_settings()
 
     # Build isolated database session for this task
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    engine = create_pooled_engine(settings)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     redis_client: redis.Redis = redis.from_url(
@@ -272,13 +273,14 @@ async def _mark_failed(task_id: str, error_message: str) -> None:
     import uuid
 
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from src.shared.config.settings import get_settings
+    from src.shared.database import create_pooled_engine
     from src.shared.models.background_task import GSageBackgroundTask, BackgroundTaskStatus
 
     settings = get_settings()
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    engine = create_pooled_engine(settings)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     try:

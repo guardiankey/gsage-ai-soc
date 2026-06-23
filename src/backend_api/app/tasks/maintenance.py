@@ -143,15 +143,15 @@ def purge_expired_files() -> dict:
         from sqlalchemy.ext.asyncio import (
             AsyncSession,
             async_sessionmaker,
-            create_async_engine,
         )
 
         from src.shared.config.settings import get_settings
+        from src.shared.database import create_pooled_engine
         from src.shared.models.generated_file import GSageFile
         from src.shared.services.file_store import get_file_store
 
         settings = get_settings()
-        engine = create_async_engine(settings.database_url, echo=False)
+        engine = create_pooled_engine(settings)
         async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
         now = datetime.now(timezone.utc)
@@ -236,10 +236,10 @@ def reap_orphan_background_tasks() -> dict:
         from sqlalchemy.ext.asyncio import (
             AsyncSession,
             async_sessionmaker,
-            create_async_engine,
         )
 
         from src.shared.config.settings import get_settings
+        from src.shared.database import create_pooled_engine
         from src.shared.models.background_task import (
             BackgroundTaskStatus,
             GSageBackgroundTask,
@@ -260,7 +260,7 @@ def reap_orphan_background_tasks() -> dict:
             tool_registry = None
 
         settings = get_settings()
-        engine = create_async_engine(settings.database_url, echo=False)
+        engine = create_pooled_engine(settings)
         async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
         now = datetime.now(timezone.utc)

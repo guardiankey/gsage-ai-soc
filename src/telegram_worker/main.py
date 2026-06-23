@@ -42,6 +42,11 @@ class TelegramWorker:
         # Maps bot_token -> (Application, asyncio.Task)
         self._bots: dict[str, tuple] = {}
         self._reload_task: Optional[asyncio.Task] = None
+        # Shared DB engine / session factory reused across all bots and
+        # profile reloads.  Created once at start-up, stored in each
+        # Application's bot_data for handler access, disposed at shutdown.
+        self._db_engine = None
+        self._db_session_factory = None
 
     # ── Public interface ──────────────────────────────────────────────────
 
@@ -64,8 +69,19 @@ class TelegramWorker:
 
     async def _run(self) -> None:
         from src.shared.config.settings import get_settings
+        from src.shared.database import create_pooled_engine
+        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as _AsyncSession
 
         settings = get_settings()
+
+        # Create a single shared engine + session factory for the lifetime
+        # of this worker.  Every bot Application and the profile-reload
+        # polling loop reuse this engine, avoiding per-message pool churn.
+        if self._db_engine is None:
+            self._db_engine = create_pooled_engine(settings)
+            self._db_session_factory = async_sessionmaker(
+                self._db_engine, class_=_AsyncSession, expire_on_commit=False,
+            )
 
         # Initial load
         profiles = await self._load_active_profiles()
@@ -108,23 +124,29 @@ class TelegramWorker:
             pass
         finally:
             await self._stop_all_bots()
+            # Dispose the shared DB engine so all asyncpg connections are
+            # properly closed before the event loop shuts down.
+            if self._db_engine is not None:
+                try:
+                    await self._db_engine.dispose()
+                except Exception:
+                    pass
+                self._db_engine = None
+                self._db_session_factory = None
             logger.info("TelegramWorker: stopped")
 
     # ── Profile loading ───────────────────────────────────────────────────
 
     async def _load_active_profiles(self) -> list:
         """Return all active Telegram InterfaceProfiles from the DB."""
-        from src.shared.config.settings import get_settings
         from src.shared.models.interface_profile import GSageInterfaceProfile
         from sqlalchemy import select
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-        settings = get_settings()
-        engine = create_async_engine(settings.database_url, pool_pre_ping=True)
-        AsyncSession_ = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        if self._db_session_factory is None:
+            raise RuntimeError("DB session factory not initialised — call _run() first")
 
         try:
-            async with AsyncSession_() as session:
+            async with self._db_session_factory() as session:
                 result = await session.execute(
                     select(GSageInterfaceProfile).where(
                         GSageInterfaceProfile.interface == "telegram",
@@ -136,8 +158,6 @@ class TelegramWorker:
         except Exception as exc:
             logger.error("TelegramWorker._load_active_profiles: error — %s", exc)
             return []
-        finally:
-            await engine.dispose()
 
     # ── Bot lifecycle ─────────────────────────────────────────────────────
 
@@ -181,6 +201,10 @@ class TelegramWorker:
             )
             try:
                 app = build_application(token, token_profiles)
+                # Inject the shared DB engine so the handler can reuse it
+                # instead of creating a new pool per inbound message.
+                app.bot_data["db_engine"] = self._db_engine
+                app.bot_data["db_session_factory"] = self._db_session_factory
                 task = asyncio.create_task(
                     self._run_bot(app, token),
                     name=f"tg-bot-{token[-6:]}",

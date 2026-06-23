@@ -153,14 +153,15 @@ async def _async_post_continuation_error(
     import uuid
 
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from src.shared.config.settings import get_settings
+    from src.shared.database import create_pooled_engine
     from src.shared.models.background_task import GSageBackgroundTask
     from src.shared.models.tenant_session import GSageTenantSession
 
     settings = get_settings()
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    engine = create_pooled_engine(settings)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     friendly = (
@@ -223,12 +224,13 @@ async def _async_continue_bg_task(task_id: str) -> None:
     """Core async logic for background task continuation."""
     import uuid
 
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from src.shared.config.settings import get_settings
+    from src.shared.database import create_pooled_engine
 
     settings = get_settings()
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    engine = create_pooled_engine(settings)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     try:
@@ -264,12 +266,13 @@ async def _async_continue_approval(approval_id: str, org_id: str) -> None:
     """Core async logic for approval continuation."""
     import uuid
 
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from src.shared.config.settings import get_settings
+    from src.shared.database import create_pooled_engine
 
     settings = get_settings()
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    engine = create_pooled_engine(settings)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     try:

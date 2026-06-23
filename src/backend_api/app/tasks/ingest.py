@@ -256,10 +256,11 @@ def ingest_document_task(
     import uuid as _uuid
 
     from markitdown import MarkItDown
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from src.backend_api.app.services.knowledge import build_knowledge, evict_knowledge_cache
     from src.shared.config.settings import get_settings
+    from src.shared.database import create_pooled_engine
     from src.shared.models.ingest_job import IngestStatus
     from src.shared.models.knowledge_base import GSageKnowledgeSource
 
@@ -272,9 +273,7 @@ def ingest_document_task(
         # different loop" because asyncio.run() creates a new event loop each
         # time while the pool retains connections from the previous loop.
         settings = get_settings()
-        engine = create_async_engine(
-            settings.database_url, echo=False, pool_pre_ping=True
-        )
+        engine = create_pooled_engine(settings)
         session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
         org_uuid = _uuid.UUID(org_id)  # defined here so finally can reference it
@@ -538,9 +537,10 @@ def ingest_url_task(
     from urllib.parse import urlparse, unquote
 
     import httpx as _httpx
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from src.shared.config.settings import get_settings
+    from src.shared.database import create_pooled_engine
     from src.shared.models.ingest_job import IngestStatus
 
     base_dir = Path(_os.environ.get("INGEST_TMP_DIR", "/data/ingest"))
@@ -599,9 +599,7 @@ def ingest_url_task(
     async def _run() -> str:
         nonlocal dest_path
         settings = get_settings()
-        engine = create_async_engine(
-            settings.database_url, echo=False, pool_pre_ping=True
-        )
+        engine = create_pooled_engine(settings)
         session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
         try:
@@ -629,9 +627,7 @@ def ingest_url_task(
 
         async def _mark_failed() -> None:
             settings = get_settings()
-            engine = create_async_engine(
-                settings.database_url, echo=False, pool_pre_ping=True
-            )
+            engine = create_pooled_engine(settings)
             session_maker = async_sessionmaker(engine, expire_on_commit=False)
             try:
                 await _update_job(

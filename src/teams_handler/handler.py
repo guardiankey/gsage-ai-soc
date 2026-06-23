@@ -30,8 +30,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
+
+from src.shared.database import create_pooled_engine
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +189,7 @@ async def handle_teams_turn(
     profile_id = profile.id
 
     settings = get_settings()
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    engine = create_pooled_engine(settings)
     AsyncSession_ = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )

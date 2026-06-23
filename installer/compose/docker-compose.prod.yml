@@ -56,6 +56,10 @@ services:
     image: postgres:16
     container_name: gsage-postgres
     restart: unless-stopped
+    # Raise max_connections from the PG default (100) to accommodate
+    # multiple services that each hold their own connection pool
+    # (backend_api, mcp-server, telegram/email workers, Celery workers).
+    command: postgres -c max_connections=300
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}

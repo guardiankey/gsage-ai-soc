@@ -26,8 +26,9 @@ import uuid
 from typing import Any, Optional, cast
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from src.shared.database import create_pooled_engine
 from src.shared.logging import configure_logging
 
 # Configure structured JSON logging before anything else
@@ -65,7 +66,7 @@ class EmailWorker:
         from src.shared.models.email_account import GSageEmailAccount
 
         settings = get_settings()
-        engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+        engine = create_pooled_engine(settings)
         Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
         logger.info("EmailWorker: loading active email accounts...")

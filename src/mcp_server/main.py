@@ -31,13 +31,14 @@ import uvicorn
 from mcp import types as mcp_types
 from mcp.server.lowlevel import Server as MCPServer
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from src.mcp_server.permissions import resolve_tool_permissions
+from src.shared.database import create_pooled_engine
 from src.mcp_server.registry.registry import build_registry, get_registry, sync_permissions_to_db, sync_tools_to_db
 from src.mcp_server.tenant_context import TenantHeaders, get_tenant_headers, get_tenant_headers_or_none
 from src.mcp_server.tools.audit import ToolAuditLogger
@@ -459,8 +460,8 @@ async def _lifespan(app: Starlette):
     else:
         logger.warning("Elasticsearch not reachable — audit logs will fail")
 
-    # PostgreSQL async engine
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    # PostgreSQL async engine (respects pool_size / max_overflow / timeouts)
+    engine = create_pooled_engine(settings)
     _state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     # Build tool registry once at start-up
