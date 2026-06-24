@@ -23,7 +23,7 @@ def _bool(flag: Any) -> bool:
     return str(flag) in ("1", "True", "true")
 
 
-def slim_guest_resource(r: dict) -> dict:
+def slim_guest_resource(r: dict[str, Any]) -> dict:
     """Slim a ``/cluster/resources?type=vm`` row (QEMU or LXC)."""
     maxcpu = r.get("maxcpu")
     cpu_frac = r.get("cpu")
@@ -48,7 +48,7 @@ def slim_guest_resource(r: dict) -> dict:
     }
 
 
-def slim_node(r: dict) -> dict:
+def slim_node(r: dict[str, Any]) -> dict:
     """Slim a ``/nodes`` row."""
     maxcpu = r.get("maxcpu")
     cpu_frac = r.get("cpu")
@@ -69,7 +69,7 @@ def slim_node(r: dict) -> dict:
     }
 
 
-def slim_node_status(r: dict) -> dict:
+def slim_node_status(r: dict[str, Any]) -> dict:
     """Slim a ``/nodes/{node}/status`` detail object."""
     cpuinfo = r.get("cpuinfo") or {}
     memory = r.get("memory") or {}
@@ -92,8 +92,10 @@ def slim_node_status(r: dict) -> dict:
     }
 
 
-def slim_storage(r: dict) -> dict:
+def slim_storage(r: dict[str, Any]) -> dict:
     """Slim a ``/nodes/{node}/storage`` row."""
+    used_raw = r.get("used")
+    total_raw = r.get("total")
     return {
         "storage": r.get("storage"),
         "type": r.get("type"),
@@ -101,17 +103,18 @@ def slim_storage(r: dict) -> dict:
         "enabled": _bool(r.get("enabled")) if r.get("enabled") is not None else None,
         "active": _bool(r.get("active")) if r.get("active") is not None else None,
         "shared": _bool(r.get("shared")) if r.get("shared") is not None else None,
-        "total_gb": _gb(r.get("total")),
-        "used_gb": _gb(r.get("used")),
+        "total_gb": _gb(total_raw),
+        "used_gb": _gb(used_raw),
         "available_gb": _gb(r.get("avail")),
         "used_percent": (
-            round(float(r.get("used")) / float(r.get("total")) * 100, 1)
-            if r.get("total") else None
+            round(float(used_raw) / float(total_raw) * 100, 1)
+            if used_raw is not None and total_raw is not None
+            else None
         ),
     }
 
 
-def slim_network(r: dict) -> dict:
+def slim_network(r: dict[str, Any]) -> dict:
     """Slim a ``/nodes/{node}/network`` interface row."""
     return {
         "iface": r.get("iface"),
@@ -127,7 +130,7 @@ def slim_network(r: dict) -> dict:
     }
 
 
-def slim_snapshot(r: dict) -> dict:
+def slim_snapshot(r: dict[str, Any]) -> dict:
     """Slim a ``/.../snapshot`` row."""
     return {
         "name": r.get("name"),
@@ -139,7 +142,7 @@ def slim_snapshot(r: dict) -> dict:
     }
 
 
-def slim_task(r: dict) -> dict:
+def slim_task(r: dict[str, Any]) -> dict:
     """Slim a ``/cluster/tasks`` or ``/nodes/{node}/tasks`` row."""
     return {
         "upid": r.get("upid"),
@@ -153,7 +156,7 @@ def slim_task(r: dict) -> dict:
     }
 
 
-def slim_guest_config(kind: str, vmid: int, node: str, config: dict, status: dict) -> dict:
+def slim_guest_config(kind: str, vmid: int, node: str, config: dict[str, Any], status: dict[str, Any]) -> dict:
     """Merge a guest's ``config`` + ``status/current`` into one flat view.
 
     Disk and network entries (scsi0, virtio0, net0, rootfs, …) are passed
@@ -179,6 +182,7 @@ def slim_guest_config(kind: str, vmid: int, node: str, config: dict, status: dic
         else:
             other.setdefault("_extra", {})[key] = val
 
+    cpu_raw = status.get("cpu")
     return {
         "vmid": vmid,
         "kind": kind,
@@ -194,8 +198,8 @@ def slim_guest_config(kind: str, vmid: int, node: str, config: dict, status: dic
         "onboot": _bool(config.get("onboot")) if config.get("onboot") is not None else None,
         "uptime_seconds": status.get("uptime"),
         "cpu_percent": (
-            round(float(status.get("cpu")) * 100, 1)
-            if status.get("cpu") is not None else None
+            round(float(cpu_raw) * 100, 1)
+            if cpu_raw is not None else None
         ),
         "memory_used_gb": _gb(status.get("mem")),
         "max_memory_gb": _gb(status.get("maxmem")),
@@ -206,15 +210,16 @@ def slim_guest_config(kind: str, vmid: int, node: str, config: dict, status: dic
     }
 
 
-def slim_guest_metrics(kind: str, vmid: int, status: dict) -> dict:
+def slim_guest_metrics(kind: str, vmid: int, status: dict[str, Any]) -> dict:
     """Slim a ``/.../status/current`` row into a metrics view."""
+    cpu_raw = status.get("cpu")
     return {
         "vmid": vmid,
         "kind": kind,
         "status": status.get("status"),
         "cpu_percent": (
-            round(float(status.get("cpu")) * 100, 1)
-            if status.get("cpu") is not None else None
+            round(float(cpu_raw) * 100, 1)
+            if cpu_raw is not None else None
         ),
         "cpus": status.get("cpus"),
         "memory_used_gb": _gb(status.get("mem")),

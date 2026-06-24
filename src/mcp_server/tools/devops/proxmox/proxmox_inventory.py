@@ -94,7 +94,12 @@ async def _resolve_guest(
     name = (params.get("name") or "").strip()
     if name:
         node, kind, row = await client.find_guest_by_name(name)
-        return node, kind, int(row.get("vmid"))
+        vmid_val = row.get("vmid")
+        if vmid_val is None:
+            raise _ParamError(
+                f"Guest {name!r} found but VMID is missing in the response."
+            )
+        return node, kind, int(vmid_val)
     raise _ParamError("This action requires 'vmid' or 'name'.")
 
 
