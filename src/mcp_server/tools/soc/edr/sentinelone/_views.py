@@ -55,7 +55,7 @@ def slim_threat(t: dict) -> dict:
     agent = t.get("agentRealtimeInfo") or {}
     mitig = t.get("mitigationStatus") or []
     mitig_status = ", ".join(
-        m.get("action") for m in mitig if isinstance(m, dict) and m.get("action")
+        a for m in mitig if isinstance(m, dict) and (a := m.get("action"))
     ) if isinstance(mitig, list) else None
     return {
         "id": t.get("id"),

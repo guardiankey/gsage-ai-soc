@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Dialog,
@@ -46,6 +46,15 @@ export function PromptForm({
     prompt?.scope || 'personal',
   )
   const [categoryId, setCategoryId] = useState(prompt?.category_id || '')
+
+  // Sync state when prompt prop changes (edit vs create, or switching prompts)
+  useEffect(() => {
+    setTitle(prompt?.title || '')
+    setContent(prompt?.content || '')
+    setDescription(prompt?.description || '')
+    setScope(prompt?.scope || 'personal')
+    setCategoryId(prompt?.category_id || '')
+  }, [prompt])
 
   // Flatten category tree for select
   const flatCategories: { id: string; name: string; depth: number }[] = []

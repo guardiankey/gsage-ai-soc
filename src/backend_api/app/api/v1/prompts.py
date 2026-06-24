@@ -512,7 +512,14 @@ async def create_prompt(
     )
     db.add(prompt)
     await db.commit()
-    await db.refresh(prompt)
+
+    # Re-query with eager-loaded relationships to avoid MissingGreenlet
+    result = await db.execute(
+        select(GSagePrompt).options(
+            selectinload(GSagePrompt.category), selectinload(GSagePrompt.creator)
+        ).where(GSagePrompt.id == prompt.id)
+    )
+    prompt = result.scalar_one()
 
     return _prompt_to_out(prompt)
 
@@ -688,7 +695,14 @@ async def update_prompt(
         setattr(prompt, key, value)
 
     await db.commit()
-    await db.refresh(prompt)
+
+    # Re-query with eager-loaded relationships to avoid MissingGreenlet
+    result = await db.execute(
+        select(GSagePrompt).options(
+            selectinload(GSagePrompt.category), selectinload(GSagePrompt.creator)
+        ).where(GSagePrompt.id == prompt.id)
+    )
+    prompt = result.scalar_one()
 
     fav = await db.get(GSageUserPromptFavorite, (ctx.user_id, prompt_id))
     return _prompt_to_out(prompt, fav is not None)
