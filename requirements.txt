@@ -76,6 +76,7 @@ azure-mgmt-containerservice>=33,<35
 azure-mgmt-storage>=22,<24
 azure-mgmt-subscription>=3,<4
 azure-mgmt-devtestlabs>=9,<10  # DevTestLab schedules (auto-shutdown VMs)
+pyVmomi>=8.0,<9          # VMware vSphere Web Services SDK (used by vcenter_* tools)
 polars[rtcompat]>=1.0,<2 # DataFrame engine used by core CSV tools (csv_describe / csv_query / csv_soc). [rtcompat] picks a build that runs on older CPUs lacking AVX2/FMA (avoids "Missing required CPU features" warning + crash risk).
 duckdb>=1.0,<2           # In-process SQL engine used by core CSV tools (csv_query, SELECT-only)
 pyarrow>=16,<22          # Required by polars.DataFrame.to_arrow() in csv_query (zero-copy DuckDB register)
