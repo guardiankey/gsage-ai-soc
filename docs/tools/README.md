@@ -60,6 +60,8 @@ framework (audience: developers).
 | `azure` | 5 | `azure:read`, `azure:write` | ✓ | ✓ | ✓ | [devops/azure.md](devops/azure.md) |
 | `gitlab` | 3 | `gitlab:read`, `gitlab:write` | ✓ | ✓ | — | [devops/gitlab.md](devops/gitlab.md) |
 | `kubernetes` | 3 | `k8s:read`, `k8s:write` | ✓ | ✓ | ✓ | [devops/k8s/kubernetes.md](devops/k8s/kubernetes.md) |
+| `proxmox` | 3 | `proxmox:read`, `proxmox:write` | ✓ | ✓ | ✓ | [devops/proxmox.md](devops/proxmox.md) |
+| `vcenter` | 3 | `vcenter:read`, `vcenter:write` | ✓ | ✓ | ✓ | [devops/vmware/vcenter.md](devops/vmware/vcenter.md) |
 
 ## dns
 
@@ -74,12 +76,15 @@ framework (audience: developers).
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `generate_document` | 1 | `files:read`, `files:write` | — | — | — | [core/generate_document.md](core/generate_document.md) |
 | `list_templates` | 1 | `files:read` | — | — | — | [core/list_templates.md](core/list_templates.md) |
+| `process_catalog_document` | 1 | — | — | — | — | [enterprise/process_catalog/process_catalog_document.md](enterprise/process_catalog/process_catalog_document.md) |
+| `sei_pen` | 3 | `sei:read`, `sei:write` | ✓ | ✓ | — | [enterprise/gov/sei_pen.md](enterprise/gov/sei_pen.md) |
 
 ## edr
 
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `gravityzone` | 3 | `gravityzone:read`, `gravityzone:write` | ✓ | ✓ | — | [soc/edr/gravityzone.md](soc/edr/gravityzone.md) |
+| `sentinelone` | 3 | `sentinelone:read`, `sentinelone:write` | ✓ | ✓ | ✓ | [soc/edr/sentinelone.md](soc/edr/sentinelone.md) |
 | `trellix_edr` | 8 | `edr:quarantine`, `edr:read`, `edr:write` | ✓ | ✓ | ✓ | [soc/edr/trellix/trellix_edr.md](soc/edr/trellix/trellix_edr.md) |
 | `trellix_edr_collectors` | 1 | `edr:read` | — | — | — | [soc/edr/trellix/trellix_edr_collectors.md](soc/edr/trellix/trellix_edr_collectors.md) |
 
@@ -99,6 +104,14 @@ framework (audience: developers).
 | `pdf_analyzer` | 1 | `agents:run` | — | — | — | [core/pdf_analyzer.md](core/pdf_analyzer.md) |
 | `read_file` | 1 | `agents:run` | — | — | — | [core/read_file.md](core/read_file.md) |
 | `zip_tool` | 1 | `files:read`, `files:write` | — | — | — | [core/zip_tool.md](core/zip_tool.md) |
+
+## firewall
+
+| Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
+| --- | ---: | --- | :---: | :---: | :---: | --- |
+| `imperva_cloud` | 2 | `imperva:read`, `imperva:write` | ✓ | ✓ | ✓ | [soc/firewall/imperva/imperva_cloud.md](soc/firewall/imperva/imperva_cloud.md) |
+| `imperva_waf` | 2 | `imperva:read`, `imperva:write` | ✓ | ✓ | ✓ | [soc/firewall/imperva/imperva_waf.md](soc/firewall/imperva/imperva_waf.md) |
+| `opnsense` | 2 | `firewall:read`, `firewall:write` | ✓ | ✓ | ✓ | [soc/firewall/opnsense.md](soc/firewall/opnsense.md) |
 
 ## itsm
 
@@ -158,6 +171,7 @@ framework (audience: developers).
 | `datastore` | 1 | `datastores:read` | — | — | — | [datastore.md](datastore.md) |
 | `mermaid_reference` | 1 | — | — | — | — | [core/mermaid_reference.md](core/mermaid_reference.md) |
 | `mermaid_validate` | 1 | — | — | — | — | [core/mermaid_validate.md](core/mermaid_validate.md) |
+| `process_catalog` | 1 | — | — | — | — | [enterprise/process_catalog/process_catalog.md](enterprise/process_catalog/process_catalog.md) |
 | `search_tools` | 1 | — | — | — | — | [core/search_tools.md](core/search_tools.md) |
 
 ## vulnerability
