@@ -372,7 +372,7 @@ class _TenantHeaderASGI:
     def __init__(self, app: Callable[[Any, Any, Any], Awaitable[None]]):
         self.app = app
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope, receive, send) -> None:
         if scope["type"] == "http":
             from src.mcp_server.tenant_context import _tenant_var
 
@@ -434,7 +434,7 @@ class _MCPEndpoint:
     async def _handle(self, scope, receive, send):
         await _session_manager.handle_request(scope, receive, send)
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope, receive, send) -> None:
         await self._inner(scope, receive, send)
 
 
