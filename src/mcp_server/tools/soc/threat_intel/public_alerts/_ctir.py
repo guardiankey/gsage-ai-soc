@@ -122,10 +122,18 @@ class CTIRParser(SourceParser):
 
             # Extract a summary snippet from parent context
             summary = None
+            full_text: str = ""
             if parent:
                 full_text = cls._safe_text(parent)
                 if full_text and len(full_text) > len(text) + 10:
-                    summary = full_text[:500]
+                    summary = cls._clean_summary_raw(full_text)
+
+            # CTIR summaries contain "última modificação DD/MM/AAAA HHhMM".
+            # Extract that date as the authoritative date for this item
+            # (the parent-text date may be shared across items in a list).
+            refined_date = cls._extract_ctir_date(summary) or cls._extract_ctir_date(full_text)
+            if refined_date:
+                date_text = refined_date or date_text
 
             items.append({
                 "title": text.strip()[:255],
@@ -171,3 +179,21 @@ class CTIRParser(SourceParser):
         if parse_date_br(text):
             return text
         return None
+
+    @staticmethod
+    def _clean_summary_raw(text: str) -> str:
+        """Collapse whitespace in CTIR listing text (before normalisation)."""
+        import re
+        return re.sub(r"\s+", " ", text).strip()[:500]
+
+    @staticmethod
+    def _extract_ctir_date(text: str | None) -> str | None:
+        """Extract a BR date from CTIR's 'última modificação' pattern.
+
+        ``"última modificação 15/01/2026 17h34"`` → ``"15/01/2026"``.
+        """
+        if not text:
+            return None
+        import re
+        m = re.search(r"(?:última|ultima)\s+modificação\s+(\d{1,2}/\d{1,2}/\d{4})", text, re.IGNORECASE)
+        return m.group(1) if m else None

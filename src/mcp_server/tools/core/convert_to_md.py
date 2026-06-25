@@ -124,6 +124,42 @@ class ConvertToMdTool(BaseTool):
     state_defaults: ClassVar[dict] = {}
     reset_policy: ClassVar[str] = "never"
 
+    # ── Helpers ───────────────────────────────────────────────────────
+
+    async def _store_or_fallback(
+        self,
+        *,
+        data: bytes,
+        filename: str,
+        content_type: str,
+        agent_context: AgentContext,
+        description: str,
+    ) -> tuple[Optional[dict], Optional[str]]:
+        """Store *data* as a file artifact, returning error instead of raising.
+
+        Long-running PDF conversions can exceed the async DB session
+        lifetime.  When storage fails we return the error message so
+        the caller can serve the Markdown inline instead.
+        """
+        from src.mcp_server.tools.base import _tool_session_ctx
+
+        session = _tool_session_ctx.get()
+        if session is None:
+            return None, "no DB session available"
+
+        try:
+            artifact = await self._store_file(
+                data=data,
+                filename=filename,
+                content_type=content_type,
+                agent_context=agent_context,
+                session=session,
+                description=description,
+            )
+            return artifact, None
+        except Exception as exc:
+            return None, str(exc)
+
     # ── Execute ───────────────────────────────────────────────────────────
 
     async def execute(
@@ -234,19 +270,17 @@ class ConvertToMdTool(BaseTool):
         )[:80]
         artifact_filename = f"convert_{ts}_{safe_name}.md"
 
-        from sqlalchemy.ext.asyncio import AsyncSession
-        from src.mcp_server.tools.base import _tool_session_ctx
-
-        session = _tool_session_ctx.get()
-        artifact: Optional[dict] = None
-        if session is not None:
-            artifact = await self._store_file(
-                data=md_content.encode("utf-8"),
-                filename=artifact_filename,
-                content_type="text/markdown",
-                agent_context=agent_context,
-                session=session,
-                description=f"Markdown conversion of {filename}",
+        artifact, store_error = await self._store_or_fallback(
+            data=md_content.encode("utf-8"),
+            filename=artifact_filename,
+            content_type="text/markdown",
+            agent_context=agent_context,
+            description=f"Markdown conversion of {filename}",
+        )
+        if store_error:
+            log.warning(
+                "convert_to_md: artifact storage failed for %s: %s",
+                filename, store_error,
             )
 
         # ── Extract title ────────────────────────────────────────────────
@@ -256,9 +290,24 @@ class ConvertToMdTool(BaseTool):
             if stripped.startswith("# ") and len(stripped) > 2:
                 title = stripped[2:].strip()[:255]
                 break
+        # Fallback: first meaningful line
+        if title is None:
+            for line in md_content.splitlines():
+                stripped = line.strip()
+                if len(stripped) > 10 and not stripped.startswith("!"):
+                    title = stripped[:255]
+                    break
 
         # ── Build preview ────────────────────────────────────────────────
-        preview = md_content[:_PREVIEW_CHARS]
+        # When artifact storage failed, return the full Markdown inline
+        # (up to 50K chars) so the agent can still read the content.
+        if artifact is None:
+            _INLINE_MAX = 50000
+            preview = md_content[:_INLINE_MAX]
+            preview_truncated = len(md_content) > _INLINE_MAX
+        else:
+            preview = md_content[:_PREVIEW_CHARS]
+            preview_truncated = md_chars > _PREVIEW_CHARS
 
         elapsed = int((time.monotonic() - t0) * 1000)
         return self._success(
@@ -269,9 +318,10 @@ class ConvertToMdTool(BaseTool):
                 "original_size_bytes": file_size,
                 "md_size_chars": md_chars,
                 "preview": preview,
-                "preview_truncated": md_chars > _PREVIEW_CHARS,
+                "preview_truncated": preview_truncated,
                 "md_truncated": md_truncated,
                 "artifact": artifact,
+                "artifact_error": store_error,
                 "title": title,
             },
             execution_time_ms=elapsed,

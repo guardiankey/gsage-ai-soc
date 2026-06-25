@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from abc import ABC, abstractmethod
 from datetime import date, datetime, timezone
-from typing import Optional
+from typing import ClassVar, Optional
 
 from bs4 import BeautifulSoup, Tag
 
@@ -101,15 +102,25 @@ class SourceParser(ABC):
                 except (ValueError, KeyError):
                     pub_date = date.today()
 
+            # Clean summary: collapse whitespace, strip wrapping newlines
+            raw_summary = item.get("summary")
+            summary = cls._clean_summary(raw_summary) if raw_summary else None
+
+            title = item.get("title", "")
+            # Infer severity and categories from title + summary when
+            # the parser didn't set them explicitly.
+            severity = item.get("severity") or cls._infer_severity(title, summary)
+            categories = item.get("categories") or cls._extract_categories(title, summary)
+
             alert = {
                 "id": cls._make_id(item.get("title", ""), pub_date),
                 "source": cls.source_id,
-                "title": item.get("title", ""),
+                "title": title,
                 "content_url": item.get("url"),
-                "severity": item.get("severity"),
+                "severity": severity,
                 "published_at": pub_date.isoformat(),
-                "summary": item.get("summary"),
-                "categories": item.get("categories") or [],
+                "summary": summary,
+                "categories": categories,
                 "tlp": "TLP:WHITE",
             }
             alerts.append(alert)
@@ -117,7 +128,51 @@ class SourceParser(ABC):
         alerts.sort(key=lambda a: a["published_at"], reverse=True)
         return alerts
 
-    # ── Helpers ───────────────────────────────────────────────────────────
+    # ── Summary / severity / categories helpers ───────────────────────────
+
+    @staticmethod
+    def _clean_summary(text: str) -> str:
+        """Collapse whitespace and strip HTML artifact newlines."""
+        import re
+        # Collapse runs of whitespace (including \n) to single space
+        cleaned = re.sub(r"\s+", " ", text)
+        return cleaned.strip()[:500]
+
+    _SEVERITY_PATTERNS: ClassVar[list[tuple[str, str]]] = [
+        ("crítica|crítico|críticas|urgente|emergencial|exploração ativa|zero.day|0-day|rce|remoto.*execução", "high"),
+        ("vulnerabilidade|exploração|comprometimento|ransomware|malware|backdoor|trojan|ameaça|incidente|ataque|invasão|breach|rootkit", "medium"),
+        ("atualização|update|patch|boletim|conscientização|boas.práticas|recomendação|orientação|divulgação|informativo", "low"),
+    ]
+
+    _CATEGORY_PATTERNS: ClassVar[list[tuple[str, str]]] = [
+        ("phishing|engenharia.social|fraude|spoofing", "phishing"),
+        ("cve-|vulnerabilidade|patch|exploit|zero.day|0-day|rce|buffer.overflow|xss|sqli|injeção", "vulnerability"),
+        ("ransomware|malware|backdoor|trojan|rootkit|wannacry|lockbit|blackcat|alphv", "malware"),
+        ("vazamento|breach|exposição|dados.expostos|data.leak|informação.pessoal|lgpd", "data-leak"),
+        ("cobalt.strike|c2|command.and.control|pivoting|lateral.movement|red.team", "apt"),
+        ("ddos|negação.de.serviço|botnet|amplificação|reflection", "ddos"),
+        ("cadeia.de.suprimentos|supply.chain|fornecedor|terceiro|software.update.comprometido", "supply-chain"),
+        ("credencial|senha|autenticação|mfa|2fa|identity|identidade|logon|acesso", "credential-access"),
+    ]
+
+    @classmethod
+    def _infer_severity(cls, title: str, summary: str | None) -> Optional[str]:
+        """Infer severity from keywords in title + summary."""
+        text = f"{title} {summary or ''}".lower()
+        for pattern, level in cls._SEVERITY_PATTERNS:
+            if re.search(pattern, text):
+                return level
+        return None
+
+    @classmethod
+    def _extract_categories(cls, title: str, summary: str | None) -> list[str]:
+        """Extract categories from keywords in title + summary."""
+        text = f"{title} {summary or ''}".lower()
+        cats: list[str] = []
+        for pattern, cat in cls._CATEGORY_PATTERNS:
+            if re.search(pattern, text):
+                cats.append(cat)
+        return cats
 
     @classmethod
     def _make_id(cls, title: str, pub_date: date) -> str:
