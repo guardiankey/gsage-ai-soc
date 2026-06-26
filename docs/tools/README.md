@@ -100,6 +100,7 @@ framework (audience: developers).
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `change_file_scope` | 1 | `files:write` | — | — | — | [core/change_file_scope.md](core/change_file_scope.md) |
+| `convert_to_md` | 1 | `core:convert_md` | — | — | — | [core/convert_to_md.md](core/convert_to_md.md) |
 | `list_recent_artifacts` | 1 | `agents:run` | — | — | — | [core/list_recent_artifacts.md](core/list_recent_artifacts.md) |
 | `pdf_analyzer` | 1 | `agents:run` | — | — | — | [core/pdf_analyzer.md](core/pdf_analyzer.md) |
 | `read_file` | 1 | `agents:run` | — | — | — | [core/read_file.md](core/read_file.md) |
@@ -112,6 +113,15 @@ framework (audience: developers).
 | `imperva_cloud` | 2 | `imperva:read`, `imperva:write` | ✓ | ✓ | ✓ | [soc/firewall/imperva/imperva_cloud.md](soc/firewall/imperva/imperva_cloud.md) |
 | `imperva_waf` | 2 | `imperva:read`, `imperva:write` | ✓ | ✓ | ✓ | [soc/firewall/imperva/imperva_waf.md](soc/firewall/imperva/imperva_waf.md) |
 | `opnsense` | 2 | `firewall:read`, `firewall:write` | ✓ | ✓ | ✓ | [soc/firewall/opnsense.md](soc/firewall/opnsense.md) |
+
+## gov
+
+| Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
+| --- | ---: | --- | :---: | :---: | :---: | --- |
+| `comprasgovbr` | 1 | `gov:compras:comprasgovbr:read` | — | ✓ | — | [enterprise/gov/compras/comprasgovbr.md](enterprise/gov/compras/comprasgovbr.md) |
+| `pncp_contratos` | 1 | `gov:compras:pncp_contratos:read` | — | — | — | [enterprise/gov/compras/pncp_contratos.md](enterprise/gov/compras/pncp_contratos.md) |
+| `siorg` | 1 | `gov:siorg:read` | — | — | — | [enterprise/gov/siorg/siorg.md](enterprise/gov/siorg/siorg.md) |
+| `tcu` | 1 | `gov:tcu:read` | — | — | — | [enterprise/gov/tcu/tcu.md](enterprise/gov/tcu/tcu.md) |
 
 ## itsm
 
@@ -161,6 +171,7 @@ framework (audience: developers).
 | `gdn_guardiankey` | 1 | `gdn:read` | — | ✓ | ✓ | [soc/threat_intel/gdn_guardiankey/gdn_guardiankey.md](soc/threat_intel/gdn_guardiankey/gdn_guardiankey.md) |
 | `msrc_bulletin` | 1 | `security:read` | — | — | — | [soc/threat_intel/msrc_bulletin.md](soc/threat_intel/msrc_bulletin.md) |
 | `nvd_lookup` | 1 | `threat:intel` | — | ✓ | — | [soc/threat_intel/nvd_lookup.md](soc/threat_intel/nvd_lookup.md) |
+| `public_alerts` | 1 | `threat_intel:public_alerts:read` | — | — | — | [soc/threat_intel/public_alerts/__init__.md](soc/threat_intel/public_alerts/__init__.md) |
 | `threat_intel_lookup` | 1 | `threat:intel` | — | ✓ | — | [soc/threat_intel/threat_intel_lookup.md](soc/threat_intel/threat_intel_lookup.md) |
 
 ## utility
@@ -169,6 +180,7 @@ framework (audience: developers).
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `base64_decoder` | 1 | `decode:base64` | — | — | — | [core/base64_decoder.md](core/base64_decoder.md) |
 | `datastore` | 1 | `datastores:read` | — | — | — | [datastore.md](datastore.md) |
+| `http_fetch` | 1 | `core:http:fetch` | — | — | — | [core/http_fetch.md](core/http_fetch.md) |
 | `mermaid_reference` | 1 | — | — | — | — | [core/mermaid_reference.md](core/mermaid_reference.md) |
 | `mermaid_validate` | 1 | — | — | — | — | [core/mermaid_validate.md](core/mermaid_validate.md) |
 | `process_catalog` | 1 | — | — | — | — | [enterprise/process_catalog/process_catalog.md](enterprise/process_catalog/process_catalog.md) |
