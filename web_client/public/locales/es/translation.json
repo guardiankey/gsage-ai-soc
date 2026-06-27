@@ -637,6 +637,7 @@
       "department": "Departamento",
       "allDepartments": "Todos (nivel org)",
       "catalogTitle": "Catálogo de Herramientas",
+      "category": "Categoría",
       "configsColumn": "Configuraciones",
       "configCount": "{{count}} configuración",
       "configCount_plural": "{{count}} configuraciones",

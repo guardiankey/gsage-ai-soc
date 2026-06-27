@@ -637,6 +637,7 @@
       "department": "部署",
       "allDepartments": "全て（組織全体）",
       "catalogTitle": "ツールカタログ",
+      "category": "カテゴリ",
       "configsColumn": "設定",
       "configCount": "{{count}} 件の設定",
       "configCount_plural": "{{count}} 件の設定",

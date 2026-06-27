@@ -667,6 +667,7 @@
       "department": "Department",
       "allDepartments": "All (org-wide)",
       "catalogTitle": "Tool Catalog",
+      "category": "Category",
       "configsColumn": "Configs",
       "configCount": "{{count}} config",
       "configCount_plural": "{{count}} configs",

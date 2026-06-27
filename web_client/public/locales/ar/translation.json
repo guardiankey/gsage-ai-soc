@@ -637,6 +637,7 @@
       "department": "القسم",
       "allDepartments": "الكل (على مستوى المؤسسة)",
       "catalogTitle": "كتالوج الأدوات",
+      "category": "الفئة",
       "configsColumn": "الإعدادات",
       "configCount": "{{count}} إعداد",
       "configCount_plural": "{{count}} إعدادات",

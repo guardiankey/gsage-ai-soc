@@ -165,6 +165,7 @@ export default function ToolConfigsPage() {
             <thead className="bg-muted/50">
               <tr>
                 <th className="text-left px-4 py-3 font-medium">{t('admin.toolConfigs.toolName')}</th>
+                <th className="text-left px-4 py-3 font-medium w-28">{t('admin.toolConfigs.category', 'Category')}</th>
                 <th className="text-left px-4 py-3 font-medium">{t('admin.toolConfigs.configsColumn', 'Configs')}</th>
                 <th className="px-4 py-3 w-20" />
                 <th className="px-4 py-3 w-24 font-medium text-center">{t('admin.toolConfigs.enabled')}</th>
@@ -188,8 +189,13 @@ export default function ToolConfigsPage() {
                         Namespace: {ns.name}
                       </button>
                     </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{ns.category || 'namespace'}</td>
                     <td className="px-4 py-3">
-                      <ConfigCountBadge entry={ns} onExpand={() => toggleNs(ns.name)} />
+                      <ConfigCountBadge
+                        entry={ns}
+                        onEdit={(tc) => setEditTarget(tc)}
+                        onDelete={(tc) => setDeleteTarget(tc)}
+                      />
                     </td>
                     <td className="px-4 py-3">
                       <Button
@@ -208,6 +214,7 @@ export default function ToolConfigsPage() {
                   {expandedNs.has(ns.name) && ns.children.map((child) => (
                     <tr key={child.name} className={rowClass(child)}>
                       <td className="px-4 py-3 pl-10 text-sm">{child.display_name || child.name}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{child.category || '—'}</td>
                       <td className="px-4 py-3">
                         <ConfigCountBadge
                           entry={child}
@@ -235,7 +242,7 @@ export default function ToolConfigsPage() {
               {/* Divider before orphan tools */}
               {nsWithChildren.length > 0 && orphanTools.length > 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-2 bg-muted/20 text-xs text-muted-foreground font-medium">
+                  <td colSpan={5} className="px-4 py-2 bg-muted/20 text-xs text-muted-foreground font-medium">
                     {t('admin.toolConfigs.noNamespace', 'Tools without namespace')}
                   </td>
                 </tr>
@@ -245,6 +252,7 @@ export default function ToolConfigsPage() {
               {orphanTools.map((tool) => (
                 <tr key={tool.name} className={rowClass(tool)}>
                   <td className="px-4 py-3 text-sm">{tool.display_name || tool.name}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">{tool.category || '—'}</td>
                   <td className="px-4 py-3">
                     <ConfigCountBadge
                       entry={tool}
@@ -269,7 +277,7 @@ export default function ToolConfigsPage() {
 
               {catalog?.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">{t('common.noResults')}</td>
+                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{t('common.noResults')}</td>
                 </tr>
               )}
             </tbody>
