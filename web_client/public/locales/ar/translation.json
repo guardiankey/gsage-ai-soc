@@ -635,7 +635,21 @@
       "deleteTitle": "حذف الإعداد",
       "deleteDesc": "حذف إعداد الأداة \"{{name}}\"؟",
       "department": "القسم",
-      "allDepartments": "الكل (على مستوى المؤسسة)"
+      "allDepartments": "الكل (على مستوى المؤسسة)",
+      "catalogTitle": "كتالوج الأدوات",
+      "configsColumn": "الإعدادات",
+      "configCount": "{{count}} إعداد",
+      "configCount_plural": "{{count}} إعدادات",
+      "notConfigured": "غير مُعد",
+      "addConfigFor": "إضافة إعداد لـ {{name}}",
+      "addConfigInline": "إضافة",
+      "noNamespace": "أدوات بدون نطاق",
+      "enabled": "مُفعّل",
+      "disabled": "مُعطّل",
+      "disableTitle": "تعطيل {{name}}؟",
+      "disableDesc": "سيتم إخفاء هذه الأداة عن الوكلاء ولن يمكن استدعاؤها حتى يتم إعادة تفعيلها.",
+      "enableTitle": "تفعيل {{name}}؟",
+      "enableDesc": "ستصبح هذه الأداة مرئية وقابلة للاستدعاء مرة أخرى."
     },
     "interfaces": {
       "title": "ملفات تعريف الواجهة",

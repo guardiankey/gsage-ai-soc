@@ -207,6 +207,29 @@ export interface ToolConfigUpdate {
   config?: Record<string, unknown>
 }
 
+// ---------- Tool Catalog (v2 — namespace-aware, enable/disable) ----------
+export interface ToolConfigSummary {
+  id: string
+  profile_id: string
+  dept_id: string | null
+  description: string | null
+}
+
+export interface ToolCatalogEntry {
+  name: string
+  display_name: string
+  category: string | null
+  config_namespace: string | null
+  is_namespace: boolean
+  is_enabled: boolean
+  config_count: number
+  configs: ToolConfigSummary[]
+}
+
+export interface ToolSettingsUpdate {
+  is_enabled: boolean
+}
+
 // ---------- Interface Profiles ----------
 export interface InterfaceProfileOut {
   id: string
@@ -579,6 +602,20 @@ export async function updateToolConfig(orgId: string, configId: string, payload:
 
 export async function deleteToolConfig(orgId: string, configId: string): Promise<void> {
   await apiClient.delete(`${base(orgId)}/tool-configs/${configId}`)
+}
+
+// ---- Tool Catalog (v2) ----
+export async function getToolCatalog(orgId: string): Promise<ToolCatalogEntry[]> {
+  const { data } = await apiClient.get<ToolCatalogEntry[]>(`${base(orgId)}/tool-catalog`)
+  return data
+}
+
+export async function updateToolSettings(
+  orgId: string,
+  toolName: string,
+  payload: ToolSettingsUpdate,
+): Promise<void> {
+  await apiClient.patch(`${base(orgId)}/tools/${encodeURIComponent(toolName)}/settings`, payload)
 }
 
 // ---- Interface Profiles ----

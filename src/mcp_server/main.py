@@ -132,6 +132,48 @@ def _base_tool_to_mcp(tool) -> mcp_types.Tool:
     })
 
 
+# ── Disabled-tool helpers ─────────────────────────────────────────────────
+
+async def _disabled_tool_names(org_id: uuid.UUID, session_factory) -> set[str]:
+    """Return the set of disabled tool_name / namespace strings for *org_id*."""
+    from sqlalchemy import select as _sql_select
+    from src.shared.models.org_tool_settings import GSageOrgToolSettings
+
+    async with session_factory() as session:
+        result = await session.execute(
+            _sql_select(GSageOrgToolSettings.tool_name).where(
+                GSageOrgToolSettings.org_id == org_id,
+                GSageOrgToolSettings.is_enabled.is_(False),
+            )
+        )
+        return {row.tool_name for row in result.all()}
+
+
+async def _is_tool_disabled(tool, org_id: uuid.UUID, session_factory) -> bool:
+    """True if the tool OR its config_namespace is disabled for *org_id*."""
+    disabled = await _disabled_tool_names(org_id, session_factory)
+    if not disabled:
+        return False
+    ns = getattr(tool, "config_namespace", None)
+    return tool.name in disabled or (ns is not None and ns in disabled)
+
+
+async def _filter_disabled_tools(
+    tools: list,
+    org_id: uuid.UUID,
+    session_factory,
+) -> list:
+    """Remove tools that are disabled for *org_id* (by name or namespace)."""
+    disabled_names = await _disabled_tool_names(org_id, session_factory)
+    if not disabled_names:
+        return tools
+    return [
+        t for t in tools
+        if t.name not in disabled_names
+        and getattr(t, "config_namespace", None) not in disabled_names
+    ]
+
+
 # ── MCP Protocol Server ───────────────────────────────────────────────────
 
 
@@ -178,6 +220,9 @@ async def handle_list_tools() -> list[mcp_types.Tool]:
         # Only expose core tools in list_tools to reduce token usage.
         # Non-core tools remain callable and are discoverable via search_tools.
         core_tools = [t for t in tools if getattr(t, "core_tool", False)]
+
+        # ── Filter out disabled tools for this org (UX, not security enforcement) ──
+        core_tools = await _filter_disabled_tools(core_tools, tenant.org_id, _state.session_factory)
 
         logger.info(
             "list_tools: org=%s user=%s perms=%s → %d total / %d core tools: %s",
@@ -326,6 +371,23 @@ async def handle_call_tool(
         return [mcp_types.TextContent(
             type="text",
             text=json.dumps({"status": "error", "error": {"code": "TOOL_NOT_FOUND", "message": f"Tool '{name}' not found"}}),
+        )]
+
+    # ── Check if tool is disabled for this org (security enforcement) ──
+    if await _is_tool_disabled(tool, tenant.org_id, _state.session_factory):
+        logger.warning(
+            "call_tool: TOOL_DISABLED '%s' (org=%s user=%s)",
+            name, tenant.org_id, tenant.user_id,
+        )
+        return [mcp_types.TextContent(
+            type="text",
+            text=json.dumps({
+                "status": "error",
+                "error": {
+                    "code": "TOOL_DISABLED",
+                    "message": f"Tool '{name}' is disabled for this organization. Contact your admin.",
+                },
+            }),
         )]
 
     # Key the credential under the tool's namespace so tools that share a

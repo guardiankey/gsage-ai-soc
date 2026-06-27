@@ -272,6 +272,35 @@ class ToolConfigUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Tool Catalog schemas (v2 — namespace-aware, enable/disable)
+# ---------------------------------------------------------------------------
+
+class ToolConfigSummary(BaseModel):
+    """Lightweight config reference for tool catalog rows."""
+    id: uuid.UUID
+    profile_id: str
+    dept_id: Optional[uuid.UUID]
+    description: Optional[str]
+
+
+class ToolCatalogEntry(BaseModel):
+    """Single row in the tool catalog (tool or namespace)."""
+    name: str                       # tool name OR namespace string
+    display_name: str
+    category: str | None            # None for namespace entries
+    config_namespace: str | None    # namespace parent (None for standalone & ns entry itself)
+    is_namespace: bool              # True = synthetic namespace entry
+    is_enabled: bool
+    config_count: int
+    configs: list[ToolConfigSummary]
+
+
+class ToolSettingsUpdate(BaseModel):
+    """Enable or disable a tool / namespace for the org."""
+    is_enabled: bool
+
+
+# ---------------------------------------------------------------------------
 # InterfaceProfile schemas
 # ---------------------------------------------------------------------------
 

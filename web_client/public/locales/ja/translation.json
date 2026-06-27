@@ -635,7 +635,21 @@
       "deleteTitle": "設定を削除",
       "deleteDesc": "「{{name}}」の設定を削除しますか？",
       "department": "部署",
-      "allDepartments": "全て（組織全体）"
+      "allDepartments": "全て（組織全体）",
+      "catalogTitle": "ツールカタログ",
+      "configsColumn": "設定",
+      "configCount": "{{count}} 件の設定",
+      "configCount_plural": "{{count}} 件の設定",
+      "notConfigured": "未設定",
+      "addConfigFor": "{{name}} の設定を追加",
+      "addConfigInline": "追加",
+      "noNamespace": "名前空間なしのツール",
+      "enabled": "有効",
+      "disabled": "無効",
+      "disableTitle": "{{name}} を無効にしますか？",
+      "disableDesc": "このツールはエージェントから非表示になり、再有効化されるまで呼び出せなくなります。",
+      "enableTitle": "{{name}} を有効にしますか？",
+      "enableDesc": "このツールが再び表示され、呼び出せるようになります。"
     },
     "interfaces": {
       "title": "インターフェースプロファイル",

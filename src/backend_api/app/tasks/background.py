@@ -95,6 +95,14 @@ async def _async_execute_background_tool(task_id: str) -> None:
     es_client = ElasticsearchClient()
 
     try:
+        # ── Phase 1: Load → mark RUNNING → load config/state → close ──────
+        agent_context: AgentContext
+        effective_config: dict
+        state: dict
+        bg_timeout: float
+        tool: Any
+        profile_id: str | None = None
+
         async with session_factory() as session:
             # Load task row
             result = await session.execute(
@@ -121,6 +129,7 @@ async def _async_execute_background_tool(task_id: str) -> None:
 
             # Reconstruct agent context
             agent_context = AgentContext.from_dict(task.agent_context_data)
+            profile_id = task.profile_id
 
             # Get the tool from the registry
             registry = build_registry()
@@ -128,7 +137,7 @@ async def _async_execute_background_tool(task_id: str) -> None:
             if tool is None:
                 raise RuntimeError(f"Tool '{task.tool_name}' not found in registry")
 
-            # Load config and state (mirrors run() steps 4 + state load).
+            # Load config and state (read-only from the same session).
             # Resolution chain must match BaseTool.run(): defaults < env < DB.
             config = await tool.load_config(
                 agent_context, session, redis_client, profile_id=task.profile_id
@@ -139,107 +148,122 @@ async def _async_execute_background_tool(task_id: str) -> None:
                 agent_context, session, profile_id=task.profile_id
             )
 
-            # Execute the core tool logic directly — NOT via run() which would
-            # re-check should_run_background() and cause an infinite dispatch loop.
-            # Inject the fresh session into the ContextVar so that tools that
-            # need DB access inside execute() (e.g. _load_file) use this session
-            # instead of falling back to the global session maker (which may
-            # hold connections from a different event loop in fork workers).
-            from src.mcp_server.tools.base import _tool_session_ctx  # noqa: PLC0415
-            from src.mcp_server.tenant_context import (  # noqa: PLC0415
-                TenantHeaders,
-                _tenant_var,
+            # Per-tool background timeout when explicitly set; otherwise
+            # use the legacy heuristic (sync timeout × 3) for compatibility.
+            bg_timeout = (
+                tool.background_timeout_seconds
+                if tool.background_timeout_seconds is not None
+                else tool.timeout_seconds * 3
             )
-            _ctx_token = _tool_session_ctx.set(session)
-            # Re-establish the tenant context for the worker run so any helper
-            # that reads ``get_tenant_headers_or_none()`` (e.g. ``_store_file``
-            # to attach files to the originating chat session) sees the same
-            # identity as the original request.
-            tenant_snapshot = TenantHeaders(
-                org_id=agent_context.org_id,
-                user_id=agent_context.user_id,
-                org_role=getattr(agent_context, "org_role", "member") or "member",
-                interface=getattr(agent_context, "interface", "web") or "web",
-                gsage_session_id=task.gsage_session_id,
-                dept_id=getattr(agent_context, "dept_id", None),
-            )
-            _tenant_token = _tenant_var.set(tenant_snapshot)
+
+            # Done with Phase 1 — commit is already done above.
+            # The session will be closed when we exit this ``async with`` block.
+
+        # ── Phase 2: Execute tool (NO DB session held open) ────────────────
+        # Do NOT set _tool_session_ctx here — long-running tools with polling
+        # (e.g. Trellix EDR) would keep a PostgreSQL connection in "idle in
+        # transaction" state, and the server-side ``idle_in_transaction_session_timeout``
+        # would kill it.  DB helpers (``_store_file``, ``store_export_artifact``)
+        # already have a fallback path that opens their own short-lived sessions.
+        tool_result = await asyncio.wait_for(
+            tool.execute(agent_context, dict(task.tool_params), effective_config, state),
+            timeout=bg_timeout,
+        )
+
+        # ── Phase 3: Persist result with a FRESH session (retry on conn err) ──
+        last_error: Exception | None = None
+        for attempt in range(3):
             try:
-                # Per-tool background timeout when explicitly set; otherwise
-                # use the legacy heuristic (sync timeout × 3) for compatibility.
-                bg_timeout = (
-                    tool.background_timeout_seconds
-                    if tool.background_timeout_seconds is not None
-                    else tool.timeout_seconds * 3
-                )
-                tool_result = await asyncio.wait_for(
-                    tool.execute(agent_context, dict(task.tool_params), effective_config, state),
-                    timeout=bg_timeout,
-                )
-            finally:
-                _tool_session_ctx.reset(_ctx_token)
-                _tenant_var.reset(_tenant_token)
+                async with session_factory() as session:
+                    # Reload task row
+                    reload_result = await session.execute(
+                        select(GSageBackgroundTask).where(
+                            GSageBackgroundTask.id == uuid.UUID(task_id)
+                        )
+                    )
+                    task = reload_result.scalar_one_or_none()
+                    if task is None:
+                        log.warning(
+                            "Background task %s disappeared during execution", task_id,
+                        )
+                        return
 
-            # Persist state changes
-            if state != tool.state_defaults:
-                await tool.save_state(
-                    agent_context, session, state, profile_id=task.profile_id
-                )
+                    # Persist state changes
+                    if state != tool.state_defaults:
+                        await tool.save_state(
+                            agent_context, session, state, profile_id=profile_id,
+                        )
 
-            # Persist result. Status mirrors the tool's outcome:
-            #   - tool_result.status == "error"  -> task FAILED (with error_message)
-            #   - anything else (success/partial/background) -> COMPLETED
-            task.result = tool_result.to_dict()
-            if tool_result.status == "error":
-                task.status = BackgroundTaskStatus.FAILED
-                err = tool_result.error or {}
-                err_code = err.get("code") or "TOOL_ERROR"
-                err_msg = err.get("message") or "Tool returned error status"
-                task.error_message = f"[{err_code}] {err_msg}"[:2000]
-            else:
-                task.status = BackgroundTaskStatus.COMPLETED
-            task.completed_at = datetime.now(timezone.utc)
-            await session.commit()
+                    # Persist result. Status mirrors the tool's outcome:
+                    #   - tool_result.status == "error"  -> task FAILED
+                    #   - anything else -> COMPLETED
+                    task.result = tool_result.to_dict()
+                    if tool_result.status == "error":
+                        task.status = BackgroundTaskStatus.FAILED
+                        err = tool_result.error or {}
+                        err_code = err.get("code") or "TOOL_ERROR"
+                        err_msg = err.get("message") or "Tool returned error status"
+                        task.error_message = f"[{err_code}] {err_msg}"[:2000]
+                    else:
+                        task.status = BackgroundTaskStatus.COMPLETED
+                    task.completed_at = datetime.now(timezone.utc)
+                    await session.commit()
 
-            # Audit log
-            audit = ToolAuditLogger(es_client)
-            completed_at = task.completed_at
-            started_at = task.started_at
-            if completed_at is not None and started_at is not None:
-                elapsed = int((completed_at - started_at).total_seconds() * 1000)
-            else:
-                elapsed = 0
-            error_code = tool_result.error.get("code") if tool_result.error else None
-            await audit.log_execution(
-                agent_context,
-                tool.name,
-                tool.version,
-                dict(task.tool_params),
-                tool_result.status,
-                elapsed,
-                error_code,
-                audit_context=task.audit_context_data or None,
-                output_data=tool_result.data if tool.audit_output else None,
-            )
+                    # Audit log
+                    audit = ToolAuditLogger(es_client)
+                    completed_at = task.completed_at
+                    started_at = task.started_at
+                    if completed_at is not None and started_at is not None:
+                        elapsed = int((completed_at - started_at).total_seconds() * 1000)
+                    else:
+                        elapsed = 0
+                    error_code = tool_result.error.get("code") if tool_result.error else None
+                    await audit.log_execution(
+                        agent_context,
+                        tool.name,
+                        tool.version,
+                        dict(task.tool_params),
+                        tool_result.status,
+                        elapsed,
+                        error_code,
+                        audit_context=task.audit_context_data or None,
+                        output_data=tool_result.data if tool.audit_output else None,
+                    )
 
-            log.info(
-                "Background task %s completed: tool=%s status=%s org=%s",
-                task_id, task.tool_name, tool_result.status, task.org_id,
-            )
+                    log.info(
+                        "Background task %s completed: tool=%s status=%s org=%s",
+                        task_id, task.tool_name, tool_result.status, task.org_id,
+                    )
 
-            # Dispatch agent continuation — re-run the agent with the result
-            # so the user receives the output without sending a new message.
-            try:
-                from src.backend_api.app.tasks.agent_continuation import (
-                    continue_after_bg_task_completed,
-                )
-                cast(Any, continue_after_bg_task_completed).delay(task_id)
-                log.info("Background task %s: dispatched continuation task", task_id)
-            except Exception as cont_exc:
-                log.warning(
-                    "Background task %s: failed to dispatch continuation: %s",
-                    task_id, cont_exc,
-                )
+                    # Dispatch agent continuation — re-run the agent with the result
+                    # so the user receives the output without sending a new message.
+                    try:
+                        from src.backend_api.app.tasks.agent_continuation import (
+                            continue_after_bg_task_completed,
+                        )
+                        cast(Any, continue_after_bg_task_completed).delay(task_id)
+                        log.info("Background task %s: dispatched continuation task", task_id)
+                    except Exception as cont_exc:
+                        log.warning(
+                            "Background task %s: failed to dispatch continuation: %s",
+                            task_id, cont_exc,
+                        )
+                break  # success — exit retry loop
+            except Exception as exc:
+                # Connection errors (InterfaceError, PendingRollbackError) are
+                # worth retrying with a fresh session.  Other errors are not.
+                if _is_connection_error(exc) and attempt < 2:
+                    log.warning(
+                        "Background task %s persist attempt %d failed (%s) — retrying",
+                        task_id, attempt + 1, type(exc).__name__,
+                    )
+                    last_error = exc
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                else:
+                    raise
+
+        if last_error is not None:
+            raise last_error  # Should never reach here if retry succeeded
 
     except Exception as exc:
         log.error("Background task %s error: %s", task_id, exc, exc_info=True)
@@ -308,3 +332,26 @@ async def _mark_failed_in_session(session, task_id: str, error_message: str) -> 
         task.error_message = error_message[:2000]
         task.completed_at = datetime.now(timezone.utc)
         await session.commit()
+
+
+def _is_connection_error(exc: Exception) -> bool:
+    """Return True if *exc* is a transient DB connection error worth retrying.
+
+    Covers:
+    - asyncpg ``InterfaceError`` ("connection is closed") — the most common
+      case when ``idle_in_transaction_session_timeout`` kills a connection.
+    - SQLAlchemy ``PendingRollbackError`` — secondary exception raised after
+      a failed flush (prevents further use of the session).
+    - SQLAlchemy ``InterfaceError`` — wraps the underlying asyncpg error.
+    """
+    exc_repr = f"{type(exc).__module__}.{type(exc).__qualname__}"
+    msg = str(exc).lower()
+    if "connection is closed" in msg:
+        return True
+    if "pendingrollbackerror" in exc_repr.lower():
+        return True
+    if ex := getattr(exc, "__cause__", None):
+        return _is_connection_error(ex)
+    if ex := getattr(exc, "__context__", None):
+        return _is_connection_error(ex)
+    return False

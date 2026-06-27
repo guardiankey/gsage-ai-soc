@@ -1,12 +1,11 @@
 """gSage AI — CTIR (gov.br/ctir) public-alert source parser.
 
-Parses the CTIR recommendations listing page at::
+Parses both **alertas** and **recomendações** from the CTIR/Gov pages::
 
+    https://www.gov.br/gsi/pt-br/assuntos/ctir/alertas/{ano}
     https://www.gov.br/ctir/pt-br/assuntos/alertas-e-recomendacoes/recomendacoes/{ano}
 
-The page lists security recommendations by year.  Each entry typically
-appears as a link (``<a>``) inside a list or table row, with the
-recommendation title and publication date.
+Each item is tagged with a ``category`` field: ``"alerta"`` or ``"recomendação"``.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ log = logging.getLogger(__name__)
 
 
 class CTIRParser(SourceParser):
-    """Parser for CTIR (gov.br/ctir) recommendations."""
+    """Parser for CTIR (gov.br/ctir) alerts and recommendations."""
 
     source_id: ClassVar[str] = "ctir"
     source_name: ClassVar[str] = "CTIR"
@@ -31,55 +30,154 @@ class CTIRParser(SourceParser):
         "CTIR — Centro de Tratamento e Resposta a Incidentes Cibernéticos "
         "(gov.br/ctir)"
     )
+    # ── Recommendations (gov.br/ctir domain) ────────────────────────────
     list_url: ClassVar[str] = (
         "https://www.gov.br/ctir/pt-br/assuntos/alertas-e-recomendacoes"
         f"/recomendacoes/{date.today().year}"
     )
-    update_frequency: ClassVar[str] = "daily"
-
-    # Fallback year if current year page is empty / not found
-    _FALLBACK_URL: ClassVar[str] = (
+    _RECS_FALLBACK_URL: ClassVar[str] = (
         "https://www.gov.br/ctir/pt-br/assuntos/alertas-e-recomendacoes"
         f"/recomendacoes/{date.today().year - 1}"
     )
+    # ── Alerts (gov.br/gsi domain — publicly accessible) ────────────────
+    _ALERTAS_URL: ClassVar[str] = (
+        "https://www.gov.br/gsi/pt-br/assuntos/ctir/alertas"
+        f"/{date.today().year}"
+    )
+    _ALERTAS_FALLBACK_URL: ClassVar[str] = (
+        "https://www.gov.br/gsi/pt-br/assuntos/ctir/alertas"
+        f"/{date.today().year - 1}"
+    )
+
+    update_frequency: ClassVar[str] = "daily"
+
+    # ── Public API ────────────────────────────────────────────────────────
 
     @classmethod
     async def fetch_and_parse(cls, *, max_results: int = 10, timeout: float = 30.0) -> list[dict]:
-        """Try current year first; fall back to previous year."""
-        original_url = cls.list_url
+        """Fetch from **both** alerta and recomendação sources.
+
+        Returns up to *max_results* items merged and sorted by
+        ``published_at`` descending (newest first).
+        """
+        all_items: list[dict] = []
+
+        # Recommendations
         try:
-            result = await super().fetch_and_parse(
-                max_results=max_results, timeout=timeout
+            recs = await cls._fetch_source(
+                url=cls.list_url,
+                fallback_url=cls._RECS_FALLBACK_URL,
+                category="recomendação",
+                timeout=timeout,
             )
-            if result:
-                return result
+            all_items.extend(recs)
         except Exception:
-            log.warning("CTIR: current year page failed, trying previous year")
-        # Fallback
-        cls.list_url = cls._FALLBACK_URL
+            log.exception("CTIR: failed to fetch recommendations")
+
+        # Alerts
         try:
-            return await super().fetch_and_parse(
-                max_results=max_results, timeout=timeout
+            alerts = await cls._fetch_source(
+                url=cls._ALERTAS_URL,
+                fallback_url=cls._ALERTAS_FALLBACK_URL,
+                category="alerta",
+                timeout=timeout,
             )
-        finally:
-            cls.list_url = original_url
+            all_items.extend(alerts)
+        except Exception:
+            log.exception("CTIR: failed to fetch alerts")
+
+        if not all_items:
+            return []
+
+        # Normalize all items together
+        normalized = cls._normalize(all_items)
+        normalized.sort(key=lambda a: a["published_at"], reverse=True)
+        return normalized[:max_results]
+
+    # ── Internal helpers ──────────────────────────────────────────────────
 
     @classmethod
-    def _parse_list_items(cls, html: str) -> list[dict]:
-        """Parse the CTIR listing page.
+    async def _fetch_source(
+        cls,
+        *,
+        url: str,
+        fallback_url: str,
+        category: str,
+        timeout: float,
+    ) -> list[dict]:
+        """Fetch one CTIR source page, falling back to *fallback_url*.
 
-        The page structure varies, but typically recommendations are
-        ``<a>`` links with a date nearby.  We use BeautifulSoup to
-        extract all plausible alert entries.
+        Each parsed item is tagged with the given *category*.
+        """
+        original = cls.list_url
+        cls.list_url = url
+        try:
+            html = await cls._fetch_list(timeout=timeout)
+            items = cls._parse_list_items(html, category=category)
+            if items:
+                return items
+        except Exception:
+            log.info("CTIR %s: primary URL failed, trying fallback", category)
+
+        cls.list_url = fallback_url
+        try:
+            html = await cls._fetch_list(timeout=timeout)
+            return cls._parse_list_items(html, category=category)
+        finally:
+            cls.list_url = original
+
+    # ── Normalisation override ─────────────────────────────────────────────
+
+    @classmethod
+    def _normalize(cls, items: list[dict]) -> list[dict]:
+        """Normalise items, preserving the ``category`` field."""
+        # Collect extra fields keyed by (title, url) for lookup after
+        # base-class normalisation strips them.
+        extra_lookup: dict[tuple[str, str | None], dict] = {}
+        for item in items:
+            extra_lookup[(item.get("title", ""), item.get("url"))] = {
+                "category": item.get("category"),
+            }
+
+        alerts = super()._normalize(items)
+
+        for alert in alerts:
+            key = (alert["title"], alert.get("content_url"))
+            extras = extra_lookup.get(key, {})
+            if extras.get("category"):
+                alert["category"] = extras["category"]
+
+        return alerts
+
+    # ── Page parser ───────────────────────────────────────────────────────
+
+    @classmethod
+    def _parse_list_items(cls, html: str, category: str = "recomendação") -> list[dict]:
+        """Parse a CTIR listing page (alertas or recomendações).
+
+        Both pages use a similar Plone-based structure::
+
+            <a href=".../alerta-XX-ano">ALERTA XX/ANO</a>
+            — última modificação DD/MM/AAAA HHhMM
+
+        or::
+
+            <a href=".../recomendacao-XX-ano">RECOMENDAÇÃO XX/ANO</a>
+            — última modificação DD/MM/AAAA HHhMM
+
+        Parameters
+        ----------
+        html:
+            The raw page HTML.
+        category:
+            ``"alerta"`` or ``"recomendação"`` — injected into every item's
+            ``category`` key for downstream use.
         """
         from src.shared.http_utils import parse_html_dom
 
         soup = parse_html_dom(html)
         items: list[dict] = []
 
-        # Strategy 1: Look for <a> tags that look like alert links.
-        # CTIR recommendations typically have URLs like
-        # /ctir/pt-br/assuntos/.../recomendacoes/... or link to PDFs.
         content_area = (
             soup.find("div", id="content-core")
             or soup.find("article")
@@ -93,15 +191,22 @@ class CTIRParser(SourceParser):
             text = cls._safe_text(link)
             if not text or len(text) < 10:
                 continue
-            # Skip navigation / utility links
-            skip_prefixes = ("/ctir/pt-br", "/login", "javascript:", "#")
+
+            # Skip navigation / utility links that happen to have long text.
+            # The CTIR domain (/ctir/pt-br/…) is the *only* navigation prefix
+            # we skip; links under /gsi/pt-br/… are actual alert URLs.
+            skip_prefixes = ("/login", "javascript:", "#")
             if any(href.startswith(p) for p in skip_prefixes):
-                # Only skip if the text looks generic / navigational
-                if len(text) < 10 or any(
+                continue
+            # Also skip the CTIR domain nav links when the text is generic
+            if href.startswith("/ctir/pt-br") and (
+                len(text) < 10
+                or any(
                     word in text.lower()
                     for word in ("acessibilidade", "conteúdo", "menu", "rodapé")
-                ):
-                    continue
+                )
+            ):
+                continue
 
             # Try to find a date sibling or parent text
             parent = link.find_parent(["li", "tr", "div", "td", "article"])
@@ -140,6 +245,7 @@ class CTIRParser(SourceParser):
                 "url": url,
                 "date_text": date_text,
                 "summary": summary,
+                "category": category,
             })
 
         # Deduplicate by title
@@ -151,7 +257,7 @@ class CTIRParser(SourceParser):
                 seen.add(key)
                 unique.append(item)
 
-        log.debug("CTIR: parsed %d items from listing", len(unique))
+        log.debug("CTIR: parsed %d %s items from listing", len(unique), category)
         return unique
 
     @classmethod

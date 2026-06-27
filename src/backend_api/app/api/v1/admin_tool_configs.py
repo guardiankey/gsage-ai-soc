@@ -19,14 +19,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.backend_api.app.api.deps import get_db, require_org_admin
 from src.backend_api.app.schemas.admin import (
+    ToolCatalogEntry,
     ToolConfigCreate,
     ToolConfigOut,
+    ToolConfigSummary,
     ToolConfigUpdate,
+    ToolSettingsUpdate,
 )
 from src.shared.cache.permissions_cache import get_perm_redis_client
 from src.shared.cache.tool_config_cache import invalidate_tool_config_cache
-from src.shared.models.tool_config import GSageToolConfig
+from src.shared.models.org_tool_settings import GSageOrgToolSettings
 from src.shared.models.tool import GSageTool
+from src.shared.models.tool_config import GSageToolConfig
 from src.shared.models.user_organization import GSageUserOrganization
 
 router = APIRouter()
@@ -258,3 +262,189 @@ async def delete_tool_config(
     await db.commit()
     # Drop any stale config the MCP server may have cached for this org.
     await invalidate_tool_config_cache(get_perm_redis_client(), org_id)
+
+
+# ---------------------------------------------------------------------------
+# Tool Catalog (v2 — namespace-aware, enable/disable)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/tool-catalog",
+    response_model=list[ToolCatalogEntry],
+    summary="List tool catalog (tools + namespace entries) with configs and enabled state",
+)
+async def get_tool_catalog(
+    org_id: uuid.UUID,
+    _: Annotated[GSageUserOrganization, Depends(require_org_admin)],
+    db: AsyncSession = Depends(get_db),
+) -> list[ToolCatalogEntry]:
+    """Return all active tools and synthetic namespace entries.
+
+    Each entry includes:
+    - ``is_namespace`` — True for synthetic namespace rows.
+    - ``configs`` — lightweight summaries of existing org tool configs.
+    - ``is_enabled`` — per-org enable/disable state.
+    """
+    from sqlalchemy import text
+
+    # ── Query A: real tools (with their own configs only, not namespace configs) ──
+    row_a = await db.execute(
+        text("""
+            SELECT
+                t.name,
+                t.display_name,
+                t.category,
+                t.config_namespace,
+                FALSE AS is_namespace,
+                COALESCE(json_agg(json_build_object(
+                    'id', tc.id, 'profile_id', tc.profile_id,
+                    'dept_id', tc.dept_id, 'description', tc.description
+                )) FILTER (WHERE tc.id IS NOT NULL), '[]') AS configs,
+                COALESCE(ots.is_enabled, TRUE) AS is_enabled
+            FROM gsage_tools t
+            LEFT JOIN gsage_tool_configs tc
+                ON tc.org_id = CAST(:org_id AS uuid)
+                AND tc.tool_name = t.name
+            LEFT JOIN gsage_org_tool_settings ots
+                ON ots.org_id = CAST(:org_id AS uuid)
+                AND ots.tool_name = t.name
+            WHERE t.is_active = TRUE
+            GROUP BY t.name, t.display_name, t.category, t.config_namespace, ots.is_enabled
+            ORDER BY t.config_namespace NULLS LAST, t.category, t.name
+        """),
+        {"org_id": str(org_id)},
+    )
+
+    # ── Query B: synthetic namespace entries ──
+    row_b = await db.execute(
+        text("""
+            WITH ns AS (
+                SELECT DISTINCT config_namespace AS name
+                FROM gsage_tools
+                WHERE is_active = TRUE AND config_namespace IS NOT NULL
+            )
+            SELECT
+                ns.name,
+                ns.name AS display_name,
+                CAST(NULL AS varchar) AS category,
+                CAST(NULL AS varchar) AS config_namespace,
+                TRUE AS is_namespace,
+                COALESCE(json_agg(json_build_object(
+                    'id', tc.id, 'profile_id', tc.profile_id,
+                    'dept_id', tc.dept_id, 'description', tc.description
+                )) FILTER (WHERE tc.id IS NOT NULL), '[]') AS configs,
+                COALESCE(ots.is_enabled, TRUE) AS is_enabled
+            FROM ns
+            LEFT JOIN gsage_tool_configs tc
+                ON tc.org_id = CAST(:org_id AS uuid) AND tc.tool_name = ns.name
+            LEFT JOIN gsage_org_tool_settings ots
+                ON ots.org_id = CAST(:org_id AS uuid) AND ots.tool_name = ns.name
+            GROUP BY ns.name, ots.is_enabled
+            ORDER BY ns.name
+        """),
+        {"org_id": str(org_id)},
+    )
+
+    # ── Merge: namespaces first, then tools ──
+    entries: list[ToolCatalogEntry] = []
+    import json as _json
+
+    def _parse_configs(raw) -> list:
+        """Handle asyncpg (list) vs psycopg2 (JSON string) vs COALESCE fallback string."""
+        if isinstance(raw, list):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return _json.loads(raw)
+            except (_json.JSONDecodeError, TypeError):
+                return []
+        return []
+
+    def _to_uuid(val) -> uuid.UUID | None:
+        """Coerce asyncpg UUID / str / None to uuid.UUID."""
+        if val is None:
+            return None
+        if isinstance(val, uuid.UUID):
+            return val
+        return uuid.UUID(str(val))
+
+    for r in row_b.mappings().all():
+        configs_raw = _parse_configs(r["configs"])
+        entries.append(ToolCatalogEntry(
+            name=r["name"],
+            display_name=r["display_name"],
+            category=r["category"],
+            config_namespace=r["config_namespace"],
+            is_namespace=bool(r["is_namespace"]),
+            is_enabled=bool(r["is_enabled"]),
+            config_count=len(configs_raw),
+            configs=[ToolConfigSummary(
+                id=uuid.UUID(str(c["id"])),
+                profile_id=str(c["profile_id"]),
+                dept_id=_to_uuid(c.get("dept_id")),
+                description=c.get("description"),
+            ) for c in configs_raw],
+        ))
+
+    for r in row_a.mappings().all():
+        configs_raw = _parse_configs(r["configs"])
+        entries.append(ToolCatalogEntry(
+            name=r["name"],
+            display_name=r["display_name"],
+            category=r["category"],
+            config_namespace=r["config_namespace"],
+            is_namespace=bool(r["is_namespace"]),
+            is_enabled=bool(r["is_enabled"]),
+            config_count=len(configs_raw),
+            configs=[ToolConfigSummary(
+                id=uuid.UUID(str(c["id"])),
+                profile_id=str(c["profile_id"]),
+                dept_id=_to_uuid(c.get("dept_id")),
+                description=c.get("description"),
+            ) for c in configs_raw],
+        ))
+
+    return entries
+
+
+@router.patch(
+    "/tools/{tool_name:path}/settings",
+    summary="Enable or disable a tool/namespace for the org",
+)
+async def update_tool_settings(
+    org_id: uuid.UUID,
+    tool_name: str,
+    payload: ToolSettingsUpdate,
+    _: Annotated[GSageUserOrganization, Depends(require_org_admin)],
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Enable or disable a tool (or namespace) for this organization.
+
+    - ``is_enabled = True`` → DELETE the row (returns to default-enabled state).
+    - ``is_enabled = False`` → INSERT or UPDATE the row.
+    """
+    stmt = select(GSageOrgToolSettings).where(
+        GSageOrgToolSettings.org_id == org_id,
+        GSageOrgToolSettings.tool_name == tool_name,
+    )
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+
+    if payload.is_enabled:
+        if existing is not None:
+            await db.delete(existing)
+            await db.commit()
+        return {"tool_name": tool_name, "is_enabled": True}
+    else:
+        if existing is None:
+            existing = GSageOrgToolSettings(
+                org_id=org_id,
+                tool_name=tool_name,
+                is_enabled=False,
+            )
+            db.add(existing)
+        else:
+            existing.is_enabled = False
+        await db.commit()
+        return {"tool_name": tool_name, "is_enabled": False}

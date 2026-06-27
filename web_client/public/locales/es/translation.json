@@ -635,7 +635,21 @@
       "deleteTitle": "Eliminar Config",
       "deleteDesc": "¿Eliminar configuración de \"{{name}}\"?",
       "department": "Departamento",
-      "allDepartments": "Todos (nivel org)"
+      "allDepartments": "Todos (nivel org)",
+      "catalogTitle": "Catálogo de Herramientas",
+      "configsColumn": "Configuraciones",
+      "configCount": "{{count}} configuración",
+      "configCount_plural": "{{count}} configuraciones",
+      "notConfigured": "no configurado",
+      "addConfigFor": "Agregar config para {{name}}",
+      "addConfigInline": "Agregar",
+      "noNamespace": "Herramientas sin namespace",
+      "enabled": "Habilitado",
+      "disabled": "Deshabilitado",
+      "disableTitle": "¿Deshabilitar {{name}}?",
+      "disableDesc": "Esta herramienta quedará oculta para los agentes y no podrá ser llamada hasta que se vuelva a habilitar.",
+      "enableTitle": "¿Habilitar {{name}}?",
+      "enableDesc": "Esta herramienta volverá a ser visible y se podrá llamar nuevamente."
     },
     "interfaces": {
       "title": "Perfiles de Interfaz",

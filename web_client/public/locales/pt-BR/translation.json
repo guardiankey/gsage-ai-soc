@@ -664,7 +664,21 @@
       "deleteTitle": "Excluir Config",
       "deleteDesc": "Excluir configuração da ferramenta \"{{name}}\"?",
       "department": "Departamento",
-      "allDepartments": "Todos (org-wide)"
+      "allDepartments": "Todos (org-wide)",
+      "catalogTitle": "Catálogo de Ferramentas",
+      "configsColumn": "Configurações",
+      "configCount": "{{count}} configuração",
+      "configCount_plural": "{{count}} configurações",
+      "notConfigured": "não configurado",
+      "addConfigFor": "Adicionar config para {{name}}",
+      "addConfigInline": "Adicionar",
+      "noNamespace": "Ferramentas sem namespace",
+      "enabled": "Habilitado",
+      "disabled": "Desabilitado",
+      "disableTitle": "Desabilitar {{name}}?",
+      "disableDesc": "Esta ferramenta será ocultada dos agentes e não poderá ser chamada até ser reabilitada.",
+      "enableTitle": "Habilitar {{name}}?",
+      "enableDesc": "Esta ferramenta ficará visível e poderá ser chamada novamente."
     },
     "interfaces": {
       "title": "Perfis de Interface",

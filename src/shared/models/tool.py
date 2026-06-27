@@ -147,5 +147,15 @@ class GSageTool(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="Admin can disable tool globally",
     )
 
+    # Shared config namespace (e.g. 'kubernetes', 'azure')
+    config_namespace: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        comment="Shared config namespace (e.g. 'kubernetes', 'azure'). "
+                "When set, config rows for this tool_name OR the namespace "
+                "are consulted.  NULL = no namespace.",
+    )
+
     def __repr__(self) -> str:
         return f"<GSageTool(id={self.id}, name={self.name}, version={self.version})>"

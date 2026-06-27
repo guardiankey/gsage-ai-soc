@@ -499,6 +499,7 @@ async def sync_tools_to_db(
                 gt.requires_user_credentials = getattr(tool, "requires_user_credentials", False)
                 gt.credential_namespace = getattr(tool, "credential_namespace", None)
                 gt.credential_schema = getattr(tool, "credential_schema", None)
+                gt.config_namespace = getattr(tool, "config_namespace", None)
                 gt.is_active = True
                 updated_count += 1
             else:
@@ -523,6 +524,7 @@ async def sync_tools_to_db(
                     requires_user_credentials=getattr(tool, "requires_user_credentials", False),
                     credential_namespace=getattr(tool, "credential_namespace", None),
                     credential_schema=getattr(tool, "credential_schema", None),
+                    config_namespace=getattr(tool, "config_namespace", None),
                     is_active=True,
                 ))
                 logger.debug("Tool '%s@%s' added to DB", name, latest_version)

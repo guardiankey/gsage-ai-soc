@@ -550,6 +550,8 @@ class ElkSearchTool(BaseTool):
             summary["hits_preview"] = [
                 _hit_preview(h) for h in hits[: min(5, len(hits))]
             ]
+            if file_info and file_info.get("storage_failed"):
+                summary["note"] = file_info.pop("note", None)
             return summary
 
         # Inline path — ensure JSON body stays within budget.
@@ -578,9 +580,12 @@ class ElkSearchTool(BaseTool):
             summary["hits_preview"] = [
                 _hit_preview(h) for h in hits[: min(5, len(hits))]
             ]
-            summary["note"] = (
-                "Response exceeded inline size budget; full results offloaded."
-            )
+            if file_info and file_info.get("storage_failed"):
+                summary["note"] = file_info.pop("note", None)
+            else:
+                summary["note"] = (
+                    "Response exceeded inline size budget; full results offloaded."
+                )
             return summary
 
         summary["hits"] = inline_hits
@@ -664,10 +669,35 @@ class ElkSearchTool(BaseTool):
                         session=db_session,
                         description=f"elk_search results for {pattern}",
                     )
+
+            if file_info is None:
+                # Storage failed — return a sentinel so callers can detect it
+                # and surface a clear message to the user instead of a silent null.
+                log.warning(
+                    "elk_search: _store_file returned None for pattern %r; "
+                    "returning storage_failed sentinel",
+                    pattern,
+                )
+                return {
+                    "storage_failed": True,
+                    "note": (
+                        "Results could not be saved as a file due to a storage "
+                        "error. An inline preview is shown below. Contact your "
+                        "administrator if the issue persists."
+                    ),
+                }
+
             return file_info
         except Exception as exc:
             log.error("elk_search: failed to offload results: %s", exc)
-            return None
+            return {
+                "storage_failed": True,
+                "note": (
+                    "Results could not be saved as a file due to a storage "
+                    "error. An inline preview is shown below. Contact your "
+                    "administrator if the issue persists."
+                ),
+            }
 
     @staticmethod
     async def _cache_get(key: str, ttl: int) -> Optional[dict]:

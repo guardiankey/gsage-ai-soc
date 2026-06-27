@@ -665,7 +665,21 @@
       "deleteTitle": "Delete Config",
       "deleteDesc": "Delete configuration for tool \"{{name}}\"?",
       "department": "Department",
-      "allDepartments": "All (org-wide)"
+      "allDepartments": "All (org-wide)",
+      "catalogTitle": "Tool Catalog",
+      "configsColumn": "Configs",
+      "configCount": "{{count}} config",
+      "configCount_plural": "{{count}} configs",
+      "notConfigured": "not configured",
+      "addConfigFor": "Add config for {{name}}",
+      "addConfigInline": "Add",
+      "noNamespace": "Tools without namespace",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "disableTitle": "Disable {{name}}?",
+      "disableDesc": "This tool will be hidden from agents and cannot be called until re-enabled.",
+      "enableTitle": "Enable {{name}}?",
+      "enableDesc": "This tool will become visible and callable again."
     },
     "interfaces": {
       "title": "Interface Profiles",

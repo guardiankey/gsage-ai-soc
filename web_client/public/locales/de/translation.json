@@ -635,7 +635,21 @@
       "deleteTitle": "Konfiguration löschen",
       "deleteDesc": "Konfiguration für \"{{name}}\" löschen?",
       "department": "Abteilung",
-      "allDepartments": "Alle (organisationsweit)"
+      "allDepartments": "Alle (organisationsweit)",
+      "catalogTitle": "Tool-Katalog",
+      "configsColumn": "Konfigurationen",
+      "configCount": "{{count}} Konfiguration",
+      "configCount_plural": "{{count}} Konfigurationen",
+      "notConfigured": "nicht konfiguriert",
+      "addConfigFor": "Konfiguration für {{name}} hinzufügen",
+      "addConfigInline": "Hinzufügen",
+      "noNamespace": "Tools ohne Namespace",
+      "enabled": "Aktiviert",
+      "disabled": "Deaktiviert",
+      "disableTitle": "{{name}} deaktivieren?",
+      "disableDesc": "Dieses Tool wird für Agenten ausgeblendet und kann erst nach erneuter Aktivierung aufgerufen werden.",
+      "enableTitle": "{{name}} aktivieren?",
+      "enableDesc": "Dieses Tool wird wieder sichtbar und aufrufbar."
     },
     "interfaces": {
       "title": "Schnittstellenprofile",

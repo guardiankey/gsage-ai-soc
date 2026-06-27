@@ -23,6 +23,7 @@ from src.shared.models.tool import GSageTool
 from src.shared.models.tool_config import GSageToolConfig
 from src.shared.models.tool_state import GSageToolState
 from src.shared.models.tool_cache import GSageToolCache, CacheScope
+from src.shared.models.org_tool_settings import GSageOrgToolSettings
 
 # Email models
 from src.shared.models.email_account import GSageEmailAccount

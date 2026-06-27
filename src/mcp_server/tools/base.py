@@ -1410,6 +1410,13 @@ class BaseTool(ABC):
                 "Tool %s: failed to store file '%s': %s",
                 self.name, filename, exc,
             )
+            # Rollback to reset a potentially broken session so the caller
+            # can continue using it for other operations (e.g. persisting
+            # the task result in background.py).
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             return None
 
     async def _replace_file_content(
@@ -1492,6 +1499,12 @@ class BaseTool(ABC):
                 "Tool %s: _replace_file_content failed for file %s: %s",
                 self.name, file_id, exc,
             )
+            # Rollback to reset a potentially broken session (same rationale
+            # as _store_file).
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             return None
 
     async def _load_file(

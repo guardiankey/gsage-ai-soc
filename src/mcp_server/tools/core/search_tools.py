@@ -109,6 +109,30 @@ class SearchToolsTool(BaseTool):
         # Exclude search_tools itself from results to avoid confusion.
         tools = [t for t in visible if t.name != self.name]
 
+        # ── Filter out tools disabled for this org ──────────────────────────
+        try:
+            from src.mcp_server.tools.base import _tool_session_ctx  # noqa: PLC0415
+            session = _tool_session_ctx.get()
+            if session is not None and agent_context.org_id:
+                from sqlalchemy import select as _sql_select  # noqa: PLC0415
+                from src.shared.models.org_tool_settings import GSageOrgToolSettings  # noqa: PLC0415
+
+                result = await session.execute(
+                    _sql_select(GSageOrgToolSettings.tool_name).where(
+                        GSageOrgToolSettings.org_id == agent_context.org_id,
+                        GSageOrgToolSettings.is_enabled.is_(False),
+                    )
+                )
+                disabled_names = {row.tool_name for row in result.all()}
+                if disabled_names:
+                    tools = [
+                        t for t in tools
+                        if t.name not in disabled_names
+                        and getattr(t, "config_namespace", None) not in disabled_names
+                    ]
+        except Exception:
+            pass  # graceful degradation — never fail search due to disabled check
+
         # ── Category filter ─────────────────────────────────────────────────
         if category_filter:
             tools = [

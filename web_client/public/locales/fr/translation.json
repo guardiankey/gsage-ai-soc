@@ -635,7 +635,21 @@
       "deleteTitle": "Supprimer la Config",
       "deleteDesc": "Supprimer la configuration de \"{{name}}\" ?",
       "department": "Département",
-      "allDepartments": "Tous (à l'échelle de l'org)"
+      "allDepartments": "Tous (à l'échelle de l'org)",
+      "catalogTitle": "Catalogue d'Outils",
+      "configsColumn": "Configurations",
+      "configCount": "{{count}} configuration",
+      "configCount_plural": "{{count}} configurations",
+      "notConfigured": "non configuré",
+      "addConfigFor": "Ajouter config pour {{name}}",
+      "addConfigInline": "Ajouter",
+      "noNamespace": "Outils sans namespace",
+      "enabled": "Activé",
+      "disabled": "Désactivé",
+      "disableTitle": "Désactiver {{name}} ?",
+      "disableDesc": "Cet outil sera masqué pour les agents et ne pourra pas être appelé tant qu'il n'est pas réactivé.",
+      "enableTitle": "Activer {{name}} ?",
+      "enableDesc": "Cet outil redeviendra visible et utilisable."
     },
     "interfaces": {
       "title": "Profils d'Interface",
