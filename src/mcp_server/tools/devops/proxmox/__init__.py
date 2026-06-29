@@ -14,11 +14,15 @@ Three MCP tools share this package and the ``proxmox`` config namespace:
   approval: clone-from-template (with cloud-init / LXC customization),
   edit, power ops, snapshots, migrate, convert-to-template and delete.
 
-Authentication is per-profile via a Proxmox **API token**
-(``token_id`` = ``user@realm!tokenname`` + ``token_secret``), so multiple
-clusters can be configured as distinct profiles. The client talks to the
-REST API at ``https://{host}:8006/api2/json`` with ``httpx`` — fully
-async, no extra dependency.
+Authentication is via a Proxmox **API token**
+(``token_id`` = ``user@realm!tokenname`` + ``token_secret``). The client
+talks to the REST API at ``https://{host}:8006/api2/json`` with ``httpx``
+— fully async, no extra dependency.
+
+**Multiple clusters**: the top-level config fields define the primary
+(``default``) cluster; add more under the ``profiles`` config map (each
+key is a cluster name with the same fields). Callers pick one with the
+``profile`` param (omit it for ``default``).
 
 Guests are addressed by ``vmid`` (unambiguous) or ``name`` (unique
 cluster-wide); the node is resolved automatically from

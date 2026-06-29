@@ -147,8 +147,9 @@ class ProxmoxInventoryTool(BaseTool):
             "profile": {
                 "type": "string",
                 "description": (
-                    "GSageToolConfig profile (Proxmox cluster) to use. "
-                    "Omit for the 'default' profile."
+                    "Name of the configured Proxmox cluster to query (a key "
+                    "under the config 'profiles' map). Omit (or 'default') "
+                    "for the primary cluster."
                 ),
             },
             "vmid": {
@@ -253,7 +254,9 @@ class ProxmoxInventoryTool(BaseTool):
         )
 
         try:
-            async with build_proxmox_client(config) as client:
+            async with build_proxmox_client(
+                config, profile=params.get("profile")
+            ) as client:
                 handler = getattr(self, f"_do_{action}")
                 data = await handler(
                     client, params, agent_context, max_results

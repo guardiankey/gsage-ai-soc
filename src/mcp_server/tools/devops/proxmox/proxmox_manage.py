@@ -142,7 +142,14 @@ class ProxmoxManageTool(BaseTool):
                 "enum": sorted(_ACTIONS),
                 "description": "Which write operation to perform.",
             },
-            "profile": {"type": "string"},
+            "profile": {
+                "type": "string",
+                "description": (
+                    "Name of the configured Proxmox cluster to act on (a key "
+                    "under the config 'profiles' map). Omit (or 'default') "
+                    "for the primary cluster."
+                ),
+            },
             "reason": {
                 "type": "string",
                 "minLength": 5,
@@ -328,7 +335,9 @@ class ProxmoxManageTool(BaseTool):
                 f"action must be one of {sorted(_ACTIONS)}; got {action!r}.",
             )
         try:
-            async with build_proxmox_client(config) as client:
+            async with build_proxmox_client(
+                config, profile=params.get("profile")
+            ) as client:
                 if action in _POWER_VERBS:
                     data = await self._do_power(client, params, action)
                 else:

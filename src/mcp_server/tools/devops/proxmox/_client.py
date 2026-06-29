@@ -51,49 +51,74 @@ log = logging.getLogger(__name__)
 # Config schema / defaults
 # ---------------------------------------------------------------------------
 
+# Per-cluster connection fields, shared by the top-level (the implicit
+# ``default`` cluster) and by every named entry under ``profiles``.
+_PROXMOX_CLUSTER_PROPERTIES: dict = {
+    "host": {
+        "type": "string",
+        "description": "Proxmox node FQDN or IP (any cluster node).",
+    },
+    "port": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 65535,
+        "description": "Proxmox API port (default 8006).",
+    },
+    "token_id": {
+        "type": "string",
+        "description": (
+            "API token id in the form 'user@realm!tokenname' "
+            "(e.g. 'svc-gsage@pve!gsage')."
+        ),
+    },
+    "token_secret": {
+        "type": "string",
+        "description": "API token secret / UUID (sensitive).",
+    },
+    "verify_ssl": {
+        "type": "boolean",
+        "description": (
+            "Validate the Proxmox TLS certificate (default true). Set "
+            "false for the default self-signed PVE certificate."
+        ),
+    },
+    "node": {
+        "type": "string",
+        "description": (
+            "Optional default node name used when an action omits it "
+            "and it cannot be resolved from the cluster."
+        ),
+    },
+    "timeout": {
+        "type": "integer",
+        "minimum": 5,
+        "maximum": 300,
+        "description": "Per-request timeout in seconds (default 60).",
+    },
+}
+
 PROXMOX_CONFIG_SCHEMA: dict = {
     "type": "object",
     "properties": {
-        "host": {
-            "type": "string",
-            "description": "Proxmox node FQDN or IP (any cluster node).",
-        },
-        "port": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 65535,
-            "description": "Proxmox API port (default 8006).",
-        },
-        "token_id": {
-            "type": "string",
+        # Top-level fields describe the primary cluster, selected when the
+        # 'profile' param is omitted or set to 'default'.
+        **_PROXMOX_CLUSTER_PROPERTIES,
+        # Additional clusters, each selectable by name via the 'profile'
+        # param. A named profile is a self-contained cluster config.
+        "profiles": {
+            "type": "object",
             "description": (
-                "API token id in the form 'user@realm!tokenname' "
-                "(e.g. 'svc-gsage@pve!gsage')."
+                "Additional named Proxmox clusters. Each key is a profile "
+                "name selectable via the 'profile' param; its value accepts "
+                "the same fields as the top level. The top-level fields "
+                "define the implicit 'default' cluster."
             ),
-        },
-        "token_secret": {
-            "type": "string",
-            "description": "API token secret / UUID (sensitive).",
-        },
-        "verify_ssl": {
-            "type": "boolean",
-            "description": (
-                "Validate the Proxmox TLS certificate (default true). Set "
-                "false for the default self-signed PVE certificate."
-            ),
-        },
-        "node": {
-            "type": "string",
-            "description": (
-                "Optional default node name used when an action omits it "
-                "and it cannot be resolved from the cluster."
-            ),
-        },
-        "timeout": {
-            "type": "integer",
-            "minimum": 5,
-            "maximum": 300,
-            "description": "Per-request timeout in seconds (default 60).",
+            "additionalProperties": {
+                "type": "object",
+                "properties": _PROXMOX_CLUSTER_PROPERTIES,
+                "required": ["host", "token_id", "token_secret"],
+                "additionalProperties": False,
+            },
         },
     },
     "required": ["host", "token_id", "token_secret"],
@@ -108,7 +133,31 @@ PROXMOX_CONFIG_DEFAULTS: dict = {
     "verify_ssl": True,
     "node": "",
     "timeout": 60,
+    "profiles": {},
 }
+
+
+def resolve_proxmox_profile(config: dict, profile: Optional[str]) -> dict:
+    """Return the flat cluster config for the selected ``profile``.
+
+    ``profile`` empty or ``"default"`` selects the top-level fields (the
+    primary cluster). Any other value is looked up under ``profiles``;
+    a missing name raises :class:`ProxmoxError` (``CONFIG_MISSING``).
+    """
+    name = (profile or "").strip()
+    if not name or name == "default":
+        return dict(config or {})
+    profiles = (config or {}).get("profiles") or {}
+    cluster = profiles.get(name)
+    if not isinstance(cluster, dict):
+        available = ", ".join(sorted(profiles.keys())) or "(none)"
+        raise ProxmoxError(
+            f"Proxmox profile {name!r} is not configured. Available extra "
+            f"profiles: {available}. Omit 'profile' (or use 'default') for "
+            "the primary cluster.",
+            code="CONFIG_MISSING",
+        )
+    return dict(cluster)
 
 
 # ---------------------------------------------------------------------------
@@ -174,16 +223,20 @@ def _translate(exc: BaseException) -> ProxmoxError:
 # ---------------------------------------------------------------------------
 
 
-def build_proxmox_client(config: dict) -> "ProxmoxClient":
-    """Build a :class:`ProxmoxClient` from a tool config dict.
+def build_proxmox_client(
+    config: dict, profile: Optional[str] = None
+) -> "ProxmoxClient":
+    """Build a :class:`ProxmoxClient` for the selected cluster ``profile``.
 
-    Use as an async context manager so the underlying HTTP connection pool
-    is closed cleanly::
+    ``profile`` selects which configured cluster to connect to (see
+    :func:`resolve_proxmox_profile`); omit it or pass ``"default"`` for the
+    primary cluster. Use as an async context manager so the underlying HTTP
+    connection pool is closed cleanly::
 
-        async with build_proxmox_client(config) as client:
+        async with build_proxmox_client(config, profile="clusterB") as client:
             ...
     """
-    return ProxmoxClient(config)
+    return ProxmoxClient(resolve_proxmox_profile(config, profile))
 
 
 # ---------------------------------------------------------------------------
@@ -447,4 +500,5 @@ __all__ = [
     "ProxmoxClient",
     "ProxmoxError",
     "build_proxmox_client",
+    "resolve_proxmox_profile",
 ]

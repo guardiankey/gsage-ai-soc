@@ -52,48 +52,73 @@ log = logging.getLogger(__name__)
 # Config schema / defaults
 # ---------------------------------------------------------------------------
 
+# Per-vCenter connection fields, shared by the top-level (the implicit
+# ``default`` vCenter) and by every named entry under ``profiles``.
+_VCENTER_CONNECTION_PROPERTIES: dict = {
+    "host": {
+        "type": "string",
+        "description": "vCenter Server FQDN or IP address.",
+    },
+    "user": {
+        "type": "string",
+        "description": (
+            "vCenter username (e.g. 'svc-gsage@vsphere.local')."
+        ),
+    },
+    "password": {
+        "type": "string",
+        "description": "vCenter password (sensitive).",
+    },
+    "port": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 65535,
+        "description": "vCenter HTTPS port (default 443).",
+    },
+    "verify_ssl": {
+        "type": "boolean",
+        "description": (
+            "Validate the vCenter TLS certificate (default true). "
+            "Set false for self-signed lab certificates."
+        ),
+    },
+    "datacenter": {
+        "type": "string",
+        "description": (
+            "Optional default datacenter name used to scope inventory "
+            "walks when not provided in params."
+        ),
+    },
+    "timeout": {
+        "type": "integer",
+        "minimum": 5,
+        "maximum": 300,
+        "description": "Per-call timeout in seconds (default 60).",
+    },
+}
+
 VCENTER_CONFIG_SCHEMA: dict = {
     "type": "object",
     "properties": {
-        "host": {
-            "type": "string",
-            "description": "vCenter Server FQDN or IP address.",
-        },
-        "user": {
-            "type": "string",
+        # Top-level fields describe the primary vCenter, selected when the
+        # 'profile' param is omitted or set to 'default'.
+        **_VCENTER_CONNECTION_PROPERTIES,
+        # Additional vCenters, each selectable by name via the 'profile'
+        # param. A named profile is a self-contained connection config.
+        "profiles": {
+            "type": "object",
             "description": (
-                "vCenter username (e.g. 'svc-gsage@vsphere.local')."
+                "Additional named vCenters. Each key is a profile name "
+                "selectable via the 'profile' param; its value accepts the "
+                "same fields as the top level. The top-level fields define "
+                "the implicit 'default' vCenter."
             ),
-        },
-        "password": {
-            "type": "string",
-            "description": "vCenter password (sensitive).",
-        },
-        "port": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 65535,
-            "description": "vCenter HTTPS port (default 443).",
-        },
-        "verify_ssl": {
-            "type": "boolean",
-            "description": (
-                "Validate the vCenter TLS certificate (default true). "
-                "Set false for self-signed lab certificates."
-            ),
-        },
-        "datacenter": {
-            "type": "string",
-            "description": (
-                "Optional default datacenter name used to scope inventory "
-                "walks when not provided in params."
-            ),
-        },
-        "timeout": {
-            "type": "integer",
-            "minimum": 5,
-            "maximum": 300,
-            "description": "Per-call timeout in seconds (default 60).",
+            "additionalProperties": {
+                "type": "object",
+                "properties": _VCENTER_CONNECTION_PROPERTIES,
+                "required": ["host", "user", "password"],
+                "additionalProperties": False,
+            },
         },
     },
     "required": ["host", "user", "password"],
@@ -108,6 +133,7 @@ VCENTER_CONFIG_DEFAULTS: dict = {
     "verify_ssl": True,
     "datacenter": "",
     "timeout": 60,
+    "profiles": {},
 }
 
 
@@ -207,16 +233,43 @@ def _translate(exc: BaseException) -> VCenterError:
 # ---------------------------------------------------------------------------
 
 
-def build_vcenter_client(config: dict) -> "VCenterClient":
-    """Build a :class:`VCenterClient` from a tool config dict.
+def resolve_vcenter_profile(config: dict, profile: Optional[str]) -> dict:
+    """Return the flat connection config for the selected ``profile``.
 
-    Use as an async context manager so the session is disconnected
-    cleanly::
+    ``profile`` empty or ``"default"`` selects the top-level fields (the
+    primary vCenter). Any other value is looked up under ``profiles``; a
+    missing name raises :class:`VCenterError` (``CONFIG_MISSING``).
+    """
+    name = (profile or "").strip()
+    if not name or name == "default":
+        return dict(config or {})
+    profiles = (config or {}).get("profiles") or {}
+    conn = profiles.get(name)
+    if not isinstance(conn, dict):
+        available = ", ".join(sorted(profiles.keys())) or "(none)"
+        raise VCenterError(
+            f"vCenter profile {name!r} is not configured. Available extra "
+            f"profiles: {available}. Omit 'profile' (or use 'default') for "
+            "the primary vCenter.",
+            code="CONFIG_MISSING",
+        )
+    return dict(conn)
 
-        async with build_vcenter_client(config) as client:
+
+def build_vcenter_client(
+    config: dict, profile: Optional[str] = None
+) -> "VCenterClient":
+    """Build a :class:`VCenterClient` for the selected ``profile``.
+
+    ``profile`` selects which configured vCenter to connect to (see
+    :func:`resolve_vcenter_profile`); omit it or pass ``"default"`` for the
+    primary vCenter. Use as an async context manager so the session is
+    disconnected cleanly::
+
+        async with build_vcenter_client(config, profile="dc2") as client:
             ...
     """
-    return VCenterClient(config)
+    return VCenterClient(resolve_vcenter_profile(config, profile))
 
 
 # ---------------------------------------------------------------------------
@@ -502,4 +555,5 @@ __all__ = [
     "VCenterClient",
     "VCenterError",
     "build_vcenter_client",
+    "resolve_vcenter_profile",
 ]

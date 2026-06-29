@@ -104,7 +104,14 @@ class ProxmoxDashboardTool(BaseTool):
                 "enum": sorted(_VIEWS),
                 "description": "Which dashboard view to render.",
             },
-            "profile": {"type": "string"},
+            "profile": {
+                "type": "string",
+                "description": (
+                    "Name of the configured Proxmox cluster to summarize (a "
+                    "key under the config 'profiles' map). Omit (or 'default') "
+                    "for the primary cluster."
+                ),
+            },
             "force_refresh": {
                 "type": "boolean",
                 "description": (
@@ -138,7 +145,9 @@ class ProxmoxDashboardTool(BaseTool):
                 f"view must be one of {sorted(_VIEWS)}; got {view!r}.",
             )
         try:
-            async with build_proxmox_client(config) as client:
+            async with build_proxmox_client(
+                config, profile=params.get("profile")
+            ) as client:
                 handler = getattr(self, f"_view_{view}")
                 data = await handler(client, params, agent_context)
         except ProxmoxError as exc:

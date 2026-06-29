@@ -114,7 +114,14 @@ class VCenterManageTool(BaseTool):
                 "enum": sorted(_ACTIONS),
                 "description": "Which write operation to perform.",
             },
-            "profile": {"type": "string"},
+            "profile": {
+                "type": "string",
+                "description": (
+                    "Name of the configured vCenter to act on (a key under "
+                    "the config 'profiles' map). Omit (or 'default') for the "
+                    "primary vCenter."
+                ),
+            },
             "name": {
                 "type": "string",
                 "description": (
@@ -292,7 +299,9 @@ class VCenterManageTool(BaseTool):
                 f"action must be one of {sorted(_ACTIONS)}; got {action!r}.",
             )
         try:
-            async with build_vcenter_client(config) as client:
+            async with build_vcenter_client(
+                config, profile=params.get("profile")
+            ) as client:
                 handler = getattr(self, f"_do_{action}")
                 data = await handler(client, params, agent_context)
         except _ParamError as exc:

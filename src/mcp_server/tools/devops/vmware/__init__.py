@@ -13,10 +13,14 @@ Three MCP tools share this package and the ``vcenter`` config namespace:
   approval: create-from-template, edit, clone, VM↔template conversion,
   power ops, snapshots, vMotion and delete.
 
-Authentication is per-profile via a vCenter user/password
-(``host`` / ``user`` / ``password`` / ``port`` / ``verify_ssl``), so
-multiple vCenters can be configured as distinct profiles. The underlying
-SDK is **pyVmomi** (imported lazily; see ``_client.py``).
+Authentication is via a vCenter user/password
+(``host`` / ``user`` / ``password`` / ``port`` / ``verify_ssl``). The
+underlying SDK is **pyVmomi** (imported lazily; see ``_client.py``).
+
+**Multiple vCenters**: the top-level config fields define the primary
+(``default``) vCenter; add more under the ``profiles`` config map (each
+key is a vCenter name with the same fields). Callers pick one with the
+``profile`` param (omit it for ``default``).
 
 A shared Redis cache (TTL 300s, key scoped by org/user/profile/host) is
 used for expensive list queries; ``params.force_refresh=true`` bypasses it.
