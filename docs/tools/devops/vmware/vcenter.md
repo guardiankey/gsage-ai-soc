@@ -41,6 +41,7 @@ gSage AI — High-level VMware vCenter dashboards (read-only summaries).
   "host": "",
   "password": "",
   "port": 443,
+  "profiles": {},
   "timeout": 60,
   "user": "",
   "verify_ssl": true
@@ -55,6 +56,7 @@ gSage AI — High-level VMware vCenter dashboards (read-only summaries).
 | `host` | `string` | ✓ | — | `""` | vCenter Server FQDN or IP address. |
 | `password` | `string` | ✓ | — | `""` | vCenter password (sensitive). |
 | `port` | `integer` | — | — | `443` | vCenter HTTPS port (default 443). |
+| `profiles` | `object` | — | — | `{}` | Additional named vCenters. Each key is a profile name selectable via the 'profile' param; its value accepts the same fields as the top level. The top-level fields define the implicit 'default' vCenter. |
 | `timeout` | `integer` | — | — | `60` | Per-call timeout in seconds (default 60). |
 | `user` | `string` | ✓ | — | `""` | vCenter username (e.g. 'svc-gsage@vsphere.local'). |
 | `verify_ssl` | `boolean` | — | — | `true` | Validate the vCenter TLS certificate (default true). Set false for self-signed lab certificates. |
@@ -69,6 +71,7 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_VCENTER__HOST` | `host` | `string` | `""` | — | vCenter Server FQDN or IP address. |
 | `TOOL_VCENTER__PASSWORD` | `password` | `string` | `""` | — | vCenter password (sensitive). |
 | `TOOL_VCENTER__PORT` | `port` | `integer` | `443` | — | vCenter HTTPS port (default 443). |
+| `TOOL_VCENTER__PROFILES` | `profiles` | `object` | `{}` | — | Additional named vCenters. Each key is a profile name selectable via the 'profile' param; its value accepts the same fields as the top level. The top-level fields define the implicit 'default' vCenter. |
 | `TOOL_VCENTER__TIMEOUT` | `timeout` | `integer` | `60` | — | Per-call timeout in seconds (default 60). |
 | `TOOL_VCENTER__USER` | `user` | `string` | `""` | — | vCenter username (e.g. 'svc-gsage@vsphere.local'). |
 | `TOOL_VCENTER__VERIFY_SSL` | `verify_ssl` | `boolean` | `true` | — | Validate the vCenter TLS certificate (default true). Set false for self-signed lab certificates. |
@@ -116,7 +119,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (vCenter target) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured vCenter to query (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | — | Target object name. Required by get_cluster, get_host, get_vm, list_snapshots, get_vm_metrics. For find_vm, matches the VM inventory/DNS name. |
   | `ip` | `string` | — | [find_vm] Guest IP address to resolve to a VM. |
   | `uuid` | `string` | — | [find_vm] VM instance UUID (or BIOS UUID). |
@@ -135,7 +138,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (vCenter target) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured vCenter to query (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | — | Target object name. Required by get_cluster, get_host, get_vm, list_snapshots, get_vm_metrics. For find_vm, matches the VM inventory/DNS name. |
   | `ip` | `string` | — | [find_vm] Guest IP address to resolve to a VM. |
   | `uuid` | `string` | — | [find_vm] VM instance UUID (or BIOS UUID). |
@@ -154,7 +157,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (vCenter target) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured vCenter to query (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | — | Target object name. Required by get_cluster, get_host, get_vm, list_snapshots, get_vm_metrics. For find_vm, matches the VM inventory/DNS name. |
   | `ip` | `string` | — | [find_vm] Guest IP address to resolve to a VM. |
   | `uuid` | `string` | — | [find_vm] VM instance UUID (or BIOS UUID). |
@@ -173,7 +176,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (vCenter target) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured vCenter to query (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | — | Target object name. Required by get_cluster, get_host, get_vm, list_snapshots, get_vm_metrics. For find_vm, matches the VM inventory/DNS name. |
   | `ip` | `string` | — | [find_vm] Guest IP address to resolve to a VM. |
   | `uuid` | `string` | — | [find_vm] VM instance UUID (or BIOS UUID). |
@@ -198,7 +201,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (vCenter target) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured vCenter to query (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | — | Target object name. Required by get_cluster, get_host, get_vm, list_snapshots, get_vm_metrics. For find_vm, matches the VM inventory/DNS name. |
   | `ip` | `string` | — | [find_vm] Guest IP address to resolve to a VM. |
   | `uuid` | `string` | — | [find_vm] VM instance UUID (or BIOS UUID). |
@@ -217,7 +220,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (vCenter target) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured vCenter to query (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | — | Target object name. Required by get_cluster, get_host, get_vm, list_snapshots, get_vm_metrics. For find_vm, matches the VM inventory/DNS name. |
   | `ip` | `string` | — | [find_vm] Guest IP address to resolve to a VM. |
   | `uuid` | `string` | — | [find_vm] VM instance UUID (or BIOS UUID). |
@@ -242,7 +245,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (vCenter target) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured vCenter to query (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | — | Target object name. Required by get_cluster, get_host, get_vm, list_snapshots, get_vm_metrics. For find_vm, matches the VM inventory/DNS name. |
   | `ip` | `string` | — | [find_vm] Guest IP address to resolve to a VM. |
   | `uuid` | `string` | — | [find_vm] VM instance UUID (or BIOS UUID). |
@@ -332,7 +335,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured vCenter to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | ✓ | Primary target name: the VM/template to act on, or — for create_vm_from_template / clone_vm — the SOURCE template/VM to clone from. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `new_name` | `string` | — | [create_vm_from_template, clone_vm, vm_to_template (clone=true)] Name of the new VM / template to create. |
@@ -379,7 +382,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured vCenter to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | ✓ | Primary target name: the VM/template to act on, or — for create_vm_from_template / clone_vm — the SOURCE template/VM to clone from. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `new_name` | `string` | — | [create_vm_from_template, clone_vm, vm_to_template (clone=true)] Name of the new VM / template to create. |
@@ -408,7 +411,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured vCenter to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | ✓ | Primary target name: the VM/template to act on, or — for create_vm_from_template / clone_vm — the SOURCE template/VM to clone from. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `new_name` | `string` | — | [create_vm_from_template, clone_vm, vm_to_template (clone=true)] Name of the new VM / template to create. |
@@ -437,7 +440,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured vCenter to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | ✓ | Primary target name: the VM/template to act on, or — for create_vm_from_template / clone_vm — the SOURCE template/VM to clone from. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `new_name` | `string` | — | [create_vm_from_template, clone_vm, vm_to_template (clone=true)] Name of the new VM / template to create. |
@@ -472,7 +475,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured vCenter to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary vCenter. |
   | `name` | `string` | ✓ | Primary target name: the VM/template to act on, or — for create_vm_from_template / clone_vm — the SOURCE template/VM to clone from. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `new_name` | `string` | — | [create_vm_from_template, clone_vm, vm_to_template (clone=true)] Name of the new VM / template to create. |

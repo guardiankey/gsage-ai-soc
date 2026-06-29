@@ -40,6 +40,7 @@ gSage AI — High-level Proxmox VE dashboards (read-only summaries).
   "host": "",
   "node": "",
   "port": 8006,
+  "profiles": {},
   "timeout": 60,
   "token_id": "",
   "token_secret": "",
@@ -54,6 +55,7 @@ gSage AI — High-level Proxmox VE dashboards (read-only summaries).
 | `host` | `string` | ✓ | — | `""` | Proxmox node FQDN or IP (any cluster node). |
 | `node` | `string` | — | — | `""` | Optional default node name used when an action omits it and it cannot be resolved from the cluster. |
 | `port` | `integer` | — | — | `8006` | Proxmox API port (default 8006). |
+| `profiles` | `object` | — | — | `{}` | Additional named Proxmox clusters. Each key is a profile name selectable via the 'profile' param; its value accepts the same fields as the top level. The top-level fields define the implicit 'default' cluster. |
 | `timeout` | `integer` | — | — | `60` | Per-request timeout in seconds (default 60). |
 | `token_id` | `string` | ✓ | — | `""` | API token id in the form 'user@realm!tokenname' (e.g. 'svc-gsage@pve!gsage'). |
 | `token_secret` | `string` | ✓ | — | `""` | API token secret / UUID (sensitive). |
@@ -68,6 +70,7 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_PROXMOX__HOST` | `host` | `string` | `""` | — | Proxmox node FQDN or IP (any cluster node). |
 | `TOOL_PROXMOX__NODE` | `node` | `string` | `""` | — | Optional default node name used when an action omits it and it cannot be resolved from the cluster. |
 | `TOOL_PROXMOX__PORT` | `port` | `integer` | `8006` | — | Proxmox API port (default 8006). |
+| `TOOL_PROXMOX__PROFILES` | `profiles` | `object` | `{}` | — | Additional named Proxmox clusters. Each key is a profile name selectable via the 'profile' param; its value accepts the same fields as the top level. The top-level fields define the implicit 'default' cluster. |
 | `TOOL_PROXMOX__TIMEOUT` | `timeout` | `integer` | `60` | — | Per-request timeout in seconds (default 60). |
 | `TOOL_PROXMOX__TOKEN_ID` | `token_id` | `string` | `""` | — | API token id in the form 'user@realm!tokenname' (e.g. 'svc-gsage@pve!gsage'). |
 | `TOOL_PROXMOX__TOKEN_SECRET` | `token_secret` | `string` | `""` | — | API token secret / UUID (sensitive). |
@@ -84,7 +87,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (Proxmox cluster) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to query (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `vmid` | `integer` | — | Target guest VMID (unambiguous). Required by get_vm / list_snapshots / get_vm_metrics unless 'name' is given. |
   | `name` | `string` | — | Target guest name (must be unique cluster-wide). Alternative to 'vmid'. |
   | `node` | `string` | — | Node name. Required by get_node; optional filter for list_vms / list_storage / list_networks / recent_tasks. |
@@ -124,7 +127,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (Proxmox cluster) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to query (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `vmid` | `integer` | — | Target guest VMID (unambiguous). Required by get_vm / list_snapshots / get_vm_metrics unless 'name' is given. |
   | `name` | `string` | — | Target guest name (must be unique cluster-wide). Alternative to 'vmid'. |
   | `node` | `string` | — | Node name. Required by get_node; optional filter for list_vms / list_storage / list_networks / recent_tasks. |
@@ -140,7 +143,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (Proxmox cluster) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to query (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `vmid` | `integer` | — | Target guest VMID (unambiguous). Required by get_vm / list_snapshots / get_vm_metrics unless 'name' is given. |
   | `name` | `string` | — | Target guest name (must be unique cluster-wide). Alternative to 'vmid'. |
   | `node` | `string` | — | Node name. Required by get_node; optional filter for list_vms / list_storage / list_networks / recent_tasks. |
@@ -168,7 +171,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | GSageToolConfig profile (Proxmox cluster) to use. Omit for the 'default' profile. |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to query (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `vmid` | `integer` | — | Target guest VMID (unambiguous). Required by get_vm / list_snapshots / get_vm_metrics unless 'name' is given. |
   | `name` | `string` | — | Target guest name (must be unique cluster-wide). Alternative to 'vmid'. |
   | `node` | `string` | — | Node name. Required by get_node; optional filter for list_vms / list_storage / list_networks / recent_tasks. |
@@ -221,7 +224,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `vmid` | `integer` | — | Target guest VMID. For clone_from_template this is the SOURCE template/guest. Use this or 'name'. |
   | `name` | `string` | — | Target guest name (unique cluster-wide). Alternative to 'vmid'. |
@@ -267,7 +270,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `vmid` | `integer` | — | Target guest VMID. For clone_from_template this is the SOURCE template/guest. Use this or 'name'. |
   | `name` | `string` | — | Target guest name (unique cluster-wide). Alternative to 'vmid'. |
@@ -318,7 +321,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `vmid` | `integer` | — | Target guest VMID. For clone_from_template this is the SOURCE template/guest. Use this or 'name'. |
   | `name` | `string` | — | Target guest name (unique cluster-wide). Alternative to 'vmid'. |
@@ -350,7 +353,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `vmid` | `integer` | — | Target guest VMID. For clone_from_template this is the SOURCE template/guest. Use this or 'name'. |
   | `name` | `string` | — | Target guest name (unique cluster-wide). Alternative to 'vmid'. |
@@ -388,7 +391,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `vmid` | `integer` | — | Target guest VMID. For clone_from_template this is the SOURCE template/guest. Use this or 'name'. |
   | `name` | `string` | — | Target guest name (unique cluster-wide). Alternative to 'vmid'. |
@@ -426,7 +429,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `vmid` | `integer` | — | Target guest VMID. For clone_from_template this is the SOURCE template/guest. Use this or 'name'. |
   | `name` | `string` | — | Target guest name (unique cluster-wide). Alternative to 'vmid'. |
@@ -458,7 +461,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `profile` | `string` | — | — |
+  | `profile` | `string` | — | Name of the configured Proxmox cluster to act on (a key under the config 'profiles' map). Omit (or 'default') for the primary cluster. |
   | `reason` | `string` | ✓ | Free-form justification recorded in the audit log. |
   | `vmid` | `integer` | — | Target guest VMID. For clone_from_template this is the SOURCE template/guest. Use this or 'name'. |
   | `name` | `string` | — | Target guest name (unique cluster-wide). Alternative to 'vmid'. |
