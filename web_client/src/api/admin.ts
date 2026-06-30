@@ -618,6 +618,30 @@ export async function updateToolSettings(
   await apiClient.patch(`${base(orgId)}/tools/${encodeURIComponent(toolName)}/settings`, payload)
 }
 
+// ---- Tool Metadata (documentation modal) ----
+export interface ToolMetadata {
+  name: string
+  display_name: string
+  description: string
+  summary: string | null
+  category: string
+  version: string
+  permissions: string[]
+  requires_config: boolean
+  requires_approval: boolean
+  config_namespace: string | null
+  config_schema: Record<string, unknown> | null
+  config_defaults: Record<string, unknown> | null
+  rate_limit_per_minute: number
+}
+
+export async function getToolMetadata(orgId: string, toolName: string): Promise<ToolMetadata> {
+  const { data } = await apiClient.get<ToolMetadata>(
+    `${base(orgId)}/tools/${encodeURIComponent(toolName)}`,
+  )
+  return data
+}
+
 // ---- Interface Profiles ----
 export async function listInterfaceProfiles(orgId: string, params?: { interface?: string; dept_id?: string }): Promise<InterfaceProfileOut[]> {
   const { data } = await apiClient.get<InterfaceProfileOut[]>(`${base(orgId)}/interface-profiles`, { params })

@@ -300,6 +300,23 @@ class ToolSettingsUpdate(BaseModel):
     is_enabled: bool
 
 
+class ToolMetadataOut(BaseModel):
+    """Full tool metadata for the admin documentation modal."""
+    name: str
+    display_name: str
+    description: str
+    summary: Optional[str] = None
+    category: str
+    version: str
+    permissions: list[str]
+    requires_config: bool
+    requires_approval: bool
+    config_namespace: Optional[str] = None
+    config_schema: Optional[Dict[str, Any]] = None
+    config_defaults: Optional[Dict[str, Any]] = None
+    rate_limit_per_minute: int
+
+
 # ---------------------------------------------------------------------------
 # InterfaceProfile schemas
 # ---------------------------------------------------------------------------

@@ -680,7 +680,22 @@
       "disableTitle": "Disable {{name}}?",
       "disableDesc": "This tool will be hidden from agents and cannot be called until re-enabled.",
       "enableTitle": "Enable {{name}}?",
-      "enableDesc": "This tool will become visible and callable again."
+      "enableDesc": "This tool will become visible and callable again.",
+      "showInfo": "Show documentation",
+      "metadataError": "Tool metadata not available.",
+      "configFields": "Config Fields",
+      "sensitive": "sensitive",
+      "field": "Field",
+      "type": "Type",
+      "required": "Required",
+      "noExtraFields": "Extra fields are not allowed.",
+      "noConfigRequired": "No configuration required.",
+      "envVars": "Environment Variables",
+      "namespaceEnvNote": "Namespace-scoped vars (shared, lower precedence) shown first.",
+      "permissions": "Permissions",
+      "rateLimit": "Rate limit",
+      "configNamespace": "Config namespace",
+      "requiresApproval": "Requires human approval"
     },
     "interfaces": {
       "title": "Interface Profiles",

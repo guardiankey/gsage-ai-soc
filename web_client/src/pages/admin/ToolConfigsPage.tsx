@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Pencil, Wrench, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, Pencil, Wrench, ChevronDown, ChevronRight, Info } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { useAuth } from '@/contexts/AuthContext'
+import ToolInfoModal from '@/components/admin/ToolInfoModal'
 import {
   listToolConfigs,
   listAvailableTools,
@@ -21,6 +22,7 @@ import {
   updateToolConfig,
   deleteToolConfig,
   getToolCatalog,
+  getToolMetadata,
   updateToolSettings,
   type ToolConfigOut,
   type ToolConfigCreate,
@@ -41,6 +43,7 @@ export default function ToolConfigsPage() {
   const [editTarget, setEditTarget] = useState<ToolConfigOut | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ToolConfigOut | null>(null)
   const [disableTarget, setDisableTarget] = useState<ToolCatalogEntry | null>(null)
+  const [infoTarget, setInfoTarget] = useState<string | null>(null)
 
   const { data: catalog, isLoading } = useQuery({
     queryKey: ['admin', 'tool-catalog', orgId],
@@ -167,6 +170,7 @@ export default function ToolConfigsPage() {
                 <th className="text-left px-4 py-3 font-medium">{t('admin.toolConfigs.toolName')}</th>
                 <th className="text-left px-4 py-3 font-medium w-28">{t('admin.toolConfigs.category', 'Category')}</th>
                 <th className="text-left px-4 py-3 font-medium">{t('admin.toolConfigs.configsColumn', 'Configs')}</th>
+                <th className="px-2 py-3 w-10" />
                 <th className="px-4 py-3 w-20" />
                 <th className="px-4 py-3 w-24 font-medium text-center">{t('admin.toolConfigs.enabled')}</th>
               </tr>
@@ -197,6 +201,17 @@ export default function ToolConfigsPage() {
                         onDelete={(tc) => setDeleteTarget(tc)}
                       />
                     </td>
+                    <td className="px-2 py-3">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        title={t('admin.toolConfigs.showInfo', 'Show documentation')}
+                        onClick={() => setInfoTarget(ns.name)}
+                      >
+                        <Info className="h-4 w-4" />
+                      </Button>
+                    </td>
                     <td className="px-4 py-3">
                       <Button
                         size="sm"
@@ -222,6 +237,17 @@ export default function ToolConfigsPage() {
                           onDelete={(tc) => setDeleteTarget(tc)}
                         />
                       </td>
+                      <td className="px-2 py-3">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          title={t('admin.toolConfigs.showInfo', 'Show documentation')}
+                          onClick={() => setInfoTarget(child.name)}
+                        >
+                          <Info className="h-4 w-4" />
+                        </Button>
+                      </td>
                       <td className="px-4 py-3">
                         <Button
                           size="sm"
@@ -242,7 +268,7 @@ export default function ToolConfigsPage() {
               {/* Divider before orphan tools */}
               {nsWithChildren.length > 0 && orphanTools.length > 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-2 bg-muted/20 text-xs text-muted-foreground font-medium">
+                  <td colSpan={6} className="px-4 py-2 bg-muted/20 text-xs text-muted-foreground font-medium">
                     {t('admin.toolConfigs.noNamespace', 'Tools without namespace')}
                   </td>
                 </tr>
@@ -259,6 +285,17 @@ export default function ToolConfigsPage() {
                       onEdit={(tc) => setEditTarget(tc)}
                       onDelete={(tc) => setDeleteTarget(tc)}
                     />
+                  </td>
+                  <td className="px-2 py-3">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title={t('admin.toolConfigs.showInfo', 'Show documentation')}
+                      onClick={() => setInfoTarget(tool.name)}
+                    >
+                      <Info className="h-4 w-4" />
+                    </Button>
                   </td>
                   <td className="px-4 py-3">
                     <Button
@@ -277,7 +314,7 @@ export default function ToolConfigsPage() {
 
               {catalog?.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{t('common.noResults')}</td>
+                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{t('common.noResults')}</td>
                 </tr>
               )}
             </tbody>
@@ -286,7 +323,7 @@ export default function ToolConfigsPage() {
       )}
 
       {/* Create dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={createOpen} onOpenChange={(o) => { setCreateOpen(o); if (!o) setCreateFor('') }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
@@ -294,7 +331,8 @@ export default function ToolConfigsPage() {
               {createFor && ` — ${createFor}`}
             </DialogTitle>
           </DialogHeader>
-          <ToolConfigForm
+          <CreateToolConfigForm
+            orgId={orgId!}
             initialToolName={createFor}
             onSubmit={(p) => muCreate.mutate(p)}
             onCancel={() => { setCreateOpen(false); setCreateFor('') }}
@@ -369,6 +407,16 @@ export default function ToolConfigsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Tool Info Modal */}
+      {infoTarget && orgId && (
+        <ToolInfoModal
+          toolName={infoTarget}
+          orgId={orgId}
+          open={!!infoTarget}
+          onOpenChange={(open) => { if (!open) setInfoTarget(null) }}
+        />
+      )}
     </div>
   )
 }
@@ -438,13 +486,14 @@ function ConfigCountBadge({
   )
 }
 
-// ── Reusable create/edit form (unchanged logic, accepts initialToolName) ──
+// ── Reusable create/edit form ──────────────────────────────────────────
 
-function ToolConfigForm({ onSubmit, onCancel, initial, initialToolName, availableTools, departments, isLoading }: {
+function ToolConfigForm({ onSubmit, onCancel, initial, initialToolName, configDefaults, availableTools, departments, isLoading }: {
   onSubmit: (p: ToolConfigCreate) => void
   onCancel: () => void
   initial?: ToolConfigOut
   initialToolName?: string
+  configDefaults?: Record<string, unknown> | null
   availableTools: AvailableTool[]
   departments: DepartmentOut[]
   isLoading: boolean
@@ -454,9 +503,11 @@ function ToolConfigForm({ onSubmit, onCancel, initial, initialToolName, availabl
   const [profileId, setProfileId] = useState(initial?.profile_id ?? 'default')
   const [deptId, setDeptId] = useState<string>(initial?.dept_id ?? '__org__')
   const [description, setDescription] = useState(initial?.description ?? '')
-  const [configJson, setConfigJson] = useState(
-    initial ? JSON.stringify(initial.config, null, 2) : '{}'
-  )
+  const [configJson, setConfigJson] = useState(() => {
+    if (initial) return JSON.stringify(initial.config, null, 2)
+    if (configDefaults) return JSON.stringify(configDefaults, null, 2)
+    return '{}'
+  })
   const [jsonError, setJsonError] = useState<string | null>(null)
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -527,3 +578,36 @@ function ToolConfigForm({ onSubmit, onCancel, initial, initialToolName, availabl
     </form>
   )
 }
+
+// ── Create form wrapper — fetches config defaults for pre-fill ─────────
+
+function CreateToolConfigForm({ orgId, initialToolName, onSubmit, onCancel, availableTools, departments, isLoading }: {
+  orgId: string
+  initialToolName?: string
+  onSubmit: (p: ToolConfigCreate) => void
+  onCancel: () => void
+  availableTools: AvailableTool[]
+  departments: DepartmentOut[]
+  isLoading: boolean
+}) {
+  const { data: defaultsMeta } = useQuery({
+    queryKey: ['admin', 'tool-metadata', orgId, initialToolName],
+    queryFn: () => getToolMetadata(orgId, initialToolName!),
+    enabled: !!initialToolName,
+    staleTime: Infinity,
+  })
+
+  return (
+    <ToolConfigForm
+      initialToolName={initialToolName}
+      configDefaults={defaultsMeta?.config_defaults ?? null}
+      onSubmit={onSubmit}
+      onCancel={onCancel}
+      availableTools={availableTools}
+      departments={departments}
+      isLoading={isLoading}
+    />
+  )
+}
+
+// ── Config-count badge with optional expand for edit/delete ────────────

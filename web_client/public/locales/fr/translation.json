@@ -650,7 +650,22 @@
       "disableTitle": "Désactiver {{name}} ?",
       "disableDesc": "Cet outil sera masqué pour les agents et ne pourra pas être appelé tant qu'il n'est pas réactivé.",
       "enableTitle": "Activer {{name}} ?",
-      "enableDesc": "Cet outil redeviendra visible et utilisable."
+      "enableDesc": "Cet outil redeviendra visible et utilisable.",
+      "showInfo": "Afficher la documentation",
+      "metadataError": "Métadonnées de l'outil non disponibles.",
+      "configFields": "Champs de Configuration",
+      "sensitive": "sensible",
+      "field": "Champ",
+      "type": "Type",
+      "required": "Requis",
+      "noExtraFields": "Les champs supplémentaires ne sont pas autorisés.",
+      "noConfigRequired": "Aucune configuration requise.",
+      "envVars": "Variables d'Environnement",
+      "namespaceEnvNote": "Variables de namespace (partagées, priorité inférieure) affichées en premier.",
+      "permissions": "Permissions",
+      "rateLimit": "Limite de débit",
+      "configNamespace": "Namespace de configuration",
+      "requiresApproval": "Nécessite une approbation humaine"
     },
     "interfaces": {
       "title": "Profils d'Interface",

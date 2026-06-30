@@ -679,7 +679,22 @@
       "disableTitle": "Desabilitar {{name}}?",
       "disableDesc": "Esta ferramenta será ocultada dos agentes e não poderá ser chamada até ser reabilitada.",
       "enableTitle": "Habilitar {{name}}?",
-      "enableDesc": "Esta ferramenta ficará visível e poderá ser chamada novamente."
+      "enableDesc": "Esta ferramenta ficará visível e poderá ser chamada novamente.",
+      "showInfo": "Mostrar documentação",
+      "metadataError": "Metadados da ferramenta não disponíveis.",
+      "configFields": "Campos de Configuração",
+      "sensitive": "sensível",
+      "field": "Campo",
+      "type": "Tipo",
+      "required": "Obrigatório",
+      "noExtraFields": "Campos extras não são permitidos.",
+      "noConfigRequired": "Nenhuma configuração necessária.",
+      "envVars": "Variáveis de Ambiente",
+      "namespaceEnvNote": "Variáveis com escopo de namespace (compartilhadas, menor precedência) mostradas primeiro.",
+      "permissions": "Permissões",
+      "rateLimit": "Limite de taxa",
+      "configNamespace": "Namespace de configuração",
+      "requiresApproval": "Requer aprovação humana"
     },
     "interfaces": {
       "title": "Perfis de Interface",

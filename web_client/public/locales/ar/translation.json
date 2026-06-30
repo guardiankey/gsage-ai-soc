@@ -650,7 +650,22 @@
       "disableTitle": "تعطيل {{name}}؟",
       "disableDesc": "سيتم إخفاء هذه الأداة عن الوكلاء ولن يمكن استدعاؤها حتى يتم إعادة تفعيلها.",
       "enableTitle": "تفعيل {{name}}؟",
-      "enableDesc": "ستصبح هذه الأداة مرئية وقابلة للاستدعاء مرة أخرى."
+      "enableDesc": "ستصبح هذه الأداة مرئية وقابلة للاستدعاء مرة أخرى.",
+      "showInfo": "عرض الوثائق",
+      "metadataError": "بيانات الأداة الوصفية غير متوفرة.",
+      "configFields": "حقول الإعداد",
+      "sensitive": "حساس",
+      "field": "حقل",
+      "type": "النوع",
+      "required": "مطلوب",
+      "noExtraFields": "الحقول الإضافية غير مسموح بها.",
+      "noConfigRequired": "لا يتطلب إعداد.",
+      "envVars": "متغيرات البيئة",
+      "namespaceEnvNote": "متغيرات نطاق الاسم (مشتركة، أولوية أقل) معروضة أولاً.",
+      "permissions": "الأذونات",
+      "rateLimit": "حد المعدل",
+      "configNamespace": "نطاق الإعداد",
+      "requiresApproval": "يتطلب موافقة بشرية"
     },
     "interfaces": {
       "title": "ملفات تعريف الواجهة",

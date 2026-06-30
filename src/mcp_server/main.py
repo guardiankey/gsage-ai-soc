@@ -665,11 +665,55 @@ async def _catalog_endpoint(request: Request) -> JSONResponse:
     )
 
 
+async def _tool_metadata_endpoint(request: Request) -> JSONResponse:
+    """Return full metadata for a single tool from the in-memory registry.
+
+    Used by the admin UI to display tool documentation (description,
+    config schema, defaults, env vars, etc.) without a DB query.
+
+    Path parameter: ``tool_name`` — the registered tool name (e.g. ``trellix_edr_search``).
+    """
+    tool_name = request.path_params.get("tool_name", "")
+    registry = get_registry()
+    tool = registry.get_tool(tool_name)
+
+    if tool is None:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"Tool '{tool_name}' not found in registry"},
+        )
+
+    # Derive display_name from the tool name (same convention as sync_tools_to_db)
+    display_name = tool_name.replace("_", " ").title()
+    raw_doc = (tool.__class__.__doc__ or "").strip()
+    description = raw_doc  # full docstring — frontend can truncate if needed
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "name": tool.name,
+            "display_name": display_name,
+            "description": description,
+            "summary": getattr(tool, "summary", None) or None,
+            "category": getattr(tool, "category", "general") or "general",
+            "version": getattr(tool, "version", "1.0.0"),
+            "permissions": list(getattr(tool, "permissions", [])),
+            "requires_config": getattr(tool, "requires_config", False),
+            "requires_approval": getattr(tool, "requires_approval", False),
+            "config_namespace": getattr(tool, "config_namespace", None) or None,
+            "config_schema": getattr(tool, "config_schema", None) or None,
+            "config_defaults": dict(tool.config_defaults) if getattr(tool, "config_defaults", None) else None,
+            "rate_limit_per_minute": getattr(tool, "rate_limit_per_minute", 60),
+        },
+    )
+
+
 app = Starlette(
     routes=[
         Route("/health", _health_endpoint, methods=["GET"]),
         Route("/tools", _tools_debug_endpoint, methods=["GET"]),
         Route("/tools/catalog", _catalog_endpoint, methods=["GET"]),
+        Route("/tools/{tool_name:str}/metadata", _tool_metadata_endpoint, methods=["GET"]),
         Route("/", _MCPEndpoint(), methods=["GET", "POST", "DELETE"]),
     ],
     lifespan=_lifespan,

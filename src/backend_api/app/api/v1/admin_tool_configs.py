@@ -24,10 +24,12 @@ from src.backend_api.app.schemas.admin import (
     ToolConfigOut,
     ToolConfigSummary,
     ToolConfigUpdate,
+    ToolMetadataOut,
     ToolSettingsUpdate,
 )
 from src.shared.cache.permissions_cache import get_perm_redis_client
 from src.shared.cache.tool_config_cache import invalidate_tool_config_cache
+from src.shared.config.settings import get_settings
 from src.shared.models.org_tool_settings import GSageOrgToolSettings
 from src.shared.models.tool import GSageTool
 from src.shared.models.tool_config import GSageToolConfig
@@ -448,3 +450,46 @@ async def update_tool_settings(
             existing.is_enabled = False
         await db.commit()
         return {"tool_name": tool_name, "is_enabled": False}
+
+
+@router.get(
+    "/tools/{tool_name:path}",
+    response_model=ToolMetadataOut,
+    summary="Get tool metadata for documentation modal",
+)
+async def get_tool_metadata(
+    org_id: uuid.UUID,
+    tool_name: str,
+    _: Annotated[GSageUserOrganization, Depends(require_org_admin)],
+) -> ToolMetadataOut:
+    """Return full metadata for a single tool from the MCP server registry.
+
+    Proxies to the MCP server's ``GET /tools/{tool_name}/metadata`` endpoint.
+    The MCP server reads directly from the in-memory tool registry (Python
+    ClassVars) — no DB query needed.
+    """
+    import httpx
+
+    settings = get_settings()
+    mcp_url = getattr(settings, "mcp_server_url", None)
+    if not mcp_url:
+        raise HTTPException(status_code=502, detail="MCP server URL not configured")
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{mcp_url.rstrip('/')}/tools/{tool_name}/metadata",
+            )
+            if resp.status_code == 404:
+                raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+            resp.raise_for_status()
+            data = resp.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"MCP server unreachable: {exc}",
+        )
+
+    return ToolMetadataOut(**data)

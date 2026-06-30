@@ -650,7 +650,22 @@
       "disableTitle": "{{name}} deaktivieren?",
       "disableDesc": "Dieses Tool wird für Agenten ausgeblendet und kann erst nach erneuter Aktivierung aufgerufen werden.",
       "enableTitle": "{{name}} aktivieren?",
-      "enableDesc": "Dieses Tool wird wieder sichtbar und aufrufbar."
+      "enableDesc": "Dieses Tool wird wieder sichtbar und aufrufbar.",
+      "showInfo": "Dokumentation anzeigen",
+      "metadataError": "Tool-Metadaten nicht verfügbar.",
+      "configFields": "Konfigurationsfelder",
+      "sensitive": "sensibel",
+      "field": "Feld",
+      "type": "Typ",
+      "required": "Erforderlich",
+      "noExtraFields": "Zusätzliche Felder sind nicht erlaubt.",
+      "noConfigRequired": "Keine Konfiguration erforderlich.",
+      "envVars": "Umgebungsvariablen",
+      "namespaceEnvNote": "Namespace-bezogene Variablen (gemeinsam, niedrigere Priorität) werden zuerst angezeigt.",
+      "permissions": "Berechtigungen",
+      "rateLimit": "Ratenlimit",
+      "configNamespace": "Konfigurations-Namespace",
+      "requiresApproval": "Erfordert menschliche Genehmigung"
     },
     "interfaces": {
       "title": "Schnittstellenprofile",

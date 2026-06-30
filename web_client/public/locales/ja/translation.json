@@ -650,7 +650,22 @@
       "disableTitle": "{{name}} を無効にしますか？",
       "disableDesc": "このツールはエージェントから非表示になり、再有効化されるまで呼び出せなくなります。",
       "enableTitle": "{{name}} を有効にしますか？",
-      "enableDesc": "このツールが再び表示され、呼び出せるようになります。"
+      "enableDesc": "このツールが再び表示され、呼び出せるようになります。",
+      "showInfo": "ドキュメントを表示",
+      "metadataError": "ツールのメタデータを利用できません。",
+      "configFields": "設定フィールド",
+      "sensitive": "機密",
+      "field": "フィールド",
+      "type": "タイプ",
+      "required": "必須",
+      "noExtraFields": "追加フィールドは許可されていません。",
+      "noConfigRequired": "設定は不要です。",
+      "envVars": "環境変数",
+      "namespaceEnvNote": "名前空間スコープの変数（共有、優先度低）が最初に表示されます。",
+      "permissions": "権限",
+      "rateLimit": "レート制限",
+      "configNamespace": "設定名前空間",
+      "requiresApproval": "人間の承認が必要です"
     },
     "interfaces": {
       "title": "インターフェースプロファイル",
