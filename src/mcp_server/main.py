@@ -666,18 +666,25 @@ async def _catalog_endpoint(request: Request) -> JSONResponse:
 
 
 async def _tool_metadata_endpoint(request: Request) -> JSONResponse:
-    """Return full metadata for a single tool from the in-memory registry.
+    """Return full metadata for a single tool (or namespace) from the in-memory registry.
 
     Used by the admin UI to display tool documentation (description,
     config schema, defaults, env vars, etc.) without a DB query.
 
-    Path parameter: ``tool_name`` — the registered tool name (e.g. ``trellix_edr_search``).
+    Path parameter: ``tool_name`` — the registered tool name or a config_namespace.
     """
     tool_name = request.path_params.get("tool_name", "")
     registry = get_registry()
     tool = registry.get_tool(tool_name)
 
+    # ── Namespace fallback: if not a real tool, check if it's a config_namespace ──
     if tool is None:
+        namespace_tools = _find_namespace_tools(registry, tool_name)
+        if namespace_tools:
+            return JSONResponse(
+                status_code=200,
+                content=_build_namespace_metadata(tool_name, namespace_tools),
+            )
         return JSONResponse(
             status_code=404,
             content={"detail": f"Tool '{tool_name}' not found in registry"},
@@ -706,6 +713,57 @@ async def _tool_metadata_endpoint(request: Request) -> JSONResponse:
             "rate_limit_per_minute": getattr(tool, "rate_limit_per_minute", 60),
         },
     )
+
+
+# ── Namespace metadata helpers ────────────────────────────────────────────
+
+
+def _find_namespace_tools(registry, namespace: str) -> list:
+    """Return all registered tools that belong to *namespace* via config_namespace."""
+    result = []
+    for name, versions in registry._tools.items():
+        latest_version = registry._latest.get(name)
+        if not latest_version:
+            continue
+        tool = versions[latest_version]
+        if getattr(tool, "config_namespace", None) == namespace:
+            result.append(tool)
+    return result
+
+
+def _build_namespace_metadata(namespace: str, tools: list) -> dict:
+    """Build a synthetic metadata response for a config namespace."""
+    display_name = namespace.replace("_", " ").title()
+    child_names = sorted(t.name for t in tools)
+    description = (
+        f"Shared configuration namespace for: {', '.join(child_names)}.\n\n"
+        f"Tools in this namespace share the same configuration profile. "
+        f"Configuring the namespace applies settings to all member tools."
+    )
+    # Merge permissions from all child tools
+    all_perms: list[str] = []
+    for t in tools:
+        for p in getattr(t, "permissions", []):
+            if p not in all_perms:
+                all_perms.append(p)
+
+    # Use the first tool's config_schema as the namespace schema reference
+    representative = tools[0] if tools else None
+    return {
+        "name": namespace,
+        "display_name": f"Namespace: {display_name}",
+        "description": description,
+        "summary": f"Shared config namespace for {len(tools)} tool(s)",
+        "category": "namespace",
+        "version": "",
+        "permissions": all_perms,
+        "requires_config": any(getattr(t, "requires_config", False) for t in tools),
+        "requires_approval": any(getattr(t, "requires_approval", False) for t in tools),
+        "config_namespace": None,
+        "config_schema": getattr(representative, "config_schema", None) if representative else None,
+        "config_defaults": dict(representative.config_defaults) if representative and getattr(representative, "config_defaults", None) else None,
+        "rate_limit_per_minute": 0,
+    }
 
 
 app = Starlette(

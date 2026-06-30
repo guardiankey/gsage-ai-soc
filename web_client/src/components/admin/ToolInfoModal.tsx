@@ -25,7 +25,7 @@ export default function ToolInfoModal({ toolName, orgId, open, onOpenChange }: T
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Info className="h-5 w-5 text-muted-foreground" />
@@ -67,7 +67,7 @@ export default function ToolInfoModal({ toolName, orgId, open, onOpenChange }: T
             )}
             {meta.description && meta.description !== meta.summary && (
               <div className="text-sm whitespace-pre-wrap leading-relaxed">
-                {meta.description}
+                {cleanDocstring(meta.description)}
               </div>
             )}
 
@@ -224,6 +224,27 @@ export default function ToolInfoModal({ toolName, orgId, open, onOpenChange }: T
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+/** Clean RST/Markdown artifacts from Python docstrings for UI display.
+ *  - Strips ``Permission:`` lines (shown separately in the footer)
+ *  - Converts `` ``text`` `` → `text`
+ *  - Normalises lists: leading ``* `` → ``• ``
+ *  - Collapses 3+ blank lines into 2 */
+function cleanDocstring(raw: string): string {
+  return raw
+    .split('\n')
+    .filter((line) => !/^\s*Permission:\s*/i.test(line))
+    .map((line) => {
+      // Replace double backticks with nothing (inline code in UI doesn't need them)
+      let cleaned = line.replace(/``/g, '')
+      // Convert RST list markers to bullet
+      cleaned = cleaned.replace(/^(\s*)\*\s/, '$1• ')
+      return cleaned
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
 
 function hasSensitiveFields(configSchema: Record<string, unknown>): boolean {
   const properties = configSchema.properties as Record<string, Record<string, unknown>> | undefined

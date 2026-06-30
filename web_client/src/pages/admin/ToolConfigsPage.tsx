@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Pencil, Wrench, ChevronDown, ChevronRight, Info } from 'lucide-react'
@@ -509,6 +509,14 @@ function ToolConfigForm({ onSubmit, onCancel, initial, initialToolName, configDe
     return '{}'
   })
   const [jsonError, setJsonError] = useState<string | null>(null)
+
+  // Sync configDefaults into the textarea when they arrive asynchronously.
+  // Only applies on create (no initial), never overwrites an existing config.
+  useEffect(() => {
+    if (!initial && configDefaults) {
+      setConfigJson(JSON.stringify(configDefaults, null, 2))
+    }
+  }, [configDefaults, initial])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
