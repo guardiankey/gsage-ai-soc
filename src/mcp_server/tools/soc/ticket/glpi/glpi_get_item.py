@@ -3,12 +3,19 @@
 Retrieves a single GLPI item by type and ID, with optional sub-items
 (followups, solutions, tasks, linked assets, logs).
 
+HATEOAS ``links`` returned by GLPI are automatically resolved into a
+``relations`` section with inline data for Entity, User, RequestType
+and ITILCategory.  Document_Item metadata is always included; set
+``download_documents=true`` to also download and store the raw files
+as conversation artifacts.
+
 Required permission: ``glpi:read``
 """
 
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import ClassVar, Optional
 
@@ -105,6 +112,34 @@ _COMPACT_FIELDS: dict[str, list[str]] = {
         "date_creation", "date_mod", "is_deleted",
     ],
 }
+# ── Link resolution constants ─────────────────────────────────────────────
+
+# Regex to parse GLPI HATEOAS link URLs: /ItemType/{id} at end of URL.
+_LINK_HREF_PATTERN = re.compile(r'/(\w+)/(\d+)/?$')
+
+# Link types automatically resolved inline — no flag needed, not exposed to agent.
+_ALWAYS_RESOLVE_LINK_TYPES: set[str] = {
+    "Entity",
+    "User",
+    "RequestType",
+    "ITILCategory",
+}
+
+# Link rels that map to sub-item collection endpoints (parent_type/parent_id/sub_type).
+# Document_Item is listed here so it gets a count in relations, but it's resolved
+# separately with full document metadata.
+_SUBITEM_COLLECTION_RELS: set[str] = {
+    "Document_Item", "TicketTask", "ITILFollowup", "ITILSolution",
+    "Ticket_User", "Group_Ticket", "Supplier_Ticket", "TicketValidation",
+    "TicketCost", "Item_Ticket", "Problem_Ticket", "Change_Ticket",
+}
+
+# Internal limits per resolved link type — NOT exposed to the agent.
+_MAX_RESOLVED: dict[str, int] = {"User": 10, "Entity": 5, "Document": 5}
+_DEFAULT_MAX_RESOLVED: int = 3
+
+# ── Compact helpers ────────────────────────────────────────────────────────
+
 # Fallback: when no whitelist is defined for an itemtype, drop these noisy keys.
 _COMPACT_DROP_KEYS: set[str] = {
     "cookie_token", "cookie_token_date", "personal_token", "personal_token_date",
@@ -202,6 +237,22 @@ def _summarize_actors(
     return buckets
 
 
+def _parse_link(href: str) -> tuple[str, int] | None:
+    """Extract (itemtype, id) from a GLPI HATEOAS link URL.
+
+    Example::
+
+        'https://atende.assefaz.org.br/apirest.php/User/246' → ('User', 246)
+        '/Ticket/6085/TicketTask/' → None  (collection, no trailing id)
+
+    Returns ``None`` for malformed or collection URLs.
+    """
+    m = _LINK_HREF_PATTERN.search(href.rstrip('/'))
+    if m:
+        return m.group(1), int(m.group(2))
+    return None
+
+
 class GlpiGetItemTool(BaseTool):
     """Retrieve a single GLPI item by type and ID.
 
@@ -236,8 +287,13 @@ class GlpiGetItemTool(BaseTool):
 
     name: ClassVar[str] = "glpi_get_item"
     config_namespace: ClassVar[str] = "glpi"
-    version: ClassVar[str] = "1.1.0"
-    summary: ClassVar[str] = "Retrieve a single GLPI item (ticket, asset, user) by its numeric ID"
+    version: ClassVar[str] = "1.2.0"
+    summary: ClassVar[str] = (
+        "Retrieve a single GLPI item (ticket, asset, user) by its numeric ID. "
+        "Related Entity, User, RequestType and ITILCategory are automatically "
+        "resolved and included in a 'relations' section. Document metadata "
+        "is always shown; use download_documents=true to fetch file contents."
+    )
     category: ClassVar[str] = "itsm"
     permissions: ClassVar[list[str]] = ["glpi:read"]
     rate_limit_per_minute: ClassVar[int] = 60
@@ -341,6 +397,15 @@ class GlpiGetItemTool(BaseTool):
                     "date_format, etc.). Greatly reduces response size and LLM context cost."
                 ),
             },
+            "download_documents": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Download linked Document files and store them as conversation "
+                    "artifacts (accessible via the file API). Default: false — only "
+                    "document metadata (name, mime, size) is returned."
+                ),
+            },
         },
         "additionalProperties": False,
     }
@@ -384,6 +449,7 @@ class GlpiGetItemTool(BaseTool):
         with_contracts: bool = params.get("with_contracts", False)
         with_documents: bool = params.get("with_documents", False)
         compact: bool = params.get("compact", False)
+        download_documents: bool = params.get("download_documents", False)
 
         log.info(
             "glpi_get_item: itemtype=%s, id=%d, config_keys=%s",
@@ -476,6 +542,123 @@ class GlpiGetItemTool(BaseTool):
                             st_rows = []
                     ticket_actors = _summarize_actors(tu_rows, gt_rows, st_rows)
 
+                # ── Resolve HATEOAS links → relations ────────────────────
+                raw_links: list[dict] = item.pop("links", []) if isinstance(item, dict) else []
+                relations: dict[str, object] = {}
+
+                if raw_links:
+                    # Phase A: always-resolved singletons (Entity, User, RequestType, ITILCategory)
+                    for link in raw_links:
+                        parsed = _parse_link(link.get("href", ""))
+                        if not parsed:
+                            continue
+                        link_type, link_id = parsed
+                        if link_type not in _ALWAYS_RESOLVE_LINK_TYPES:
+                            continue
+                        # Dedup + limit
+                        bucket: list[dict] = relations.setdefault(link_type, [])  # type: ignore[assignment]
+                        max_for_type = _MAX_RESOLVED.get(link_type, _DEFAULT_MAX_RESOLVED)
+                        if any(r.get("id") == link_id for r in bucket):
+                            continue
+                        if len(bucket) >= max_for_type:
+                            continue
+                        try:
+                            obj = await client.get_item_no_links(
+                                link_type, link_id, expand_dropdowns=expand_dropdowns,
+                            )
+                            resolved_obj = _compact_item(link_type, obj) if compact else obj
+                            bucket.append(resolved_obj)
+                        except GLPIError as exc:
+                            log.warning(
+                                "glpi_get_item: resolve %s/%d failed: %s",
+                                link_type, link_id, exc,
+                            )
+                            bucket.append({"id": link_id, "_error": "unavailable"})
+
+                    # Phase B: Document_Item — always resolve metadata
+                    doc_link = next(
+                        (l for l in raw_links if l.get("rel") == "Document_Item"), None
+                    )
+                    if doc_link:
+                        try:
+                            doc_items = await client.get_sub_items(
+                                itemtype, item_id, "Document_Item",
+                                range="0-4",  # max 5 docs (0-indexed)
+                                expand_dropdowns=False,
+                            )
+                        except GLPIError:
+                            doc_items = []
+
+                        docs_meta: list[dict] = []
+                        max_docs = _MAX_RESOLVED.get("Document", _DEFAULT_MAX_RESOLVED)
+                        for di in doc_items[:max_docs]:
+                            doc_id = di.get("documents_id")
+                            if not doc_id:
+                                continue
+                            try:
+                                doc = await client.get_item_no_links(
+                                    "Document", int(doc_id), expand_dropdowns=False,
+                                )
+                            except GLPIError:
+                                docs_meta.append(
+                                    {"id": doc_id, "_error": "unavailable"}
+                                )
+                                continue
+
+                            entry: dict = {
+                                "id": doc.get("id", doc_id),
+                                "name": doc.get("name", ""),
+                                "mime": doc.get("mime", ""),
+                                "file_size": doc.get("file_size", ""),
+                            }
+                            # Optional: download raw file as artifact
+                            if download_documents:
+                                try:
+                                    raw_bytes, filename, content_type = (
+                                        await client.download_document(int(doc_id))
+                                    )
+                                    from src.mcp_server.tools.base import _tool_session_ctx
+                                    db_session = _tool_session_ctx.get()
+                                    if db_session and raw_bytes:
+                                        stored = await self._store_file(
+                                            data=raw_bytes,
+                                            filename=filename,
+                                            content_type=content_type,
+                                            agent_context=agent_context,
+                                            session=db_session,
+                                            description=(
+                                                f"GLPI document {doc_id} from "
+                                                f"{itemtype}#{item_id}"
+                                            ),
+                                        )
+                                        if stored:
+                                            entry["artifact"] = stored
+                                except GLPIError as exc:
+                                    log.warning(
+                                        "glpi_get_item: download doc %s failed: %s",
+                                        doc_id, exc,
+                                    )
+                                    entry["_download_error"] = "unavailable"
+
+                            docs_meta.append(entry)
+
+                        relations["Document_Item"] = {
+                            "count": len(doc_items),
+                            "documents": docs_meta,
+                        }
+
+                    # Phase C: collection links — count if already fetched via sub_items
+                    for link in raw_links:
+                        rel = link.get("rel", "")
+                        if rel not in _SUBITEM_COLLECTION_RELS:
+                            continue
+                        if rel == "Document_Item":
+                            continue  # already handled above
+                        if rel in sub_item_results:
+                            relations[rel] = {
+                                "count": len(sub_item_results[rel]),
+                            }
+
         except GLPIError as exc:
             elapsed = int((time.monotonic() - t0) * 1000)
             return self._failure(
@@ -494,6 +677,8 @@ class GlpiGetItemTool(BaseTool):
             item = _compact_item(itemtype, item)
 
         result: dict = {"itemtype": itemtype, "id": item_id, "item": item}
+        if relations:
+            result["relations"] = relations
         if sub_item_results:
             result["sub_items"] = sub_item_results
         if ticket_actors is not None:

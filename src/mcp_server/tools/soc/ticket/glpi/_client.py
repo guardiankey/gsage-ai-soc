@@ -302,6 +302,83 @@ class GLPIClient:
         result = await self._request("GET", f"{itemtype}/{item_id}", params=p)
         return result or {}
 
+    async def get_item_no_links(
+        self,
+        itemtype: str,
+        item_id: int,
+        *,
+        expand_dropdowns: bool = True,
+    ) -> dict:
+        """Fetch a single item **without** HATEOAS links.
+
+        Used internally when resolving related items (User, Entity, etc.)
+        to avoid embedding another full ``links`` array in each resolved entry.
+        """
+        p: dict[str, Any] = {
+            "expand_dropdowns": str(expand_dropdowns).lower(),
+            "get_hateoas": "false",
+        }
+        result = await self._request("GET", f"{itemtype}/{item_id}", params=p)
+        return result or {}
+
+    async def download_document(self, doc_id: int) -> tuple[bytes, str, str]:
+        """Download a GLPI document as raw bytes.
+
+        Calls ``GET /Document/{doc_id}?alt=media`` and returns
+        ``(raw_bytes, filename, content_type)``.
+
+        The filename is extracted from the ``Content-Disposition`` header
+        when available; otherwise falls back to ``document_{doc_id}``.
+        """
+        await self._ensure_session()
+        client = self._get_http()
+        url = f"{self._url}/Document/{doc_id}"
+
+        try:
+            resp = await client.get(
+                url,
+                headers=self._session_headers(),
+                params={"alt": "media"},
+            )
+        except httpx.RequestError as exc:
+            raise GLPIError(
+                f"Network error downloading document {doc_id}: {exc}",
+                glpi_error="CONNECTION_ERROR",
+            ) from exc
+
+        if resp.status_code == 401:
+            # Re-authenticate and retry once
+            self._session_token = None
+            await self._ensure_session()
+            try:
+                resp = await client.get(
+                    url,
+                    headers=self._session_headers(),
+                    params={"alt": "media"},
+                )
+            except httpx.RequestError as exc:
+                raise GLPIError(
+                    f"Network error downloading document {doc_id} (retry): {exc}",
+                    glpi_error="CONNECTION_ERROR",
+                ) from exc
+
+        if not resp.is_success:
+            _raise_from_response(resp, f"GET Document/{doc_id}")
+
+        raw = resp.content
+        filename = f"document_{doc_id}"
+        content_type = resp.headers.get("Content-Type", "application/octet-stream")
+
+        # Try to extract filename from Content-Disposition header
+        cd = resp.headers.get("Content-Disposition", "")
+        if cd:
+            import re as _re
+            match = _re.search(r'filename[^;=\n]*=["\']?([^"\';\n]*)', cd, _re.IGNORECASE)
+            if match:
+                filename = match.group(1).strip() or filename
+
+        return raw, filename, content_type
+
     async def get_all_items(
         self,
         itemtype: str,
