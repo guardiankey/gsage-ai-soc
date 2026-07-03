@@ -232,6 +232,7 @@ AD_READ_ACTIONS: Final[tuple[str, ...]] = (
     "list_ous",
     "get_user",
     "get_group",
+    "audit_accounts",
 )
 
 
@@ -283,6 +284,72 @@ AD_READ_PARAMS_SCHEMA: Final[dict] = {
             "type": "integer",
             "minimum": 0,
             "description": "Pagination offset (list_* actions). Default 0.",
+        },
+        # ── Date filters (list_users, LDAP server-side) ────────────
+        "password_changed_within_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "list_users only: filter to users whose pwdLastSet is within the last N days (recent password changes).",
+        },
+        "password_changed_older_than_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "list_users only: filter to users whose pwdLastSet is older than N days (stale passwords).",
+        },
+        "last_logon_within_days": {
+            "type": "integer",
+            "minimum": 14,
+            "maximum": 3650,
+            "description": "list_users only: filter to users whose lastLogonTimestamp is within the last N days (recently active). Min 14 due to AD replication lag.",
+        },
+        "last_logon_older_than_days": {
+            "type": "integer",
+            "minimum": 14,
+            "maximum": 3650,
+            "description": "list_users only: filter to users whose lastLogonTimestamp is older than N days (stale/inactive accounts). Min 14 due to AD replication lag.",
+        },
+        # ── CSV export (list_users, audit_accounts) ────────────────
+        "export_csv": {
+            "type": "boolean",
+            "default": False,
+            "description": "Persist all rows as a CSV file artifact. Prefer CSV for tabular results. Auto-forced when result exceeds 100 rows.",
+        },
+        # ── audit_accounts parameters ──────────────────────────────
+        "audit_categories": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": [
+                    "stale_accounts",
+                    "recent_password_changes",
+                    "locked_out",
+                    "password_never_expires",
+                    "never_logged_in",
+                    "all",
+                ],
+            },
+            "description": "audit_accounts only: which audit categories to include. Use ['all'] for every category.",
+        },
+        "stale_days": {
+            "type": "integer",
+            "minimum": 14,
+            "maximum": 3650,
+            "default": 90,
+            "description": "audit_accounts only: days threshold for stale_accounts category. Default 90.",
+        },
+        "password_change_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "default": 30,
+            "description": "audit_accounts only: days threshold for recent_password_changes category. Default 30.",
+        },
+        "include_items": {
+            "type": "boolean",
+            "default": False,
+            "description": "audit_accounts only: include full user lists per category. When false, only counts are returned.",
         },
         # get_user / get_group
         "user_dn": {

@@ -197,7 +197,7 @@ export default function ChatPage() {
   }, [])
 
   return (
-    <div className="flex flex-1 h-full">
+    <div className="flex flex-1 h-full min-w-0">
       {/* Conversation sidebar */}
       <ConversationList mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 

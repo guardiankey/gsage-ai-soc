@@ -19,13 +19,34 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Optional
 
 log = logging.getLogger(__name__)
 
+# ── FILETIME conversion ───────────────────────────────────────────────
+# Windows FILETIME is a 64-bit integer counting 100-nanosecond intervals
+# since 1601-01-01T00:00:00Z.  Used to build LDAP comparison filters
+# against pwdLastSet and lastLogonTimestamp.
 
-# Attribute sets used for each object type — kept small so we don't pull
-# binary blobs (thumbnailPhoto, etc.) by accident.
+_FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
+_NS_PER_SECOND = 10_000_000  # 100-ns intervals per second
+
+
+def _datetime_to_filetime(dt: datetime) -> int:
+    """Convert a timezone-aware datetime to a Windows FILETIME integer.
+
+    The result is the number of 100-nanosecond intervals since
+    1601-01-01T00:00:00Z — suitable for LDAP comparison filters
+    against ``pwdLastSet`` and ``lastLogonTimestamp``.
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    delta = dt - _FILETIME_EPOCH
+    return int(delta.total_seconds() * _NS_PER_SECOND)
+
+
+# ── Attribute sets ────────────────────────────────────────────────────
 _USER_ATTRS: tuple[str, ...] = (
     "sAMAccountName",
     "distinguishedName",
@@ -357,10 +378,20 @@ class AdClient:
         enabled: Optional[bool] = None,
         limit: int = 100,
         offset: int = 0,
+        # ── Date filters (LDAP server-side) ─────────────────────────
+        password_changed_within_days: Optional[int] = None,
+        password_changed_older_than_days: Optional[int] = None,
+        last_logon_within_days: Optional[int] = None,
+        last_logon_older_than_days: Optional[int] = None,
     ) -> dict:
-        """List users under *ou* (defaults to config.base_dn)."""
+        """List users under *ou* (defaults to config.base_dn).
+
+        Optional date filters are evaluated **server-side** by the DC via
+        FILETIME integer comparisons — only matching entries are returned.
+        """
         base = ou or self.config.base_dn
         filters: list[str] = ["(objectCategory=person)", "(objectClass=user)"]
+
         if name_pattern:
             pat = _glob_to_ldap(name_pattern)
             filters.append(f"(|(sAMAccountName={pat})(displayName={pat})(cn={pat}))")
@@ -368,6 +399,53 @@ class AdClient:
             filters.append("(!(userAccountControl:1.2.840.113556.1.4.803:=2))")
         elif enabled is False:
             filters.append("(userAccountControl:1.2.840.113556.1.4.803:=2)")
+
+        # ── Mutual exclusion guards ──────────────────────────────────
+        if password_changed_within_days is not None and password_changed_older_than_days is not None:
+            raise AdLdapError(
+                "INVALID_PARAMS",
+                "Cannot combine password_changed_within_days and "
+                "password_changed_older_than_days for the same field.",
+            )
+        if last_logon_within_days is not None and last_logon_older_than_days is not None:
+            raise AdLdapError(
+                "INVALID_PARAMS",
+                "Cannot combine last_logon_within_days and "
+                "last_logon_older_than_days for the same field.",
+            )
+
+        # ── lastLogonTimestamp replication guard ─────────────────────
+        for param_name, param_val in (
+            ("last_logon_within_days", last_logon_within_days),
+            ("last_logon_older_than_days", last_logon_older_than_days),
+        ):
+            if param_val is not None and param_val < 14:
+                raise AdLdapError(
+                    "INVALID_PARAMS",
+                    f"{param_name} must be >= 14. lastLogonTimestamp is "
+                    "replicated only every ~14 days; values below 14 "
+                    "return unreliable results.",
+                )
+
+        # ── Date filters (LDAP server-side FILETIME comparisons) ─────
+        now = datetime.now(timezone.utc)
+
+        if password_changed_within_days is not None:
+            cutoff = now - timedelta(days=password_changed_within_days)
+            filters.append(f"(pwdLastSet>={_datetime_to_filetime(cutoff)})")
+
+        if password_changed_older_than_days is not None:
+            cutoff = now - timedelta(days=password_changed_older_than_days)
+            filters.append(f"(pwdLastSet<={_datetime_to_filetime(cutoff)})")
+
+        if last_logon_within_days is not None:
+            cutoff = now - timedelta(days=last_logon_within_days)
+            filters.append(f"(lastLogonTimestamp>={_datetime_to_filetime(cutoff)})")
+
+        if last_logon_older_than_days is not None:
+            cutoff = now - timedelta(days=last_logon_older_than_days)
+            filters.append(f"(lastLogonTimestamp<={_datetime_to_filetime(cutoff)})")
+
         ldap_filter = f"(&{''.join(filters)})"
 
         items, total = await self._search(
@@ -378,6 +456,67 @@ class AdClient:
             offset=offset,
             transform=_entry_to_user_dict,
         )
+
+        # ── Auto-sort: when a date filter is active, results are always
+        # sorted ascending (oldest / stalest first) — no params needed.
+        password_filter = (
+            password_changed_within_days is not None
+            or password_changed_older_than_days is not None
+        )
+        last_logon_filter = (
+            last_logon_within_days is not None
+            or last_logon_older_than_days is not None
+        )
+
+        if last_logon_filter and password_filter:
+            items.sort(key=lambda u: (
+                u.get("last_logon_timestamp") or "",
+                u.get("password_last_set") or "",
+            ))
+        elif last_logon_filter:
+            items.sort(key=lambda u: u.get("last_logon_timestamp") or "")
+        elif password_filter:
+            items.sort(key=lambda u: u.get("password_last_set") or "")
+
+        # ── Filter metadata for the agent ────────────────────────────
+        applied_filters: dict[str, int] = {}
+        cutoff_dates: dict[str, str] = {}
+
+        if password_changed_within_days is not None:
+            applied_filters["password_changed_within_days"] = password_changed_within_days
+            cutoff_dates["password_changed_since"] = (
+                now - timedelta(days=password_changed_within_days)
+            ).isoformat()
+        if password_changed_older_than_days is not None:
+            applied_filters["password_changed_older_than_days"] = password_changed_older_than_days
+            cutoff_dates["password_changed_before"] = (
+                now - timedelta(days=password_changed_older_than_days)
+            ).isoformat()
+        if last_logon_within_days is not None:
+            applied_filters["last_logon_within_days"] = last_logon_within_days
+            cutoff_dates["last_logon_since"] = (
+                now - timedelta(days=last_logon_within_days)
+            ).isoformat()
+        if last_logon_older_than_days is not None:
+            applied_filters["last_logon_older_than_days"] = last_logon_older_than_days
+            cutoff_dates["last_logon_before"] = (
+                now - timedelta(days=last_logon_older_than_days)
+            ).isoformat()
+
+        sort_info: Optional[dict] = None
+        if last_logon_filter:
+            sort_info = {"by": "last_logon_timestamp", "order": "asc"}
+        elif password_filter:
+            sort_info = {"by": "password_last_set", "order": "asc"}
+
+        hint: Optional[str] = None
+        if last_logon_filter:
+            hint = (
+                "lastLogonTimestamp is replicated every ~14 days. "
+                "Accounts that have never logged in interactively appear "
+                "with last_logon_timestamp near the epoch (or null)."
+            )
+
         return {
             "items": items,
             "count": len(items),
@@ -385,6 +524,10 @@ class AdClient:
             "limit": limit,
             "offset": offset,
             "ou": base,
+            "filters": applied_filters or None,
+            "cutoff_dates": cutoff_dates or None,
+            "sort": sort_info,
+            "_hint": hint,
         }
 
     async def list_groups(
@@ -512,7 +655,180 @@ class AdClient:
         )
         return items[0] if items else None
 
-    # ── Internal search helper ──────────────────────────────────────────
+    # ── Security audit ────────────────────────────────────────────────
+
+    async def audit_accounts(
+        self,
+        *,
+        ou: Optional[str] = None,
+        categories: list[str],
+        stale_days: int = 90,
+        password_change_days: int = 30,
+        include_items: bool = False,
+    ) -> dict:
+        """Run multiple security-focused LDAP queries and return a summary.
+
+        Each category runs as a separate LDAP search within the same
+        connection.  Counts are fetched via :meth:`_count` (server-side
+        tally, zero data transfer) unless *include_items* is ``True``.
+        """
+        base = ou or self.config.base_dn
+        now = datetime.now(timezone.utc)
+
+        category_specs: dict[str, dict] = {
+            "stale_accounts": {
+                "filter": (
+                    f"(&(objectCategory=person)(objectClass=user)"
+                    f"(!(userAccountControl:1.2.840.113556.1.4.803:=2))"
+                    f"(lastLogonTimestamp<={_datetime_to_filetime(now - timedelta(days=stale_days))}))"
+                ),
+                "threshold_days": stale_days,
+                "severity": "high",
+            },
+            "recent_password_changes": {
+                "filter": (
+                    f"(&(objectCategory=person)(objectClass=user)"
+                    f"(pwdLastSet>={_datetime_to_filetime(now - timedelta(days=password_change_days))}))"
+                ),
+                "threshold_days": password_change_days,
+                "severity": "info",
+            },
+            "locked_out": {
+                "filter": "(&(objectCategory=person)(objectClass=user)(lockoutTime>=1))",
+                "threshold_days": None,
+                "severity": "medium",
+            },
+            "password_never_expires": {
+                "filter": (
+                    "(&(objectCategory=person)(objectClass=user)"
+                    "(userAccountControl:1.2.840.113556.1.4.803:=65536))"
+                ),
+                "threshold_days": None,
+                "severity": "medium",
+            },
+            "never_logged_in": {
+                "filter": (
+                    "(&(objectCategory=person)(objectClass=user)"
+                    "(|(lastLogonTimestamp=0)(!(lastLogonTimestamp=*))))"
+                ),
+                "threshold_days": None,
+                "severity": "high",
+            },
+        }
+
+        # Resolve "all" → every defined category
+        resolved: list[str] = []
+        for c in categories:
+            if c == "all":
+                resolved.extend(k for k in category_specs if k not in resolved)
+            elif c not in resolved:
+                resolved.append(c)
+
+        findings: dict = {}
+        for cat_key in resolved:
+            spec = category_specs.get(cat_key)
+            if spec is None:
+                continue
+
+            if include_items:
+                items, total = await self._search(
+                    base=base,
+                    filter_=spec["filter"],
+                    attrs=_USER_ATTRS,
+                    limit=500,
+                    offset=0,
+                    transform=_entry_to_user_dict,
+                )
+                # Sort stalest / oldest first (ascending) for consistency
+                if cat_key in ("stale_accounts", "never_logged_in"):
+                    items.sort(key=lambda u: u.get("last_logon_timestamp") or "")
+                elif cat_key == "recent_password_changes":
+                    items.sort(key=lambda u: u.get("password_last_set") or "")
+                elif cat_key == "locked_out":
+                    items.sort(key=lambda u: u.get("sam_account_name") or "")
+                elif cat_key == "password_never_expires":
+                    items.sort(key=lambda u: u.get("sam_account_name") or "")
+            else:
+                total = await self._count(base, spec["filter"])
+                items = []
+
+            finding: dict = {
+                "count": total,
+                "severity": spec["severity"],
+            }
+            if spec["threshold_days"] is not None:
+                finding["threshold_days"] = spec["threshold_days"]
+            if include_items:
+                finding["items"] = items
+            findings[cat_key] = finding
+
+        # ── Overall summary counts ──────────────────────────────────
+        total_all = await self._count(
+            base, "(&(objectCategory=person)(objectClass=user))"
+        )
+        enabled_count = await self._count(
+            base,
+            "(&(objectCategory=person)(objectClass=user)"
+            "(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
+        )
+        disabled_count = await self._count(
+            base,
+            "(&(objectCategory=person)(objectClass=user)"
+            "(userAccountControl:1.2.840.113556.1.4.803:=2))",
+        )
+
+        return {
+            "ou": base,
+            "summary": {
+                "total_users": total_all,
+                "enabled_users": enabled_count,
+                "disabled_users": disabled_count,
+            },
+            "findings": findings,
+        }
+
+    # ── Internal helpers ────────────────────────────────────────────────
+
+    async def _count(self, base: str, filter_: str) -> int:
+        """Return the number of entries matching *filter_*.
+
+        Runs a dedicated LDAP search with ``size_limit=0`` (server default,
+        typically 1000 entries in AD) and DN-only attributes.  No entry
+        data is transferred — only the count matters.
+
+        For accurate counts in directories exceeding ``MaxPageSize``
+        (default 1000), a paged-results control is needed.  This
+        implementation is good enough for SOC domains of typical size.
+        """
+        return await asyncio.to_thread(self._count_sync, base, filter_)
+
+    def _count_sync(self, base: str, filter_: str) -> int:
+        import ldap3  # type: ignore[import-not-found]
+
+        conn = self._conn
+        if conn is None or not getattr(conn, "bound", False):
+            raise AdLdapError("LDAP_NOT_CONNECTED", "LDAP connection is not open.")
+
+        try:
+            ok = conn.search(
+                search_base=base,
+                search_filter=filter_,
+                search_scope=ldap3.SUBTREE,
+                attributes=["distinguishedName"],
+                size_limit=0,  # server default limit (typically 1000)
+            )
+        except Exception as exc:
+            raise AdLdapError(
+                "LDAP_SEARCH_FAILED",
+                f"LDAP count search failed: {exc}",
+            ) from exc
+
+        if not ok:
+            err = getattr(conn, "last_error", None) or getattr(conn, "result", {})
+            raise AdLdapError("LDAP_SEARCH_FAILED", f"LDAP count search failed: {err}")
+
+        entries = list(getattr(conn, "entries", []) or [])
+        return len(entries)
 
     async def _search(
         self,

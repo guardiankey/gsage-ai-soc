@@ -1,12 +1,14 @@
 """gSage AI — ad_read tool (Active Directory read-only).
 
-Exposes five read-only operations against AD:
+Exposes six read-only operations against AD:
 
-* ``list_users``  — paginated list of users under a base OU.
-* ``list_groups`` — paginated list of groups under a base OU.
-* ``list_ous``    — paginated list of OUs under a base DN.
-* ``get_user``    — fetch a single user by DN or sAMAccountName.
-* ``get_group``   — fetch a single group by DN or CN.
+* ``list_users``     — paginated list of users under a base OU.
+* ``list_groups``    — paginated list of groups under a base OU.
+* ``list_ous``       — paginated list of OUs under a base DN.
+* ``get_user``       — fetch a single user by DN or sAMAccountName.
+* ``get_group``      — fetch a single group by DN or CN.
+* ``audit_accounts`` — security-focused multi-query summary (stale,
+  locked, never-logged-in, etc.).
 
 All calls are performed over LDAP(S) by :class:`AdClient` and never
 contact the Windows jump host.
@@ -21,6 +23,7 @@ import time
 from typing import ClassVar, Optional
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
+from src.mcp_server.tools.result_export import build_agent_payload
 from src.mcp_server.tools.soc.admin.ad._ad_client import AdLdapError, open_ad_client
 from src.mcp_server.tools.soc.admin.ad._schemas import (
     AD_CONFIG_DEFAULTS,
@@ -35,19 +38,24 @@ log = logging.getLogger(__name__)
 class AdReadTool(BaseTool):
     """Read-only queries against Active Directory via LDAP.
 
-    Dispatches on ``params["action"]`` to one of five query methods.
+    Dispatches on ``params["action"]`` to one of six query methods.
     Returns JSON-safe dicts — dates are surfaced as ISO strings, binary
     attributes are omitted by design.
+
+    Tabular results (list_* and audit_accounts with include_items) are
+    capped at 100 inline rows; the full result is auto-exported as a CSV
+    artifact when the row count exceeds the cap.
 
     Permission: ``ad:read``.
     """
 
     name: ClassVar[str] = "ad_read"
     config_namespace: ClassVar[str] = "active_directory"
-    version: ClassVar[str] = "1.0.0"
+    version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = (
         "Read-only Active Directory queries: list/search users, groups, "
-        "and OUs; fetch single user or group by DN or name."
+        "and OUs; fetch single user or group by DN or name; "
+        "run security audit (stale accounts, locked out, never logged in)."
     )
     category: ClassVar[str] = "admin"
     permissions: ClassVar[list[str]] = ["ad:read"]
@@ -75,6 +83,7 @@ class AdReadTool(BaseTool):
     ) -> ToolResult:
         start = time.perf_counter()
         action = params.get("action")
+        export_csv = bool(params.get("export_csv", False))
 
         if not action:
             return self._failure(
@@ -93,7 +102,15 @@ class AdReadTool(BaseTool):
                         enabled=params.get("enabled"),
                         limit=int(params.get("limit") or 100),
                         offset=int(params.get("offset") or 0),
+                        password_changed_within_days=params.get("password_changed_within_days"),
+                        password_changed_older_than_days=params.get("password_changed_older_than_days"),
+                        last_logon_within_days=params.get("last_logon_within_days"),
+                        last_logon_older_than_days=params.get("last_logon_older_than_days"),
                     )
+                    data = await self._apply_csv_export(
+                        data, export_csv, action, agent_context
+                    )
+
                 elif action == "list_groups":
                     data = await client.list_groups(
                         ou=params.get("ou"),
@@ -101,6 +118,10 @@ class AdReadTool(BaseTool):
                         limit=int(params.get("limit") or 100),
                         offset=int(params.get("offset") or 0),
                     )
+                    data = await self._apply_csv_export(
+                        data, export_csv, action, agent_context
+                    )
+
                 elif action == "list_ous":
                     data = await client.list_ous(
                         base_dn=params.get("ou"),
@@ -108,6 +129,10 @@ class AdReadTool(BaseTool):
                         limit=int(params.get("limit") or 200),
                         offset=int(params.get("offset") or 0),
                     )
+                    data = await self._apply_csv_export(
+                        data, export_csv, action, agent_context
+                    )
+
                 elif action == "get_user":
                     user = await client.get_user(
                         user_dn=params.get("user_dn"),
@@ -121,6 +146,7 @@ class AdReadTool(BaseTool):
                             execution_time_ms=int((time.perf_counter() - start) * 1000),
                         )
                     data = {"user": user}
+
                 elif action == "get_group":
                     group = await client.get_group(
                         group_dn=params.get("group_dn"),
@@ -134,6 +160,20 @@ class AdReadTool(BaseTool):
                             execution_time_ms=int((time.perf_counter() - start) * 1000),
                         )
                     data = {"group": group}
+
+                elif action == "audit_accounts":
+                    categories: list[str] = params.get("audit_categories") or ["all"]
+                    data = await client.audit_accounts(
+                        ou=params.get("ou"),
+                        categories=categories,
+                        stale_days=int(params.get("stale_days") or 90),
+                        password_change_days=int(params.get("password_change_days") or 30),
+                        include_items=bool(params.get("include_items", False)),
+                    )
+                    data = await self._apply_audit_csv_export(
+                        data, export_csv, action, agent_context
+                    )
+
                 else:
                     return self._failure(
                         "INVALID_PARAMS",
@@ -163,3 +203,90 @@ class AdReadTool(BaseTool):
             data={"action": action, **data},
             execution_time_ms=int((time.perf_counter() - start) * 1000),
         )
+
+    # ── CSV export helpers ────────────────────────────────────────────
+
+    async def _apply_csv_export(
+        self,
+        data: dict,
+        export_csv: bool,
+        action: str,
+        agent_context: AgentContext,
+    ) -> dict:
+        """Apply CSV export to a list_* result, returning updated *data*."""
+        rows: list[dict] = data.get("items") or []
+        if not rows:
+            return data
+
+        agent_payload = await build_agent_payload(
+            self,
+            rows=rows,
+            export_csv=export_csv,
+            export_json=False,
+            filename_prefix=f"ad_read_{action}",
+            agent_context=agent_context,
+        )
+        return {
+            **data,
+            "rows": agent_payload["rows_preview"],
+            "rows_total": agent_payload["rows_total"],
+            "rows_overflow": agent_payload["rows_overflow"],
+            "artifacts": agent_payload["artifacts"],
+            "agent_hint": agent_payload["agent_hint"],
+        }
+
+    async def _apply_audit_csv_export(
+        self,
+        data: dict,
+        export_csv: bool,
+        action: str,
+        agent_context: AgentContext,
+    ) -> dict:
+        """Apply CSV export to an audit_accounts result.
+
+        Each finding's items are replaced with a preview subset; the full
+        combined list is persisted as a CSV artifact tagged with
+        ``_audit_category``.
+        """
+        findings: dict = data.get("findings") or {}
+        all_rows: list[dict] = []
+
+        for cat_key, finding in findings.items():
+            items: list[dict] = finding.get("items") or []
+            if not items:
+                continue
+            for row in items:
+                row["_audit_category"] = cat_key
+            all_rows.extend(items)
+
+        if not all_rows:
+            return data
+
+        agent_payload = await build_agent_payload(
+            self,
+            rows=all_rows,
+            export_csv=export_csv,
+            export_json=False,
+            filename_prefix=f"ad_read_{action}",
+            agent_context=agent_context,
+        )
+
+        # Partition preview rows back into per-category lists
+        preview_rows: list[dict] = agent_payload["rows_preview"]
+        preview_by_cat: dict[str, list[dict]] = {k: [] for k in findings}
+        for row in preview_rows:
+            cat = row.pop("_audit_category", None)
+            if cat and cat in preview_by_cat:
+                preview_by_cat[cat].append(row)
+
+        for cat_key in findings:
+            findings[cat_key]["items"] = preview_by_cat.get(cat_key, [])
+
+        return {
+            **data,
+            "findings": findings,
+            "rows_total": agent_payload["rows_total"],
+            "rows_overflow": agent_payload["rows_overflow"],
+            "artifacts": agent_payload["artifacts"],
+            "agent_hint": agent_payload["agent_hint"],
+        }
