@@ -1,6 +1,6 @@
 """gSage AI — Convert to Markdown tool.
 
-Converts an attached document (PDF, DOCX, PPTX, XLSX, HTML) to Markdown
+Converts an attached document (PDF, DOCX, PPTX, XLSX, HTML, RTF) to Markdown
 and saves the result as a downloadable artifact.  Plain-text attachments
 are passed through unchanged.
 
@@ -31,6 +31,9 @@ _CONTENT_TYPE_MAP: dict[str, str] = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
     "text/html": "html",
+    "application/rtf": "rtf",
+    "text/rtf": "rtf",
+    "text/richtext": "rtf",
 }
 
 # Content-type prefixes treated as plain-text passthrough
@@ -76,15 +79,25 @@ def _convert_with_markitdown(data: bytes) -> str:
     return result.text_content
 
 
+def _convert_rtf(data: bytes) -> str:
+    """Convert RTF *data* to plain text via ``striprtf``.
+
+    Returns the extracted text.  Raises on conversion failure.
+    """
+    from striprtf.striprtf import rtf_to_text  # noqa: PLC0415
+
+    return rtf_to_text(data.decode("utf-8", errors="replace"))
+
+
 # ── Tool ─────────────────────────────────────────────────────────────────────
 
 
 class ConvertToMdTool(BaseTool):
-    """Convert a document attachment (PDF, DOCX, PPTX, XLSX, HTML) to Markdown.
+    """Convert a document attachment (PDF, DOCX, PPTX, XLSX, HTML, RTF) to Markdown.
 
     Provide the ``file_id`` of an attachment already uploaded to the chat.
     The tool detects the format automatically, converts the content to
-    Markdown, saves it as a downloadle artifact, and returns a short
+    Markdown, saves it as a downloadable artifact, and returns a short
     inline preview (200 characters).
 
     Plain-text files (TXT, CSV, JSON, XML, …) are passed through unchanged.
@@ -93,7 +106,7 @@ class ConvertToMdTool(BaseTool):
     name: ClassVar[str] = "convert_to_md"
     version: ClassVar[str] = "1.0.0"
     summary: ClassVar[str] = (
-        "Convert an attached document (PDF, DOCX, PPTX, XLSX, HTML, TXT) "
+        "Convert an attached document (PDF, DOCX, PPTX, XLSX, HTML, RTF, TXT) "
         "to Markdown. Saves the result as a downloadable artifact."
     )
     category: ClassVar[str] = "file"
@@ -227,6 +240,12 @@ class ConvertToMdTool(BaseTool):
                 log.info(
                     "convert_to_md: %s is plain text (%d bytes), passthrough",
                     filename, file_size,
+                )
+            elif source_format == "rtf":
+                md_content = _convert_rtf(data)
+                log.info(
+                    "convert_to_md: %s (rtf) converted to text (%d chars)",
+                    filename, len(md_content),
                 )
             else:
                 md_content = _convert_with_markitdown(data)

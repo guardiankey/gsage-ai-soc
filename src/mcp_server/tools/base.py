@@ -763,6 +763,12 @@ class BaseTool(ABC):
             )
             return bg_result
 
+        # ── 4d. Commit config/state reads before tool execution ──────────
+        # Close the read transaction so the DB connection is not held idle
+        # during long-running tool executions (e.g. dashboard HTTP calls).
+        # save_state will open a fresh transaction when needed.
+        await session.commit()
+
         # ── 5. Execute with retry ────────────────────────────────────────
         result: ToolResult = self._failure(
             code="TOOL_NOT_EXECUTED",
@@ -858,6 +864,13 @@ class BaseTool(ABC):
                     "Tool %s: failed to save state (profile=%s): %s",
                     self.name, profile_id, save_exc,
                 )
+                # Rollback the failed transaction so the outer session
+                # context manager (async with) doesn't trip over a broken
+                # connection on its own commit/rollback.
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
 
         # ── 8. Audit log ─────────────────────────────────────────────────
         error_code = result.error.get("code") if result.error else None
