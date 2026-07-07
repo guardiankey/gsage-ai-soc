@@ -1423,11 +1423,18 @@ class BaseTool(ABC):
                 "Tool %s: failed to store file '%s': %s",
                 self.name, filename, exc,
             )
-            # Rollback to reset a potentially broken session so the caller
-            # can continue using it for other operations (e.g. persisting
-            # the task result in background.py).
+            # ── Clean up the (possibly broken) session ───────────────────
+            # After a long-running tool execution, the underlying asyncpg
+            # connection may have been closed by PostgreSQL (idle timeout).
+            # Any attempt to rollback or close will raise InterfaceError.
+            # Suppress all errors and close explicitly so the caller's
+            # ``async with session`` __aexit__ becomes a safe no-op.
             try:
                 await session.rollback()
+            except Exception:
+                pass
+            try:
+                await session.close()
             except Exception:
                 pass
             return None
@@ -1512,10 +1519,13 @@ class BaseTool(ABC):
                 "Tool %s: _replace_file_content failed for file %s: %s",
                 self.name, file_id, exc,
             )
-            # Rollback to reset a potentially broken session (same rationale
-            # as _store_file).
+            # ── Clean up the (possibly broken) session ───────────────────
             try:
                 await session.rollback()
+            except Exception:
+                pass
+            try:
+                await session.close()
             except Exception:
                 pass
             return None

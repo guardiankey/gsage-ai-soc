@@ -18,22 +18,14 @@ from sqlalchemy import select
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.shared.security.context import AgentContext
 
-log = logging.getLogger(__name__)
-
-# Text content types that can be decoded to UTF-8 and returned as strings.
-_TEXT_MIME_PREFIXES = (
-    "text/",
-    "application/json",
-    "application/xml",
-    "application/javascript",
-    "application/x-yaml",
-    "application/x-sh",
-    "application/x-python",
-    "application/csv",
+# Shared file-tool constants and helpers (text detection, MIME, size limits).
+from src.mcp_server.tools.core._file_shared import (
+    TEXT_MIME_PREFIXES,
+    MAX_FILE_BYTES,
+    is_text_content,
 )
 
-# Hard cap on bytes read from MinIO (5 MB).
-_MAX_READ_BYTES = 5 * 1024 * 1024
+log = logging.getLogger(__name__)
 
 # Default maximum lines returned for text content (no filters applied).
 _DEFAULT_MAX_LINES = 200
@@ -44,11 +36,6 @@ _MD_EXTENSIONS: tuple[str, ...] = (".md", ".mdx", ".markdown")
 
 # Regex to match ATX headings (1-6 # followed by space and title).
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
-
-
-def _is_text(content_type: str) -> bool:
-    ct = content_type.lower().split(";")[0].strip()
-    return any(ct.startswith(p) for p in _TEXT_MIME_PREFIXES)
 
 
 def _is_markdown(content_type: str, filename: str) -> bool:
@@ -349,7 +336,7 @@ class ReadFileTool(BaseTool):
             org_id=str(agent_context.org_id),
             user_id=str(agent_context.user_id),
             dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
-            max_bytes=_MAX_READ_BYTES,
+            max_bytes=MAX_FILE_BYTES,
         )
 
         if result is None:
@@ -382,7 +369,7 @@ class ReadFileTool(BaseTool):
         }
 
         # ── Binary: never return content ──────────────────────────────────
-        if not _is_text(content_type):
+        if not is_text_content(content_type):
             return self._success(
                 {
                     **base_meta,

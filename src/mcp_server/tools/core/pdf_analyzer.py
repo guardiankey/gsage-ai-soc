@@ -900,20 +900,27 @@ class PdfAnalyzerTool(BaseTool):
             safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
             stored_filename = f"pdf_analysis_{safe_name}.json"
             file_info: Optional[dict] = None
-            try:
-                from src.shared.database import _get_session_maker  # noqa: PLC0415
 
-                async with _get_session_maker()() as db_session:
+            # Reuse the framework session (injected via _tool_session_ctx)
+            # instead of creating a new one from the pool.  After a long
+            # analysis (60-90s), pool connections may be stale; the
+            # framework session was committed before execute() and is still
+            # valid for a new transaction.
+            from src.mcp_server.tools.base import _tool_session_ctx  # noqa: PLC0415
+
+            store_session = _tool_session_ctx.get()
+            if store_session is not None:
+                try:
                     file_info = await self._store_file(
                         data=result_json.encode("utf-8"),
                         filename=stored_filename,
                         content_type="application/json",
                         agent_context=agent_context,
-                        session=db_session,
+                        session=store_session,
                         description=f"PDF security analysis for {filename}",
                     )
-            except Exception as exc:
-                logger.error("pdf_analyzer: failed to store large result: %s", exc)
+                except Exception as exc:
+                    logger.error("pdf_analyzer: failed to store large result: %s", exc)
 
             summary_data: dict = {
                 "_meta": data["_meta"],

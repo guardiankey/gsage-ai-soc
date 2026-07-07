@@ -73,8 +73,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get update && apt-get install -y --no-install-recommends \
         curl unixodbc \
     && groupadd -r appuser && useradd -r -g appuser -s /sbin/nologin appuser \
-    && mkdir -p /data/ingest \
-    && chown -R appuser:appuser /data
+    && mkdir -p /data/ingest /home/appuser \
+    && chown -R appuser:appuser /data /home/appuser
 
 # ── Optional: Microsoft ODBC Driver 18 for SQL Server ────────────────────────
 # Uncomment the block below to enable SQL Server connectivity (msodbcsql18).

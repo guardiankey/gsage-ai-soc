@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 _MAX_FILE_BYTES = 200 * 1024 * 1024  # 200 MB
 _MAX_MD_CHARS = 5 * 1024 * 1024  # 5 MB generated Markdown
 _PREVIEW_CHARS = 200  # Fixed inline preview size
+_OCR_MAX_PAGES = 50  # Max PDF pages to process via OCR (limits timeout risk)
 
 # Content-type → internal format label
 _CONTENT_TYPE_MAP: dict[str, str] = {
@@ -89,6 +90,182 @@ def _convert_rtf(data: bytes) -> str:
     return rtf_to_text(data.decode("utf-8", errors="replace"))
 
 
+def _pdf_has_extractable_text(
+    data: bytes,
+    min_chars: int = 500,
+    min_text_ratio: float = 0.3,
+    max_pages_to_check: int = 20,
+) -> bool:
+    """Return True if PDF has enough extractable text to use markitdown.
+
+    Uses two combined heuristics to avoid false positives from residual
+    text (digital signatures, stamps, headers on otherwise image-only pages):
+
+    1. Total extracted chars across checked pages >= *min_chars* (default 500).
+    2. Ratio of pages-with-text / checked-pages >= *min_text_ratio* (default 0.3).
+
+    Both must be satisfied for the PDF to be considered text-based.
+
+    Only the first *max_pages_to_check* pages are examined (default 20).
+    The function exits early as soon as a definitive answer is reached.
+    """
+    import io
+    import logging as _logging
+
+    # ── Suppress pdfminer DEBUG spam ────────────────────────────────────
+    # pdfplumber uses pdfminer internally; at DEBUG level it logs every
+    # PDF content-stream token, producing tens of thousands of lines per
+    # page.  This I/O alone can cause timeouts even for small PDFs.
+    _logging.getLogger("pdfminer").setLevel(_logging.WARNING)
+
+    import pdfplumber  # noqa: PLC0415
+
+    try:
+        pdf = pdfplumber.open(io.BytesIO(data))
+        pages = pdf.pages
+        if not pages:
+            pdf.close()
+            return False
+
+        total_pages = len(pages)
+        pages_to_check = min(total_pages, max_pages_to_check)
+
+        total_chars = 0
+        pages_with_text = 0
+        pages_checked = 0
+
+        for page in pages[:pages_to_check]:
+            try:
+                text = page.extract_text() or ""
+                chars = len(text.strip())
+                total_chars += chars
+                pages_checked += 1
+                if chars > 50:  # meaningful content, not just a stamp
+                    pages_with_text += 1
+            except Exception:
+                pages_checked += 1
+                continue
+
+            # ── Early exit: already proven text-based ───────────────────
+            if total_chars >= min_chars and (
+                pages_with_text / pages_checked >= min_text_ratio
+            ):
+                pdf.close()
+                log.debug(
+                    "_pdf_has_extractable_text: early YES at page %d/%d "
+                    "(chars=%d, text_pages=%d)",
+                    pages_checked, pages_to_check, total_chars, pages_with_text,
+                )
+                return True
+
+            # ── Early exit: impossible to reach ratio ────────────────────
+            # Even if all remaining pages had text, we couldn't hit min_text_ratio
+            remaining = pages_to_check - pages_checked
+            best_possible = (pages_with_text + remaining) / pages_to_check
+            if best_possible < min_text_ratio and total_chars < min_chars:
+                pdf.close()
+                log.debug(
+                    "_pdf_has_extractable_text: early NO at page %d/%d "
+                    "(best_possible_ratio=%.2f)",
+                    pages_checked, pages_to_check, best_possible,
+                )
+                return False
+
+        pdf.close()
+
+        text_ratio = (
+            pages_with_text / pages_checked if pages_checked > 0 else 0
+        )
+        result = total_chars >= min_chars and text_ratio >= min_text_ratio
+
+        log.debug(
+            "_pdf_has_extractable_text: chars=%d pages_with_text=%d/%d "
+            "(of %d total) ratio=%.2f -> %s",
+            total_chars, pages_with_text, pages_checked, total_pages,
+            text_ratio, result,
+        )
+        return result
+
+    except Exception:
+        # If pdfplumber can't open it, fall back to markitdown
+        log.warning(
+            "_pdf_has_extractable_text: pdfplumber failed, falling back to markitdown",
+        )
+        return True
+
+
+def _get_docling_version() -> str | None:
+    """Return the installed Docling version string, or None."""
+    try:
+        from importlib.metadata import version  # noqa: PLC0415
+        return version("docling")
+    except Exception:
+        return None
+
+
+def _convert_pdf_ocr(data: bytes, engine: str = "docling") -> tuple[str, dict]:
+    """Convert image-based PDF to Markdown via OCR.
+
+    Args:
+        data: Raw PDF bytes.
+        engine: OCR engine to use. Currently only ``"docling"`` is supported.
+
+    Returns:
+        ``(markdown_text, pipeline_meta_dict)``.
+        *pipeline_meta* includes: ``engine``, ``ocr_applied``, ``engine_version``.
+
+    Raises:
+        ValueError: If *engine* is not supported.
+    """
+    import tempfile
+
+    pipeline_meta: dict = {
+        "engine": engine,
+        "ocr_applied": True,
+        "engine_version": None,
+    }
+
+    if engine != "docling":
+        raise ValueError(f"Unsupported OCR engine: {engine!r}")
+
+    # ── Redirect model/cache dirs away from $HOME ───────────────────────
+    # Docling depends on huggingface_hub / transformers / torch, which all
+    # try to write to ~/.cache/.  In the container, appuser is a system
+    # user (useradd -r) whose $HOME may be missing or non‑writable.
+    # Point everything at /tmp so Docling can download its models.
+    import os
+
+    _ocr_cache = "/tmp/docling_cache"
+    os.makedirs(_ocr_cache, exist_ok=True)
+    os.environ.setdefault("HF_HOME", os.path.join(_ocr_cache, "huggingface"))
+    os.environ.setdefault("TORCH_HOME", os.path.join(_ocr_cache, "torch"))
+    os.environ.setdefault("XDG_CACHE_HOME", _ocr_cache)
+
+    # Lazy import — Docling is heavy (~PyTorch + models)
+    from docling.document_converter import DocumentConverter  # noqa: PLC0415
+
+    pipeline_meta["engine_version"] = _get_docling_version()
+
+    # Docling's convert() expects a path/URL string, not BytesIO.
+    # Write to a temporary file so Docling can read it.
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    try:
+        tmp.write(data)
+        tmp.close()
+
+        converter = DocumentConverter()
+        result = converter.convert(tmp.name)
+        md_content = result.document.export_to_markdown()
+    finally:
+        import os
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+    return md_content, pipeline_meta
+
+
 # ── Tool ─────────────────────────────────────────────────────────────────────
 
 
@@ -104,10 +281,11 @@ class ConvertToMdTool(BaseTool):
     """
 
     name: ClassVar[str] = "convert_to_md"
-    version: ClassVar[str] = "1.0.0"
+    version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = (
         "Convert an attached document (PDF, DOCX, PPTX, XLSX, HTML, RTF, TXT) "
-        "to Markdown. Saves the result as a downloadable artifact."
+        "to Markdown. PDFs are auto-detected as text or image; image PDFs "
+        "use OCR (Docling). Saves the result as a downloadable artifact."
     )
     category: ClassVar[str] = "file"
     permissions: ClassVar[list[str]] = ["core:convert_md"]
@@ -115,6 +293,9 @@ class ConvertToMdTool(BaseTool):
     timeout_seconds: ClassVar[int] = 90
     requires_approval: ClassVar[bool] = False
     use_circuit_breaker: ClassVar[bool] = False
+    # Dispatch to Celery background worker when synchronous execution
+    # exceeds this threshold instead of returning a hard TOOL_TIMEOUT.
+    background_threshold_seconds: ClassVar[Optional[int]] = 60
 
     params_schema: ClassVar[dict] = {
         "type": "object",
@@ -125,6 +306,33 @@ class ConvertToMdTool(BaseTool):
                 "description": (
                     "UUID of the attached file to convert. "
                     "Use list_recent_artifacts to discover available files."
+                ),
+            },
+            "force_ocr": {
+                "type": "boolean",
+                "description": (
+                    "Force OCR processing even if the PDF has extractable text. "
+                    "Useful when text extraction is corrupted or poorly formatted. "
+                    "Default: false."
+                ),
+            },
+            "ocr_engine": {
+                "type": "string",
+                "enum": ["docling"],
+                "description": (
+                    "OCR engine to use for image-based PDFs. "
+                    "Currently only 'docling' is supported. Default: 'docling'."
+                ),
+            },
+            "output_filename": {
+                "type": "string",
+                "description": (
+                    "Optional custom filename for the output Markdown file. "
+                    "If omitted, defaults to 'convert_{timestamp}_{original_name}.md'. "
+                    "The '.md' extension is appended automatically if missing. "
+                    "Non-alphanumeric characters (except . _ - and space) are "
+                    "replaced with underscores. Example: 'meeting-notes.md', "
+                    "'report-final'."
                 ),
             },
         },
@@ -234,6 +442,8 @@ class ConvertToMdTool(BaseTool):
             )
 
         # ── Convert ──────────────────────────────────────────────────────
+        pipeline_meta: Optional[dict] = None
+
         try:
             if source_format == "text":
                 md_content = data.decode("utf-8", errors="replace")
@@ -247,8 +457,28 @@ class ConvertToMdTool(BaseTool):
                     "convert_to_md: %s (rtf) converted to text (%d chars)",
                     filename, len(md_content),
                 )
+            elif source_format == "pdf":
+                force_ocr = params.get("force_ocr", False)
+                ocr_engine = params.get("ocr_engine", "docling")
+                pipeline_meta = {"ocr_applied": False, "engine": "markitdown"}
+
+                if not force_ocr and _pdf_has_extractable_text(data):
+                    md_content = _convert_with_markitdown(data)
+                    log.info(
+                        "convert_to_md: %s is text-based PDF, using markitdown",
+                        filename,
+                    )
+                else:
+                    md_content, pipeline_meta = _convert_pdf_ocr(
+                        data, engine=ocr_engine,
+                    )
+                    log.info(
+                        "convert_to_md: %s using OCR (engine=%s, force=%s)",
+                        filename, ocr_engine, force_ocr,
+                    )
             else:
                 md_content = _convert_with_markitdown(data)
+                pipeline_meta = {"ocr_applied": False, "engine": "markitdown"}
                 log.info(
                     "convert_to_md: %s (%s) converted to Markdown (%d chars)",
                     filename, source_format, len(md_content),
@@ -283,11 +513,22 @@ class ConvertToMdTool(BaseTool):
         md_chars = len(md_content)
 
         # ── Save artifact ────────────────────────────────────────────────
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        safe_name = "".join(
-            c if c.isalnum() or c in "._- " else "_" for c in filename
-        )[:80]
-        artifact_filename = f"convert_{ts}_{safe_name}.md"
+        output_filename: str | None = (
+            (params.get("output_filename") or "").strip() or None
+        )
+        if output_filename:
+            safe = "".join(
+                c if c.isalnum() or c in "._- " else "_" for c in output_filename
+            )[:200]
+            if not safe.lower().endswith(".md"):
+                safe += ".md"
+            artifact_filename = safe
+        else:
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            safe_name = "".join(
+                c if c.isalnum() or c in "._- " else "_" for c in filename
+            )[:80]
+            artifact_filename = f"convert_{ts}_{safe_name}.md"
 
         artifact, store_error = await self._store_or_fallback(
             data=md_content.encode("utf-8"),
@@ -342,6 +583,7 @@ class ConvertToMdTool(BaseTool):
                 "artifact": artifact,
                 "artifact_error": store_error,
                 "title": title,
+                "pipeline": pipeline_meta,
             },
             execution_time_ms=elapsed,
         )
