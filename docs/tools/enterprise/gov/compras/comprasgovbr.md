@@ -58,11 +58,18 @@ The variables below are derived automatically from each tool's `config_schema`. 
   | `codigo_uasg` | `integer` | — | [buscar_contrato_ug_origem] UASG origin code. Example: 110001. |
   | `numero_contrato` | `string` | — | [buscar_contrato_ug_origem] Contract number/year format. Example: '00022/2025'. |
 
-- **`buscar_contratos_fornecedor`** — _(no description)_
+- **`buscar_contratos_fornecedor`** — Search contracts by supplier CPF/CNPJ via Portal da Transparência. Paginates through all available pages (15 items/page). Results are cached for 6 hours (PostgreSQL). Supports client-side filters for date range, agency name, and contract object. Sanctions (CEIS/CNEP/CEPIM/CEAF) are queried in parallel. CSV auto-generated when results exceed 30 rows.
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `cpf_cnpj` | `string` | — | [buscar_contratos_fornecedor] CPF (11 digits) or CNPJ (14 digits) do fornecedor. Aceita formatado ou só dígitos. Exemplos: '00394411000109', '21545863000114'. |
+  | `cpf_cnpj` | `string` | ✅ | CPF (11 digits) or CNPJ (14 digits) do fornecedor. Aceita formatado ou só dígitos. |
+  | `max_results` | `integer` | — | Max contracts to return (default 50, max 500). |
+  | `export_csv` | `boolean` | — | Force CSV export. Auto-generated when >30 rows. |
+  | `vigencia_min` | `string` | — | Filter: start date >= value (YYYY-MM-DD, YYYYMMDD, or DD/MM/YYYY). Client-side. |
+  | `vigencia_max` | `string` | — | Filter: end date <= value (YYYY-MM-DD, YYYYMMDD, or DD/MM/YYYY). Client-side. |
+  | `filtro_orgao` | `string` | — | Filter by agency name (case-insensitive substring). Client-side. |
+  | `filtro_objeto` | `string` | — | Filter by term in contract object/description. Client-side. |
+  | `force_refresh` | `boolean` | — | Bypass cache and fetch fresh data. |
 
 - **`buscar_materiais`** — _(no description)_
 
