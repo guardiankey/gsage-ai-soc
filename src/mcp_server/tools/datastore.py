@@ -154,6 +154,7 @@ class DataStoreTool(BaseTool):
         redis_client,
         es_client,
         gsage_session_id=None,
+        tool_call_id=None,
     ) -> ToolResult:
         """Check DATASTORE_ENABLED, set session ContextVar, then delegate to BaseTool.run()."""
         from src.shared.config.settings import get_settings

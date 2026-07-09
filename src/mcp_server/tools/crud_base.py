@@ -226,6 +226,7 @@ class CrudBaseTool(BaseTool):
         redis_client,
         es_client,
         gsage_session_id=None,
+        tool_call_id=None,
     ) -> ToolResult:
         """
         Check feature flag, store session in ContextVar, then delegate to BaseTool.run().

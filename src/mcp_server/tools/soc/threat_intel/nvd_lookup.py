@@ -744,6 +744,7 @@ class NvdLookupTool(BaseTool):
         redis_client: redis.Redis,
         es_client: ElasticsearchClient,
         gsage_session_id: Optional[uuid.UUID] = None,
+        tool_call_id: Optional[uuid.UUID] = None,
     ) -> ToolResult:
         """Override to make the DB session available inside execute()."""
         token = _nvd_session_ctx.set(session)
