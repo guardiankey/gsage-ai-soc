@@ -407,6 +407,128 @@ async def continue_after_bg_task(
 
 
 # ---------------------------------------------------------------------------
+# Public: continue after interaction (REPLAN_AGENT mode)
+# ---------------------------------------------------------------------------
+
+_AGENT_RETRY_ATTEMPTS = 2
+
+
+async def continue_after_interaction(
+    interaction_id: str,
+    db: AsyncSession,
+) -> tuple[GSageTenantSession, str]:
+    """Re-run the agent after a REPLAN_AGENT interaction has been submitted.
+
+    Builds an ``[INTERACTION_RESPONSE]`` block with the user's responses
+    and context, then calls ``agent.arun()`` so the agent can replan with
+    the new information.
+
+    Returns:
+        (session, response_text) — caller is responsible for delivery.
+
+    Raises:
+        ValueError: if the interaction or session is not found.
+    """
+    from src.shared.models.gsage_interaction import GSageInteraction
+
+    result = await db.execute(
+        select(GSageInteraction).where(
+            GSageInteraction.id == uuid.UUID(interaction_id)
+        )
+    )
+    interaction = result.scalar_one_or_none()
+    if interaction is None:
+        raise ValueError(f"Interaction {interaction_id} not found")
+
+    if interaction.status != "submitted":
+        raise ValueError(
+            f"Interaction {interaction_id} is not submitted (status={interaction.status})"
+        )
+
+    if interaction.gsage_session_id is None:
+        raise ValueError(
+            f"Interaction {interaction_id} has no gsage_session_id"
+        )
+
+    # Resolve the TenantSession
+    session_result = await db.execute(
+        select(GSageTenantSession).where(
+            GSageTenantSession.id == interaction.gsage_session_id
+        )
+    )
+    tenant_session = session_result.scalar_one_or_none()
+    if tenant_session is None:
+        raise ValueError(
+            f"TenantSession {interaction.gsage_session_id} not found"
+        )
+
+    # Determine interface
+    interface = _source_to_interface(tenant_session.source)
+
+    # Rebuild context
+    ctx = await _rebuild_tenant_context(tenant_session, db, interface=interface)
+
+    # Load org and user
+    org = await db.get(GSageOrganization, tenant_session.org_id)
+    user = await db.get(GSageUser, ctx.user_id) if ctx.user_id else None
+
+    # Build the [INTERACTION_RESPONSE] block
+    from src.backend_api.app.services.interaction_handler import (
+        build_interaction_response_block,
+    )
+
+    response_block = build_interaction_response_block(
+        interaction_id=uuid.UUID(interaction_id),
+        responses=interaction.response_json or {},
+        context=interaction.context_json,
+    )
+
+    # Build agent
+    agent = await _build_agent_for_session(
+        tenant_session, ctx, db, org=org, user=user, source="interaction"
+    )
+
+    # Run the agent with the interaction response as input
+    response_text = ""
+    for attempt in range(1 + _AGENT_RETRY_ATTEMPTS):
+        try:
+            run_output = await agent.arun(response_block)
+        except Exception as exc:
+            if attempt < _AGENT_RETRY_ATTEMPTS and _is_transient_continuation_error(str(exc)):
+                import asyncio
+                delay = 2.0 * (2 ** attempt)
+                log.warning(
+                    "continue_after_interaction: transient LLM error, "
+                    "retrying in %.1fs (attempt %d): %s",
+                    delay, attempt + 1, exc,
+                )
+                await asyncio.sleep(delay)
+                continue
+            log.error(
+                "continue_after_interaction: agent run failed iid=%s: %s",
+                interaction_id, exc, exc_info=True,
+            )
+            response_text = (
+                "The agent was unable to process the submitted information. "
+                "Please try again or contact your administrator."
+            )
+            break
+
+        response_text = _extract_text(getattr(run_output, "content", None))
+        if not response_text:
+            response_text = "Information received. How would you like to proceed?"
+        break  # success
+
+    await _safe_mcp_cleanup(agent)
+
+    log.info(
+        "continue_after_interaction: iid=%s session=%s response_len=%d",
+        interaction_id, tenant_session.id, len(response_text),
+    )
+    return tenant_session, response_text
+
+
+# ---------------------------------------------------------------------------
 # Public: continue after approval resolution
 # ---------------------------------------------------------------------------
 

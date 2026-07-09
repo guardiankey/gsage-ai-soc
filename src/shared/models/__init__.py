@@ -25,6 +25,9 @@ from src.shared.models.tool_state import GSageToolState
 from src.shared.models.tool_cache import GSageToolCache, CacheScope
 from src.shared.models.org_tool_settings import GSageOrgToolSettings
 
+# Interaction models
+from src.shared.models.gsage_interaction import GSageInteraction
+
 # Email models
 from src.shared.models.email_account import GSageEmailAccount
 from src.shared.models.email_message import GSageEmailMessage, GSageEmailDirection, GSageEmailStatus

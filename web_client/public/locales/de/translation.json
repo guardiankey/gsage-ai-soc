@@ -113,6 +113,14 @@
     "enterSends": "Enter sendet Nachricht",
     "enterNewline": "Enter fügt neue Zeile ein"
   },
+  "interaction": {
+    "title": "Eingabe erforderlich",
+    "submit": "Absenden",
+    "cancel": "Abbrechen",
+    "submitting": "Wird gesendet...",
+    "submitError": "Antwort konnte nicht gesendet werden",
+    "fieldRequired": "Dieses Feld ist erforderlich"
+  },
   "knowledge": {
     "title": "Wissensdatenbank",
     "subtitle": "Dokumente suchen, verwalten und in die KI-Wissensdatenbank einpflegen",

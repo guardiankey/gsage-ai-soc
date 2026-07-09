@@ -116,6 +116,79 @@ def continue_after_approval_resolved(self, approval_id: str, org_id: str) -> Non
             _post_continuation_error_message(approval_id=approval_id, org_id=org_id, error=str(exc))
 
 
+@celery_app.task(
+    bind=True,
+    acks_late=True,
+    max_retries=2,
+    default_retry_delay=30,
+    name="src.backend_api.app.tasks.agent_continuation.continue_after_interaction_submitted",
+)
+def continue_after_interaction_submitted(self, interaction_id: str) -> None:  # type: ignore[misc]
+    """Re-run the agent after a REPLAN_AGENT interaction is submitted."""
+    from src.backend_api.app.services.agent_continuation import (
+        _is_transient_continuation_error,
+    )
+
+    try:
+        asyncio.run(_async_continue_interaction(interaction_id))
+    except Exception as exc:
+        log.error(
+            "continue_after_interaction_submitted failed iid=%s: %s",
+            interaction_id, exc, exc_info=True,
+        )
+        if not _is_transient_continuation_error(str(exc)):
+            log.warning(
+                "continue_after_interaction_submitted: non-transient error, skipping retry",
+            )
+            return
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            log.error(
+                "continue_after_interaction_submitted: retries exhausted iid=%s",
+                interaction_id,
+            )
+
+
+async def _async_continue_interaction(interaction_id: str) -> None:
+    """Async wrapper: continue agent after REPLAN_AGENT interaction submission."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from src.shared.config.settings import get_settings
+    from src.shared.database import create_pooled_engine
+    from src.backend_api.app.services.agent_continuation import (
+        continue_after_interaction,
+    )
+    from src.backend_api.app.services.agno_session_lock import (
+        publish_conversation_updated,
+    )
+    from src.backend_api.app.services.channel_sender import deliver_response
+
+    settings = get_settings()
+    engine = create_pooled_engine(settings)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    try:
+        async with session_factory() as db:
+            tenant_session, response_text = await continue_after_interaction(
+                interaction_id, db,
+            )
+            if response_text:
+                await deliver_response(tenant_session, response_text, db)
+
+            # Notify SSE subscribers so the frontend refetches immediately
+            await publish_conversation_updated(
+                tenant_session.id, reason="interaction_submitted"
+            )
+
+            log.info(
+                "continue_after_interaction_submitted: delivered iid=%s session=%s",
+                interaction_id, tenant_session.id,
+            )
+    finally:
+        await engine.dispose()
+
+
 def _post_continuation_error_message(
     *,
     task_id: str | None = None,

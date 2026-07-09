@@ -402,6 +402,9 @@ async def handle_call_tool(
         )
 
     async with _state.session_factory() as session:
+        # Generate a unique ID for this tool invocation — used for
+        # tracing across logs, audit, interactions, and DB records.
+        tool_call_id = uuid.uuid4()
         result = await tool.run(
             agent_context=agent_ctx,
             params=arguments or {},
@@ -409,6 +412,7 @@ async def handle_call_tool(
             redis_client=_state.redis_client,
             es_client=_state.es_client,
             gsage_session_id=tenant.gsage_session_id,
+            tool_call_id=tool_call_id,
         )
 
     return [mcp_types.TextContent(

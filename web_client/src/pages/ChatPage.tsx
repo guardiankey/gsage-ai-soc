@@ -2,12 +2,15 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Menu } from 'lucide-react'
-import { createConversation, streamMessage, uploadChatAttachment, type SendMessageResponse } from '@/api/chat'
+import { createConversation, streamMessage, uploadChatAttachment, subscribeConversationEvents, type SendMessageResponse } from '@/api/chat'
 import { useAuth } from '@/contexts/AuthContext'
 import { ConversationList } from '@/components/chat/ConversationList'
 import { ChatWindow, type ChatWindowHandle } from '@/components/chat/ChatWindow'
 import { ChatInput } from '@/components/chat/ChatInput'
 import { Button } from '@/components/ui/button'
+import { InteractionRenderer } from '@/components/interaction/InteractionRenderer'
+import { useInteraction } from '@/hooks/useInteraction'
+import type { InteractionEvent } from '@/hooks/useInteraction'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 
@@ -32,6 +35,45 @@ export default function ChatPage() {
   // Tracks whether we just created a new conversation (avoids resetting pendingUserMessage on nav).
   const justCreatedRef = useRef(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // ── Interaction Service ─────────────────────────────────────────────
+  const interaction = useInteraction(orgId)
+  const [interactionLoading, setInteractionLoading] = useState(false)
+
+  // Subscribe to interaction.requested SSE events for the current conversation
+  useEffect(() => {
+    if (!orgId || !conversationId) return
+    const stop = subscribeConversationEvents(
+      orgId,
+      conversationId,
+      () => {}, // messages_updated — already handled by ChatWindow
+      (event) => {
+        interaction.handleEvent(event as unknown as InteractionEvent)
+      }
+    )
+    return stop
+  }, [orgId, conversationId, interaction])
+
+  const handleInteractionSubmit = useCallback(
+    async (interactionId: string, responses: Record<string, unknown>) => {
+      setInteractionLoading(true)
+      try {
+        await interaction.submit(interactionId, responses)
+      } catch {
+        toast.error(t('interaction.submitError'))
+      } finally {
+        setInteractionLoading(false)
+      }
+    },
+    [interaction, t]
+  )
+
+  const handleInteractionCancel = useCallback(
+    async (interactionId: string) => {
+      await interaction.cancel(interactionId)
+    },
+    [interaction]
+  )
 
   // Reset streaming state when conversation changes
   useEffect(() => {
@@ -264,6 +306,22 @@ export default function ChatPage() {
           </div>
         )}
       </div>
+
+      {/* Interaction Service — renders modals for form/confirm/upload requests from tools */}
+      <InteractionRenderer
+        open={interaction.state.visible}
+        interactionId={interaction.state.interactionId}
+        title={interaction.state.title}
+        description={interaction.state.description}
+        schema={interaction.state.schema}
+        submitLabel={interaction.state.submitLabel}
+        cancelLabel={interaction.state.cancelLabel}
+        size={interaction.state.size}
+        isLoading={interactionLoading}
+        onSubmit={handleInteractionSubmit}
+        onCancel={handleInteractionCancel}
+        onClose={interaction.dismiss}
+      />
     </div>
   )
 }

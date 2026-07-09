@@ -113,6 +113,14 @@
     "enterSends": "Enter يرسل الرسالة",
     "enterNewline": "Enter يضيف سطرًا جديدًا"
   },
+  "interaction": {
+    "title": "الإدخال مطلوب",
+    "submit": "إرسال",
+    "cancel": "إلغاء",
+    "submitting": "جارٍ الإرسال...",
+    "submitError": "فشل إرسال الرد",
+    "fieldRequired": "هذا الحقل مطلوب"
+  },
   "knowledge": {
     "title": "قاعدة المعرفة",
     "subtitle": "ابحث وأدر واستورد المستندات إلى قاعدة معرفة الذكاء الاصطناعي",

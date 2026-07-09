@@ -113,6 +113,14 @@
     "enterSends": "Enter envía el mensaje",
     "enterNewline": "Enter agrega nueva línea"
   },
+  "interaction": {
+    "title": "Entrada Requerida",
+    "submit": "Enviar",
+    "cancel": "Cancelar",
+    "submitting": "Enviando...",
+    "submitError": "Error al enviar la respuesta",
+    "fieldRequired": "Este campo es obligatorio"
+  },
   "knowledge": {
     "title": "Base de Conocimiento",
     "subtitle": "Busca, gestiona e ingiere documentos en la base de conocimiento de IA",

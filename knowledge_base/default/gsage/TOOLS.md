@@ -739,6 +739,112 @@ If you are building a normal integration against an external system, subclass `B
 
 10. Do not hand-roll CSV export for large list-style tool results.
    Use `src.mcp_server.tools.result_export` so preview limits, overflow behavior, and artifact metadata stay consistent across tools.
+11. Do not generate HTML or custom dialogs for user input.
+   Use the Interaction Service (`self.interaction.form()` / `self.interaction.request()`). The frontend owns rendering.
+
+---
+
+## Interaction Service (User Input from Tools)
+
+Tools can request structured user input (forms, confirmations, uploads) through
+the **Interaction Service**. The tool declares an interaction schema; the backend
+serializes it to JSON; the React frontend renders the appropriate UI.
+
+### Quick start
+
+```python
+from src.shared.interaction import (
+    Form, TextField, NumberField, SelectField, ResumeMode,
+)
+
+class IncidentForm(Form):
+    titulo = TextField(label="Título", required=True)
+    severidade = SelectField(
+        label="Severidade",
+        options=[
+            {"value": "baixa", "label": "Baixa"},
+            {"value": "media", "label": "Média"},
+            {"value": "alta", "label": "Alta"},
+        ],
+    )
+
+class MyIncidentTool(BaseTool):
+    name = "incident_create"
+
+    async def execute(self, agent_context, params, config, state):
+        dados = await self.interaction.form(
+            IncidentForm,
+            title="Criar Incidente",
+            description="Preencha os dados do incidente.",
+            resume=ResumeMode.CONTINUE_TOOL,
+            context={"ticket_id": params.get("ticket_id")},
+        )
+        titulo = dados["titulo"]
+        severidade = dados["severidade"]
+        # ... create incident ...
+        return self._success({"incident_id": "INC-001"})
+```
+
+### Resume modes
+
+- **`CONTINUE_TOOL`** — the tool blocks (`await`) until the user submits. Returns the response dict. The tool continues its `execute()` method normally.
+- **`REPLAN_AGENT`** — the tool does NOT block. Raises `InteractionReplanRequested`. The agent framework injects the user's responses as a `[INTERACTION_RESPONSE]` block so the agent can replan and decide which tools to call next.
+
+### Available field types
+
+| Field | Python class | React component |
+|-------|-------------|-----------------|
+| Text | `TextField` | `<input type="text">` |
+| TextArea | `TextAreaField` | `<textarea>` |
+| Number | `NumberField` | `<input type="number">` |
+| Select | `SelectField` | Radix UI `<Select>` |
+| Checkbox | `CheckboxField` | `<Checkbox>` |
+| Radio | `RadioField` | `<input type="radio">` group |
+| Date | `DateField` | `<input type="date">` |
+
+### Field metadata
+
+All fields support:
+
+- `label`, `description`, `hint`, `placeholder`
+- `required`, `value` (pre-fill), `default`, `example`
+- `visible`, `enabled`
+- `validation` (dict: `pattern`, `min_length`, …)
+- Layout: `width`, `group`, `order`, `tab`, `icon` (reserved, React ignores in V1)
+- Conditional: `visible_when`, `enabled_when` (reserved, React ignores in V1)
+
+### Primary API vs convenience
+
+```python
+# Primary — explicit interaction type (extensible to Confirm, Upload, …)
+dados = await self.interaction.request(
+    FormInteraction(form=MyForm, title="..." , submit_label="Criar"),
+    resume=ResumeMode.CONTINUE_TOOL,
+    context={"ticket_id": "INC-1234"},
+)
+
+# Convenience shortcut
+dados = await self.interaction.form(MyForm, title="...", context={...})
+```
+
+### How it works under the hood
+
+1. Tool calls `self.interaction.form(...)` or `self.interaction.request(...)`.
+2. `InteractionService` persists a `gsage_interactions` row and publishes to Redis pub/sub (`interaction:conv:{session_id}`).
+3. The backend API's SSE stream receives the event and emits `interaction.requested` to the frontend.
+4. React's `InteractionRenderer` opens a modal with `FormRenderer`.
+5. User fills the form and clicks submit → `POST /v1/orgs/{org_id}/interactions/{id}/submit`.
+6. Backend pushes the response to Redis; the waiting tool's `BRPOP` returns; tool continues.
+
+### Limitations (V1)
+
+- Uses Redis BRPOP — the MCP HTTP call stays open for the entire interaction.
+- Not available in background (Celery) tools. Tools should return `USER_INPUT_REQUIRED` and let the agent decide how to proceed.
+- `visible_when` / `enabled_when` are serialized but not evaluated by the React renderer.
+
+### Architecture reference
+
+See `docs-local/architecture/interaction-service.md` for the full design document.
 
 ---
 
@@ -754,3 +860,4 @@ If you are building a normal integration against an external system, subclass `B
 8. Configure the tool for the target organization if it needs config.
 9. Assign the permission tags to a group.
 10. Verify discovery through `search_tools` or, if appropriate, `list_tools`.
+11. If your tool requests user input, use `self.interaction.form()` / `self.interaction.request()` — see Interaction Service section above.

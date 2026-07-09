@@ -25,6 +25,7 @@ from src.backend_api.app.api.v1 import (
     departments,
     files,
     health,
+    interactions,
     knowledge,
     org_settings,
     prompts,
@@ -72,6 +73,7 @@ _org_router.include_router(
 _org_router.include_router(knowledge.router, prefix="/v1", tags=["Knowledge"])
 _org_router.include_router(approvals.router, prefix="/v1", tags=["Approvals"])
 _org_router.include_router(files.router, prefix="/v1", tags=["Files"])
+_org_router.include_router(interactions.router, prefix="/v1", tags=["Interactions"])
 _org_router.include_router(background_tasks.router, prefix="/v1", tags=["Background Tasks"])
 _org_router.include_router(scheduled_jobs.router, prefix="/v1", tags=["Scheduled Jobs"])
 _org_router.include_router(approval_rules.router, prefix="/v1", tags=["Approval Rules"])

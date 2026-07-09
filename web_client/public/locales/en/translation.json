@@ -113,6 +113,14 @@
     "messageCopyError": "Failed to copy message",
     "newConversationInFolder": "New conversation in folder"
   },
+  "interaction": {
+    "title": "Input Required",
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "submitting": "Submitting...",
+    "submitError": "Failed to submit response",
+    "fieldRequired": "This field is required"
+  },
   "knowledge": {
     "title": "Knowledge Base",
     "subtitle": "Search, manage and ingest documents into the AI knowledge base",

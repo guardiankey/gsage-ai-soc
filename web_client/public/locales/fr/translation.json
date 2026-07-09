@@ -113,6 +113,14 @@
     "enterSends": "Entrée envoie le message",
     "enterNewline": "Entrée ajoute une nouvelle ligne"
   },
+  "interaction": {
+    "title": "Saisie requise",
+    "submit": "Envoyer",
+    "cancel": "Annuler",
+    "submitting": "Envoi en cours...",
+    "submitError": "Échec de l'envoi de la réponse",
+    "fieldRequired": "Ce champ est obligatoire"
+  },
   "knowledge": {
     "title": "Base de Connaissances",
     "subtitle": "Recherchez, gérez et ingérez des documents dans la base de connaissances IA",

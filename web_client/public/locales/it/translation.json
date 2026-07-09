@@ -113,6 +113,14 @@
     "enterSends": "Invio invia il messaggio",
     "enterNewline": "Invio aggiunge una nuova riga"
   },
+  "interaction": {
+    "title": "Input Richiesto",
+    "submit": "Invia",
+    "cancel": "Annulla",
+    "submitting": "Invio in corso...",
+    "submitError": "Invio della risposta fallito",
+    "fieldRequired": "Questo campo è obbligatorio"
+  },
   "knowledge": {
     "title": "Base di Conoscenza",
     "subtitle": "Cerca, gestisci e carica documenti nella base di conoscenza AI",

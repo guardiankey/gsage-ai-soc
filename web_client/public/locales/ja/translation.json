@@ -113,6 +113,14 @@
     "enterSends": "Enterで送信",
     "enterNewline": "Enterで改行"
   },
+  "interaction": {
+    "title": "入力が必要です",
+    "submit": "送信",
+    "cancel": "キャンセル",
+    "submitting": "送信中...",
+    "submitError": "応答の送信に失敗しました",
+    "fieldRequired": "このフィールドは必須です"
+  },
   "knowledge": {
     "title": "ナレッジベース",
     "subtitle": "AIナレッジベースのドキュメントを検索、管理、取り込みます",

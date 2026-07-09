@@ -22,6 +22,7 @@ Routes
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
 from datetime import datetime, timezone
@@ -898,6 +899,7 @@ async def list_messages(
                 or "[ATTACHED_FILES]" in content_str
                 or "[DEPARTMENT_CONTEXT]" in content_str
                 or "[SYSTEM_REPROMPT]" in content_str
+                or "[INTERACTION_RESPONSE]" in content_str
             ):
                 import re as _re
                 content_str = _re.sub(
@@ -923,9 +925,15 @@ async def list_messages(
                     "",
                     content_str,
                     flags=_re.DOTALL,
+                )
+                content_str = _re.sub(
+                    r"\[INTERACTION_RESPONSE\].*?\[/INTERACTION_RESPONSE\](?:\s*---)?\s*",
+                    "",
+                    content_str,
+                    flags=_re.DOTALL,
                 ).strip()
                 if not content_str:
-                    continue
+                    content_str = "📋 Form received."
 
             # Assistant messages with no textual content are tool-call-only messages.
             # Enrich them with a summary of the tool(s) being invoked.
@@ -1823,27 +1831,125 @@ async def stream_message(
 async def _conv_events_stream(
     conv_id: uuid.UUID,
 ) -> AsyncIterator[str]:
-    """SSE generator subscribing to Redis pub/sub updates for *conv_id*."""
+    """SSE generator subscribing to Redis pub/sub updates for *conv_id*.
+
+    Listens to two channels concurrently:
+
+    * ``messages_updated`` — background-task continuations, approval resolutions.
+    * ``interaction.requested`` — user interaction requests (forms, …) from tools.
+    """
+    import asyncio as _asyncio
+
     from src.backend_api.app.services.agno_session_lock import (  # noqa: PLC0415
         subscribe_conversation_updates,
     )
+
+    queue: _asyncio.Queue[tuple[str, dict]] = _asyncio.Queue()
+
+    async def _forward_messages() -> None:
+        """Forward conversation-update events to the queue."""
+        try:
+            async for reason in subscribe_conversation_updates(conv_id):
+                await queue.put(("messages_updated", {"reason": reason}))
+        except _asyncio.CancelledError:
+            pass
+
+    async def _forward_interactions() -> None:
+        """Forward interaction-request events to the queue."""
+        try:
+            async for payload in _subscribe_interaction_events(conv_id):
+                if not payload:  # keep-alive tick
+                    continue
+                await queue.put(("interaction.requested", payload))
+        except _asyncio.CancelledError:
+            pass
+
+    tasks: list[_asyncio.Task[None]] = [
+        _asyncio.ensure_future(_forward_messages()),
+        _asyncio.ensure_future(_forward_interactions()),
+    ]
 
     # Initial hello so the client connection completes promptly.
     yield _fmt_sse("connected", {"conv_id": str(conv_id)})
 
     try:
-        async for reason in subscribe_conversation_updates(conv_id):
-            if not reason:
-                # Keep-alive emitted by the subscriber on idle ticks.
-                # SSE comments (lines beginning with ``:``) are ignored
-                # by EventSource and keep proxies from closing the
-                # connection.
-                yield ": keep-alive\n\n"
-                continue
-            yield _fmt_sse("messages_updated", {"reason": reason})
-    except asyncio.CancelledError:
+        while True:
+            event_type, data = await queue.get()
+            if event_type == "messages_updated":
+                reason = data.get("reason", "")
+                if not reason:
+                    # Keep-alive — SSE comment
+                    yield ": keep-alive\n\n"
+                else:
+                    yield _fmt_sse("messages_updated", {"reason": str(reason)})
+            elif event_type == "interaction.requested":
+                yield _fmt_sse("interaction.requested", data)
+            else:
+                # Unknown event — forward generically
+                yield _fmt_sse(event_type, data)
+    except _asyncio.CancelledError:
         log.debug("conv_events_stream: client disconnected conv=%s", conv_id)
-        return
+    finally:
+        for t in tasks:
+            t.cancel()
+            try:
+                await t
+            except _asyncio.CancelledError:
+                pass
+
+
+async def _subscribe_interaction_events(
+    conv_id: uuid.UUID,
+) -> AsyncIterator[dict]:
+    """Async iterator yielding interaction events for *conv_id*.
+
+    Subscribes to the Redis pub/sub channel ``interaction:conv:{conv_id}``
+    and yields parsed JSON payloads.  Runs until cancelled.
+    """
+    import json as _json
+
+    import redis.asyncio as _redis
+
+    from src.shared.config.settings import get_settings
+
+    settings = get_settings()
+    client = _redis.from_url(
+        settings.redis_url,
+        encoding="utf-8",
+        decode_responses=True,
+    )
+    pubsub = client.pubsub()
+    channel = f"interaction:conv:{conv_id}"
+    await pubsub.subscribe(channel)
+    try:
+        while True:
+            msg = await pubsub.get_message(
+                ignore_subscribe_messages=True,
+                timeout=1.0,
+            )
+            if msg is None:
+                # Yield a keep-alive hint so the caller can emit SSE comments.
+                yield {}  # empty dict signals keep-alive to the merger
+                continue
+            data_raw = msg.get("data")
+            if data_raw is None:
+                continue
+            try:
+                payload = _json.loads(data_raw)
+            except (_json.JSONDecodeError, TypeError):
+                log.warning(
+                    "conv_events_stream: unparseable interaction event conv=%s",
+                    conv_id,
+                )
+                continue
+            yield payload
+    finally:
+        with contextlib.suppress(Exception):
+            await pubsub.unsubscribe(channel)
+        with contextlib.suppress(Exception):
+            await pubsub.aclose()
+        with contextlib.suppress(Exception):
+            await client.aclose()
 
 
 @stream_router.get(

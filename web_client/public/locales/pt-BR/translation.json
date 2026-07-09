@@ -113,6 +113,14 @@
     "messageCopyError": "Falha ao copiar a mensagem",
     "newConversationInFolder": "Nova conversa nesta pasta"
   },
+  "interaction": {
+    "title": "Entrada Necessária",
+    "submit": "Enviar",
+    "cancel": "Cancelar",
+    "submitting": "Enviando...",
+    "submitError": "Falha ao enviar resposta",
+    "fieldRequired": "Este campo é obrigatório"
+  },
   "knowledge": {
     "title": "Base de Conhecimento",
     "subtitle": "Pesquise, gerencie e ingira documentos na base de conhecimento da IA",

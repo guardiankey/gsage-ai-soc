@@ -294,7 +294,8 @@ export function streamMessage(
 export function subscribeConversationEvents(
   orgId: string,
   convId: string,
-  onUpdate: (reason: string) => void
+  onUpdate: (reason: string) => void,
+  onInteractionRequested?: (event: Record<string, unknown>) => void
 ): () => void {
   const token = getAccessToken()
   const deptId = getDeptId()
@@ -314,6 +315,13 @@ export function subscribeConversationEvents(
           onUpdate(parsed.reason ?? 'updated')
         } catch {
           onUpdate('updated')
+        }
+      } else if (ev.event === 'interaction.requested') {
+        try {
+          const parsed = JSON.parse(ev.data || '{}')
+          onInteractionRequested?.(parsed)
+        } catch {
+          // Non-JSON — ignore
         }
       }
       // Ignore ``connected`` and any other event types.
