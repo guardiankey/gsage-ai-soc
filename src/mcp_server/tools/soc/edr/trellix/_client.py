@@ -240,6 +240,7 @@ class TrellixEDRClient:
         *,
         json_body: Optional[dict] = None,
         allow_303: bool = False,
+        params: Optional[dict[str, str | int]] = None,
     ) -> httpx.Response:
         if self._http is None:
             raise TrellixEDRError("Trellix client is not open.", code="CLIENT_CLOSED")
@@ -251,6 +252,7 @@ class TrellixEDRClient:
                     url,
                     headers=self._headers(),
                     json=json_body,
+                    params=params,
                 )
             except httpx.RequestError as exc:
                 raise TrellixEDRError(
@@ -413,3 +415,104 @@ class TrellixEDRClient:
                 status_code=resp.status_code,
                 code="BAD_RESPONSE",
             ) from exc
+
+    # ── Alerts (v3) ────────────────────────────────────────────────────────
+
+    async def get_alerts(
+        self,
+        *,
+        page_offset: int = 0,
+        page_limit: int = 100,
+        from_ms: Optional[int] = None,
+        to_ms: Optional[int] = None,
+        sort: Optional[str] = None,
+        filter_str: Optional[str] = None,
+    ) -> dict:
+        """Fetch one page of v3 alerts (enriched with HostInfo).
+
+        Returns the full JSON:API response dict.
+        """
+        url = f"{self._base_v2}/edr/v3/alerts"
+        params: dict[str, str | int] = {
+            "page[offset]": page_offset,
+            "page[limit]": page_limit,
+        }
+        if from_ms is not None:
+            params["from"] = from_ms
+        if to_ms is not None:
+            params["to"] = to_ms
+        if sort:
+            params["sort"] = sort
+        if filter_str:
+            params["filter"] = filter_str
+
+        resp = await self._request("GET", url, params=params)
+        return resp.json()
+
+    # ── Threats ────────────────────────────────────────────────────────────
+
+    async def get_threats(
+        self,
+        *,
+        page_offset: int = 0,
+        page_limit: int = 100,
+        from_ms: Optional[int] = None,
+        to_ms: Optional[int] = None,
+        sort: Optional[str] = None,
+        filter_str: Optional[str] = None,
+    ) -> dict:
+        """Fetch one page of threats from /edr/v2/threats."""
+        url = f"{self._base_v2}/edr/v2/threats"
+        params: dict[str, str | int] = {
+            "page[offset]": page_offset,
+            "page[limit]": page_limit,
+        }
+        if from_ms is not None:
+            params["from"] = from_ms
+        if to_ms is not None:
+            params["to"] = to_ms
+        if sort:
+            params["sort"] = sort
+        if filter_str:
+            params["filter"] = filter_str
+
+        resp = await self._request("GET", url, params=params)
+        return resp.json()
+
+    async def get_threat_by_id(self, threat_id: str) -> dict:
+        """Fetch a single threat by ID from /edr/v2/threats/{id}."""
+        url = f"{self._base_v2}/edr/v2/threats/{threat_id}"
+        resp = await self._request("GET", url)
+        return resp.json()
+
+    async def get_affected_hosts(
+        self,
+        threat_id: str,
+        *,
+        page_offset: int = 0,
+        page_limit: int = 100,
+    ) -> dict:
+        """Fetch affected hosts for a threat from /edr/v2/threats/{id}/affectedhosts."""
+        url = f"{self._base_v2}/edr/v2/threats/{threat_id}/affectedhosts"
+        params: dict[str, str | int] = {
+            "page[offset]": page_offset,
+            "page[limit]": page_limit,
+        }
+        resp = await self._request("GET", url, params=params)
+        return resp.json()
+
+    async def get_detections_by_threat(
+        self,
+        threat_id: str,
+        *,
+        page_offset: int = 0,
+        page_limit: int = 100,
+    ) -> dict:
+        """Fetch detections for a threat from /edr/v2/threats/{id}/detections."""
+        url = f"{self._base_v2}/edr/v2/threats/{threat_id}/detections"
+        params: dict[str, str | int] = {
+            "page[offset]": page_offset,
+            "page[limit]": page_limit,
+        }
+        resp = await self._request("GET", url, params=params)
+        return resp.json()

@@ -20,6 +20,8 @@ Tools:
     trellix_edr_search_processes             — Process hunt (Processes/ProcessHistory).
     trellix_edr_quarantine_host              — Host (un)quarantine by hostname/IP.
     trellix_edr_get_host_quarantine_status   — Read quarantine state per host.
+    trellix_edr_alerts                       — Fetch and summarise v3 alerts with filtering.
+    trellix_edr_threats                      — Fetch threats, affected hosts, and detections.
 
 All tools support multiple Trellix tenants via ``config_profile``
 (``supports_multiple_configs=True``).

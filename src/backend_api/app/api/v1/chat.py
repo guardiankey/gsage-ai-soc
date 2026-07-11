@@ -926,13 +926,14 @@ async def list_messages(
                     content_str,
                     flags=_re.DOTALL,
                 )
+                has_interaction_response = "[INTERACTION_RESPONSE]" in content_str
                 content_str = _re.sub(
                     r"\[INTERACTION_RESPONSE\].*?\[/INTERACTION_RESPONSE\](?:\s*---)?\s*",
                     "",
                     content_str,
                     flags=_re.DOTALL,
                 ).strip()
-                if not content_str:
+                if has_interaction_response and not content_str:
                     content_str = "📋 Form received."
 
             # Assistant messages with no textual content are tool-call-only messages.

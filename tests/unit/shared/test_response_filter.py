@@ -54,12 +54,58 @@ async def test_mermaid_timeline_ignores_non_timeline() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mermaid_timeline_skips_seconds() -> None:
-    """HH:MM:SS is left alone (not a timeline label format)."""
+async def test_mermaid_timeline_converts_seconds() -> None:
+    """HH:MM:SS is now normalised to HHhMMmSSs."""
     f = MermaidTimelineTimeFilter()
     text = "timeline\n  12:34:56 : with seconds\n"
     out = await f.apply(text, _ctx())
-    assert "12:34:56" in out
+    assert "12h34m56s : with seconds" in out
+
+
+@pytest.mark.asyncio
+async def test_mermaid_timeline_fixes_mixed_format() -> None:
+    """HHhMM:SS (broken agent output) → HHhMMmSSs."""
+    f = MermaidTimelineTimeFilter()
+    text = "timeline\n  10h18:30 : conexao iniciada\n"
+    out = await f.apply(text, _ctx())
+    assert "10h18m30s : conexao iniciada" in out
+
+
+@pytest.mark.asyncio
+async def test_mermaid_timeline_adds_missing_m_suffix() -> None:
+    """HHhMM without 'm' → HHhMMm."""
+    f = MermaidTimelineTimeFilter()
+    text = "timeline\n  08h01 : artefato executado\n"
+    out = await f.apply(text, _ctx())
+    assert "08h01m : artefato executado" in out
+
+
+@pytest.mark.asyncio
+async def test_mermaid_timeline_normalises_range() -> None:
+    """HH:MM-HH:MM range → HHhMMm-HHhMMm."""
+    f = MermaidTimelineTimeFilter()
+    text = "timeline\n  08:01-12:00 : janela de tempo\n"
+    out = await f.apply(text, _ctx())
+    assert "08h01m-12h00m : janela de tempo" in out
+
+
+@pytest.mark.asyncio
+async def test_mermaid_timeline_normalises_mixed_range() -> None:
+    """Mixed-format range HHhMM:SS-HHhMM:SS → HHhMMmSSs-HHhMMmSSs."""
+    f = MermaidTimelineTimeFilter()
+    text = "timeline\n  10h18:30-10h19:25 : trafego DNS\n"
+    out = await f.apply(text, _ctx())
+    assert "10h18m30s-10h19m25s : trafego DNS" in out
+
+
+@pytest.mark.asyncio
+async def test_mermaid_timeline_preserves_already_correct() -> None:
+    """Already-correct format is left untouched."""
+    f = MermaidTimelineTimeFilter()
+    text = "timeline\n  10h18m30s : correto\n  08h01m-12h00m : range ok\n"
+    out = await f.apply(text, _ctx())
+    assert "10h18m30s : correto" in out
+    assert "08h01m-12h00m : range ok" in out
 
 
 @pytest.mark.asyncio
