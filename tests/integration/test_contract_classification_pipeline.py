@@ -23,7 +23,17 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.shared.models.contract_facts import ContractFacts
+from src.shared.models.contract_facts import (
+    AquisicaoFacts,
+    ComplexidadeFacts,
+    ContextoFacts,
+    ContractFacts,
+    MercadoFacts,
+    ObjetoFacts,
+    ServicoFacts,
+    TicFacts,
+    ValorFacts,
+)
 from src.shared.decision.inference_engine import InferenceEngine
 from src.shared.decision.rule_evaluator import SimpleRuleEvaluator
 from src.shared.decision.dag_composer import DAGComposer, CycleDetectedError
@@ -101,13 +111,13 @@ def _resolve(facts: ContractFacts) -> dict:
 def facts_pregao_bens() -> ContractFacts:
     """Cenário 1: Pregão eletrônico para bens comuns."""
     return ContractFacts(
-        objeto={"tipo": "bem", "descricao": "Aquisição de 100 notebooks"},
-        tic={"envolve": True, "subtipo": "hardware"},
-        aquisicao={"natureza": "compra"},
-        complexidade={},
-        mercado={"solucao_disponivel": "sim"},
-        valor={"estimado": 250000.00},
-        contexto={"orgao": "Ministério Y", "esfera": "federal"},
+        objeto=ObjetoFacts(tipo="bem", descricao="Aquisição de 100 notebooks"),
+        tic=TicFacts(envolve=True, subtipo="hardware"),
+        aquisicao=AquisicaoFacts(natureza="compra"),
+        complexidade=ComplexidadeFacts(),
+        mercado=MercadoFacts(solucao_disponivel="sim"),
+        valor=ValorFacts(estimado=250000.00),
+        contexto=ContextoFacts(orgao="Ministério Y", esfera="federal"),
     )
 
 
@@ -115,11 +125,11 @@ def facts_pregao_bens() -> ContractFacts:
 def facts_obra() -> ContractFacts:
     """Cenário 2: Concorrência para obra de engenharia."""
     return ContractFacts(
-        objeto={"tipo": "obra", "descricao": "Construção de ponte sobre o Rio X"},
-        complexidade={"elevado_risco": True},
-        mercado={"solucao_disponivel": "nao"},
-        valor={"estimado": 5000000.00},
-        contexto={"orgao": "DNIT", "esfera": "federal"},
+        objeto=ObjetoFacts(tipo="obra", descricao="Construção de ponte sobre o Rio X"),
+        complexidade=ComplexidadeFacts(elevado_risco=True),
+        mercado=MercadoFacts(solucao_disponivel="nao"),
+        valor=ValorFacts(estimado=5000000.00),
+        contexto=ContextoFacts(orgao="DNIT", esfera="federal"),
     )
 
 
@@ -127,13 +137,13 @@ def facts_obra() -> ContractFacts:
 def facts_dispensa_valor() -> ContractFacts:
     """Cenário 4: Dispensa por valor (art. 75, II)."""
     return ContractFacts(
-        objeto={"tipo": "servico", "descricao": "Serviço de manutenção de ar condicionado"},
-        servico={"natureza": "comum"},
-        aquisicao={"natureza": "servico"},
-        complexidade={},
-        mercado={"solucao_disponivel": "sim"},
-        valor={"estimado": 30000.00},
-        contexto={"orgao": "Prefeitura Z", "esfera": "municipal"},
+        objeto=ObjetoFacts(tipo="servico", descricao="Serviço de manutenção de ar condicionado"),
+        servico=ServicoFacts(natureza="comum"),
+        aquisicao=AquisicaoFacts(natureza="servico"),
+        complexidade=ComplexidadeFacts(),
+        mercado=MercadoFacts(solucao_disponivel="sim"),
+        valor=ValorFacts(estimado=30000.00),
+        contexto=ContextoFacts(orgao="Prefeitura Z", esfera="municipal"),
     )
 
 
@@ -141,14 +151,14 @@ def facts_dispensa_valor() -> ContractFacts:
 def facts_saas_lgpd() -> ContractFacts:
     """Cenário 5: SaaS + LGPD — multi-capability composition."""
     return ContractFacts(
-        objeto={"tipo": "servico", "descricao": "Contratação de plataforma SaaS de gestão"},
-        servico={"natureza": "continuado"},
-        tic={"envolve": True, "subtipo": "saas"},
-        aquisicao={"natureza": "assinatura"},
-        complexidade={"lgpd": True, "integracao": True},
-        mercado={"solucao_disponivel": "sim"},
-        valor={"estimado": 360000.00},
-        contexto={"orgao": "Ministério X", "esfera": "federal"},
+        objeto=ObjetoFacts(tipo="servico", descricao="Contratação de plataforma SaaS de gestão"),
+        servico=ServicoFacts(natureza="continuado"),
+        tic=TicFacts(envolve=True, subtipo="saas"),
+        aquisicao=AquisicaoFacts(natureza="assinatura"),
+        complexidade=ComplexidadeFacts(lgpd=True, integracao=True),
+        mercado=MercadoFacts(solucao_disponivel="sim"),
+        valor=ValorFacts(estimado=360000.00),
+        contexto=ContextoFacts(orgao="Ministério X", esfera="federal"),
     )
 
 
@@ -156,14 +166,14 @@ def facts_saas_lgpd() -> ContractFacts:
 def facts_sustentacao_tic_legado() -> ContractFacts:
     """Cenário 6: Sustentação TIC + legado + alta disponibilidade."""
     return ContractFacts(
-        objeto={"tipo": "servico", "descricao": "Suporte técnico e sustentação de sistemas legados 24x7"},
-        servico={"natureza": "continuado"},
-        tic={"envolve": True, "subtipo": "sustentacao"},
-        aquisicao={"natureza": "servico"},
-        complexidade={"lgpd": True, "integracao": True, "legado": True, "afeta_producao": True, "operacao_24x7": True},
-        mercado={"solucao_disponivel": "sim"},
-        valor={"estimado": 480000.00},
-        contexto={"orgao": "Ministério X", "esfera": "federal"},
+        objeto=ObjetoFacts(tipo="servico", descricao="Suporte técnico e sustentação de sistemas legados 24x7"),
+        servico=ServicoFacts(natureza="continuado"),
+        tic=TicFacts(envolve=True, subtipo="sustentacao"),
+        aquisicao=AquisicaoFacts(natureza="servico"),
+        complexidade=ComplexidadeFacts(lgpd=True, integracao=True, legado=True, afeta_producao=True, operacao_24x7=True),
+        mercado=MercadoFacts(solucao_disponivel="sim"),
+        valor=ValorFacts(estimado=480000.00),
+        contexto=ContextoFacts(orgao="Ministério X", esfera="federal"),
     )
 
 

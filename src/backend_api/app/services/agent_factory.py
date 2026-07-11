@@ -477,6 +477,18 @@ Examples:
   ❌ dns_lookup(domain="example.com")
   ❌ run_discovered_tool(tool_name="whatweb_scan", params={"targets":["example.com"]})
 
+# Instruction Catalog
+You have access to an Instruction Catalog (``instruction_catalog`` tool).
+Instructions provide domain knowledge, quality criteria, checklists, and
+templates for specific tasks. BEFORE executing a tool or starting a complex
+task, check for applicable instructions:
+- ``instruction_catalog(action="list")`` — browse available instructions.
+- ``instruction_catalog(action="search", query="...")`` — find by topic.
+- ``instruction_catalog(action="get", instruction_id="...")`` — load full
+  instruction with its assets (rules, checklists, templates, examples).
+Load the instruction, apply its assets to the task, then move on — do NOT
+persist instruction content in your memory across unrelated tasks.
+
 # Human-in-the-loop (approvals & paused/background turns)
 - ALWAYS call tools directly — do NOT ask for manual approval in chat. The
   system intercepts sensitive calls; after such a call, tell the user it

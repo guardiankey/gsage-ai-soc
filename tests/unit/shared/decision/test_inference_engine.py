@@ -4,7 +4,18 @@ from __future__ import annotations
 
 import pytest
 
-from src.shared.models.contract_facts import ContractFacts, Inferences
+from src.shared.models.contract_facts import (
+    AquisicaoFacts,
+    ComplexidadeFacts,
+    ContextoFacts,
+    ContractFacts,
+    Inferences,
+    MercadoFacts,
+    ObjetoFacts,
+    ServicoFacts,
+    TicFacts,
+    ValorFacts,
+)
 from src.shared.decision.inference_engine import InferenceEngine
 
 
@@ -17,14 +28,14 @@ def engine() -> InferenceEngine:
 def facts_tic_continuado_lgpd() -> ContractFacts:
     """Sustentação de TIC, serviço continuado, com LGPD."""
     return ContractFacts(
-        objeto={"tipo": "servico", "descricao": "Suporte técnico e sustentação de sistemas legados"},
-        servico={"natureza": "continuado"},
-        tic={"envolve": True, "subtipo": "sustentacao"},
-        aquisicao={"natureza": "servico"},
-        complexidade={"lgpd": True, "integracao": True, "legado": True},
-        mercado={"solucao_disponivel": "sim"},
-        valor={"estimado": 480000.00},
-        contexto={"orgao": "Ministério X"},
+        objeto=ObjetoFacts(tipo="servico", descricao="Suporte técnico e sustentação de sistemas legados"),
+        servico=ServicoFacts(natureza="continuado"),
+        tic=TicFacts(envolve=True, subtipo="sustentacao"),
+        aquisicao=AquisicaoFacts(natureza="servico"),
+        complexidade=ComplexidadeFacts(lgpd=True, integracao=True, legado=True),
+        mercado=MercadoFacts(solucao_disponivel="sim"),
+        valor=ValorFacts(estimado=480000.00),
+        contexto=ContextoFacts(orgao="Ministério X"),
     )
 
 
@@ -32,12 +43,12 @@ def facts_tic_continuado_lgpd() -> ContractFacts:
 def facts_bens_comuns() -> ContractFacts:
     """Pregão para bens comuns."""
     return ContractFacts(
-        objeto={"tipo": "bem", "descricao": "Aquisição de notebooks"},
-        tic={"envolve": True, "subtipo": "hardware"},
-        complexidade={},
-        mercado={"solucao_disponivel": "sim"},
-        valor={"estimado": 120000.00},
-        contexto={"orgao": "Ministério Y"},
+        objeto=ObjetoFacts(tipo="bem", descricao="Aquisição de notebooks"),
+        tic=TicFacts(envolve=True, subtipo="hardware"),
+        complexidade=ComplexidadeFacts(),
+        mercado=MercadoFacts(solucao_disponivel="sim"),
+        valor=ValorFacts(estimado=120000.00),
+        contexto=ContextoFacts(orgao="Ministério Y"),
     )
 
 
@@ -45,11 +56,11 @@ def facts_bens_comuns() -> ContractFacts:
 def facts_obra() -> ContractFacts:
     """Obra de engenharia."""
     return ContractFacts(
-        objeto={"tipo": "obra", "descricao": "Construção de ponte"},
-        complexidade={"elevado_risco": True},
-        mercado={"solucao_disponivel": "nao"},
-        valor={"estimado": 5000000.00},
-        contexto={"orgao": "DNIT"},
+        objeto=ObjetoFacts(tipo="obra", descricao="Construção de ponte"),
+        complexidade=ComplexidadeFacts(elevado_risco=True),
+        mercado=MercadoFacts(solucao_disponivel="nao"),
+        valor=ValorFacts(estimado=5000000.00),
+        contexto=ContextoFacts(orgao="DNIT"),
     )
 
 
@@ -102,10 +113,10 @@ class TestTechnologyInferences:
 
     def test_nuvem_implied_by_saas(self, engine):
         facts = ContractFacts(
-            objeto={"tipo": "servico"},
-            tic={"envolve": True, "subtipo": "saas"},
-            complexidade={},
-            mercado={"solucao_disponivel": "sim"},
+            objeto=ObjetoFacts(tipo="servico"),
+            tic=TicFacts(envolve=True, subtipo="saas"),
+            complexidade=ComplexidadeFacts(),
+            mercado=MercadoFacts(solucao_disponivel="sim"),
         )
         inferences = engine.apply(facts)
         assert inferences.tecnologia.nuvem is True  # SaaS implies cloud

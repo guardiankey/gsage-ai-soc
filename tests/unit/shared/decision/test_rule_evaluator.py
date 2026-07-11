@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from src.shared.models.contract_facts import ContractFacts, Inferences
+from src.shared.models.contract_facts import (
+    ComplexidadeFacts,
+    ContractFacts,
+    Inferences,
+    MercadoFacts,
+    ObjetoFacts,
+    ServicoFacts,
+    TicFacts,
+    ValorFacts,
+)
 from src.shared.decision.inference_engine import InferenceEngine
 from src.shared.decision.rule_evaluator import SimpleRuleEvaluator
 
@@ -17,12 +26,12 @@ def evaluator() -> SimpleRuleEvaluator:
 @pytest.fixture
 def facts() -> ContractFacts:
     return ContractFacts(
-        objeto={"tipo": "servico", "descricao": "Teste"},
-        servico={"natureza": "continuado"},
-        tic={"envolve": True, "subtipo": "sustentacao"},
-        complexidade={"lgpd": True},
-        mercado={"solucao_disponivel": "sim"},
-        valor={"estimado": 480000.00},
+        objeto=ObjetoFacts(tipo="servico", descricao="Teste"),
+        servico=ServicoFacts(natureza="continuado"),
+        tic=TicFacts(envolve=True, subtipo="sustentacao"),
+        complexidade=ComplexidadeFacts(lgpd=True),
+        mercado=MercadoFacts(solucao_disponivel="sim"),
+        valor=ValorFacts(estimado=480000.00),
     )
 
 

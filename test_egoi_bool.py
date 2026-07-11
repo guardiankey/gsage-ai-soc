@@ -24,9 +24,9 @@ def test():
 
     for name, value in candidates:
         try:
-            api.get_email_report(
+            api.get_email_report(  # type: ignore[call-overload]
                 query_params={"date": value},
-                path_params={"campaign_hash": "deadbeef"},
+                path_params={"campaign_hash": "deadbeef"},  # type: ignore[arg-type]
                 skip_deserialization=True,
                 timeout=3
             )

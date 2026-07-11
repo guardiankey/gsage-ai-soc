@@ -6,10 +6,16 @@ import pytest
 from pydantic import ValidationError
 
 from src.shared.models.contract_facts import (
+    AquisicaoFacts,
+    ComplexidadeFacts,
+    ContextoFacts,
     ContractFacts,
     Inferences,
+    MercadoFacts,
     ObjetoFacts,
-    ComplexidadeFacts,
+    ServicoFacts,
+    TicFacts,
+    ValorFacts,
 )
 
 
@@ -17,12 +23,12 @@ class TestContractFactsValidation:
     """Tests for ContractFacts model validation."""
 
     def test_minimal_facts(self):
-        facts = ContractFacts(objeto={"tipo": "servico", "descricao": "Teste"})
+        facts = ContractFacts(objeto=ObjetoFacts(tipo="servico", descricao="Teste"))
         assert facts.objeto.tipo == "servico"
         assert facts.id.startswith("facts_")
 
     def test_defaults(self):
-        facts = ContractFacts(objeto={"tipo": "bem", "descricao": "Teste"})
+        facts = ContractFacts(objeto=ObjetoFacts(tipo="bem", descricao="Teste"))
         assert facts.complexidade.lgpd is False
         assert facts.complexidade.inovacao is False
         assert facts.contexto.esfera == "federal"
@@ -30,10 +36,11 @@ class TestContractFactsValidation:
 
     def test_tic_with_servico_valid(self):
         facts = ContractFacts(
-            objeto={"tipo": "servico", "descricao": "Suporte"},
-            tic={"envolve": True, "subtipo": "sustentacao"},
-            complexidade={},
+            objeto=ObjetoFacts(tipo="servico", descricao="Suporte"),
+            tic=TicFacts(envolve=True, subtipo="sustentacao"),
+            complexidade=ComplexidadeFacts(),
         )
+        assert facts.tic is not None
         assert facts.tic.envolve is True
         assert facts.tic.subtipo == "sustentacao"
 
@@ -41,40 +48,42 @@ class TestContractFactsValidation:
         """tic.envolve=True requires objeto.tipo in [servico, bem]."""
         with pytest.raises(ValidationError):
             ContractFacts(
-                objeto={"tipo": "obra", "descricao": "Ponte"},
-                tic={"envolve": True, "subtipo": "hardware"},
-                complexidade={},
+                objeto=ObjetoFacts(tipo="obra", descricao="Ponte"),
+                tic=TicFacts(envolve=True, subtipo="hardware"),
+                complexidade=ComplexidadeFacts(),
             )
 
     def test_servico_natureza_without_servico_invalid(self):
         """servico.natureza requires objeto.tipo == 'servico'."""
         with pytest.raises(ValidationError):
             ContractFacts(
-                objeto={"tipo": "bem", "descricao": "Notebook"},
-                servico={"natureza": "continuado"},
-                complexidade={},
+                objeto=ObjetoFacts(tipo="bem", descricao="Notebook"),
+                servico=ServicoFacts(natureza="continuado"),
+                complexidade=ComplexidadeFacts(),
             )
 
     def test_full_facts(self):
         facts = ContractFacts(
-            objeto={"tipo": "servico", "descricao": "Suporte técnico"},
-            servico={"natureza": "continuado"},
-            tic={"envolve": True, "subtipo": "sustentacao"},
-            aquisicao={"natureza": "servico"},
-            complexidade={"lgpd": True, "integracao": True, "legado": True},
-            mercado={"solucao_disponivel": "sim"},
-            valor={"estimado": 480000.00, "moeda": "BRL"},
-            contexto={"orgao": "Ministério X", "esfera": "federal"},
+            objeto=ObjetoFacts(tipo="servico", descricao="Suporte técnico"),
+            servico=ServicoFacts(natureza="continuado"),
+            tic=TicFacts(envolve=True, subtipo="sustentacao"),
+            aquisicao=AquisicaoFacts(natureza="servico"),
+            complexidade=ComplexidadeFacts(lgpd=True, integracao=True, legado=True),
+            mercado=MercadoFacts(solucao_disponivel="sim"),
+            valor=ValorFacts(estimado=480000.00, moeda="BRL"),
+            contexto=ContextoFacts(orgao="Ministério X", esfera="federal"),
         )
         assert facts.objeto.tipo == "servico"
+        assert facts.servico is not None
         assert facts.servico.natureza == "continuado"
+        assert facts.valor is not None
         assert facts.valor.estimado == 480000.00
 
     def test_serialization(self):
         facts = ContractFacts(
-            objeto={"tipo": "bem", "descricao": "Notebooks"},
-            complexidade={},
-            valor={"estimado": 100000.00},
+            objeto=ObjetoFacts(tipo="bem", descricao="Notebooks"),
+            complexidade=ComplexidadeFacts(),
+            valor=ValorFacts(estimado=100000.00),
         )
         data = facts.model_dump(mode="json")
         assert data["objeto"]["tipo"] == "bem"
