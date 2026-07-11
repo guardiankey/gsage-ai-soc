@@ -18,6 +18,23 @@ Usage (by the agent, via MCP)::
         },
     )
 
+Conditional fields (depends_on)::
+
+    Fields can declare ``depends_on`` to control visibility based on
+    another field's value.  Example::
+
+        {
+            "id": "subtipo_tic",
+            "field_type": "select",
+            "label": "Qual o tipo de solução de TIC?",
+            "options": [...],
+            "depends_on": {"field": "tic_envolve", "value": true}
+        }
+
+    The field is only shown when the referenced field has the specified value.
+    Initially only ``equals`` semantics are supported (the value must match
+    exactly).
+
 The agent never sees the form — it receives the user's responses as a
 ``[INTERACTION_RESPONSE]`` context block and can replan accordingly.
 """
@@ -150,6 +167,27 @@ class CollectUserInputTool(BaseTool):
                         "rows": {
                             "type": "integer",
                             "description": "Visible rows (textarea fields)",
+                        },
+                        "depends_on": {
+                            "type": "object",
+                            "description": (
+                                "Conditional visibility: field is only shown when "
+                                "the referenced field has the specified value. "
+                                "Initially only supports 'equals' semantics."
+                            ),
+                            "properties": {
+                                "field": {
+                                    "type": "string",
+                                    "description": "The 'id' of the field this depends on.",
+                                },
+                                "value": {
+                                    "description": (
+                                        "The value the referenced field must have "
+                                        "for this field to be visible."
+                                    ),
+                                },
+                            },
+                            "required": ["field", "value"],
                         },
                     },
                     "required": ["id", "field_type", "label"],
