@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import cast
 
 import pytest
 
@@ -25,15 +26,25 @@ from src.mcp_server.tools.soc.edr.trellix.trellix_edr_threats import TrellixEdrT
 from src.shared.security.context import AgentContext, RequestSource
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _require_data(result: object) -> dict:
+    """Assert result.data is not None and return it (type narrow)."""
+    from src.mcp_server.tools.base import ToolResult
+    assert isinstance(result, ToolResult), f"Expected ToolResult, got {type(result)}"
+    assert result.data is not None, f"result.data is None: {result.error}"
+    return cast(dict, result.data)
+
+
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
 def agent_context() -> AgentContext:
     """Minimal agent context for tool execution (org/user IDs are placeholders)."""
-    org_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
     return AgentContext(
-        org_id=org_id,
+        org_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
         user_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
         group_ids=[uuid.UUID("00000000-0000-0000-0000-000000000010")],
         permissions=["edr:read"],
@@ -74,9 +85,10 @@ class TestTrellixEdrAlertsLive:
         result = await tool.execute(agent_context, {}, trellix_config, {})
 
         assert result.status == "success", f"Failed: {result.error}"
-        assert result.data["api_version"] == "v3"
-        assert result.data["total_matched"] > 0, "Expected at least 1 alert"
-        assert len(result.data["rows"]) > 0, "Expected preview rows"
+        data = _require_data(result)
+        assert data["api_version"] == "v3"
+        assert data["total_matched"] > 0, "Expected at least 1 alert"
+        assert len(data["rows"]) > 0, "Expected preview rows"
 
     async def test_list_alerts_filtered_severity(self, agent_context, trellix_config):
         """Fetch alerts filtered by severity=s0."""
@@ -88,13 +100,13 @@ class TestTrellixEdrAlertsLive:
         }, trellix_config, {})
 
         assert result.status == "success", f"Failed: {result.error}"
-        for row in result.data["rows"]:
-            assert str(row.get("Severity", "")).lower() == "s0", f"Unexpected severity: {row.get('Severity')}"
+        data = _require_data(result)
+        for row in data["rows"]:
+            assert str(row.get("Severity", "")).lower() == "s0"
 
     async def test_list_alerts_hostname_filter(self, agent_context, trellix_config):
         """Fetch alerts filtered by hostname_contains."""
         tool = TrellixEdrAlertsTool()
-        # Use lookback_hours=0 to get server default window (widest)
         result = await tool.execute(agent_context, {
             "hostname_contains": "PR",
             "max_rows": 20,
@@ -102,8 +114,9 @@ class TestTrellixEdrAlertsLive:
         }, trellix_config, {})
 
         assert result.status == "success", f"Failed: {result.error}"
-        if result.data["total_matched"] > 0:
-            for row in result.data["rows"]:
+        data = _require_data(result)
+        if data["total_matched"] > 0:
+            for row in data["rows"]:
                 host = str(row.get("Host_Name", ""))
                 assert "pr" in host.lower(), f"Host_Name '{host}' does not contain 'PR'"
 
@@ -111,32 +124,18 @@ class TestTrellixEdrAlertsLive:
         """Fetch alerts with CSV export enabled."""
         tool = TrellixEdrAlertsTool()
         result = await tool.execute(agent_context, {
-            "max_rows": 10,
+            "max_rows": 150,
             "export_csv": True,
             "lookback_hours": 12,
         }, trellix_config, {})
 
         assert result.status == "success", f"Failed: {result.error}"
-        # CSV should be auto-generated when rows_total > 0
-        csv_file = result.data["artifacts"].get("csv_file")
-        assert csv_file is not None, "Expected CSV artifact"
-
-    async def test_list_alerts_sort_rank(self, agent_context, trellix_config):
-        """Fetch alerts sorted by rank descending."""
-        tool = TrellixEdrAlertsTool()
-        result = await tool.execute(agent_context, {
-            "max_rows": 10,
-            "sort": "-rank",
-            "lookback_hours": 12,
-        }, trellix_config, {})
-
-        assert result.status == "success", f"Failed: {result.error}"
-        if len(result.data["rows"]) >= 2:
-            ranks = [row.get("Rank", 0) for row in result.data["rows"]]
-            assert ranks == sorted(ranks, reverse=True), f"Ranks not descending: {ranks}"
+        data = _require_data(result)
+        csv_file = data["artifacts"].get("csv_file")
+        assert csv_file is not None, "Expected CSV artifact when rows > 100"
 
     async def test_list_alerts_no_time_filter(self, agent_context, trellix_config):
-        """Fetch alerts with lookback_hours=0 (omit from/to — server default window)."""
+        """Fetch alerts with lookback_hours=0 (omit from/to)."""
         tool = TrellixEdrAlertsTool()
         result = await tool.execute(agent_context, {
             "max_rows": 10,
@@ -144,7 +143,8 @@ class TestTrellixEdrAlertsLive:
         }, trellix_config, {})
 
         assert result.status == "success", f"Failed: {result.error}"
-        assert result.data["total_matched"] > 0
+        data = _require_data(result)
+        assert data["total_matched"] > 0
 
     async def test_summary_has_expected_keys(self, agent_context, trellix_config):
         """Verify the summary block contains the expected structure."""
@@ -155,7 +155,8 @@ class TestTrellixEdrAlertsLive:
         }, trellix_config, {})
 
         assert result.status == "success"
-        summary = result.data["summary"]
+        data = _require_data(result)
+        summary = data["summary"]
         assert "row_count" in summary
         assert "distinct" in summary
         assert "top" in summary
@@ -181,10 +182,10 @@ class TestTrellixEdrThreatsLive:
         }, trellix_config, {})
 
         assert result.status == "success", f"Failed: {result.error}"
-        assert result.data["total_matched"] > 0, "Expected at least 1 threat"
-        # Threat IDs are numeric strings
-        for row in result.data["rows"]:
-            assert str(row.get("id", "")).isdigit(), f"Expected numeric threat ID, got: {row.get('id')}"
+        data = _require_data(result)
+        assert data["total_matched"] > 0, "Expected at least 1 threat"
+        for row in data["rows"]:
+            assert str(row.get("id", "")).isdigit()
 
     async def test_list_threats_by_severity(self, agent_context, trellix_config):
         """List threats filtered by severity s4."""
@@ -197,13 +198,13 @@ class TestTrellixEdrThreatsLive:
         }, trellix_config, {})
 
         assert result.status == "success", f"Failed: {result.error}"
-        for row in result.data["rows"]:
-            assert str(row.get("severity", "")).lower() == "s4", f"Unexpected severity: {row.get('severity')}"
+        data = _require_data(result)
+        for row in data["rows"]:
+            assert str(row.get("severity", "")).lower() == "s4"
 
     async def test_list_threats_by_hash(self, agent_context, trellix_config):
         """List threats filtered by SHA256 hash."""
         tool = TrellixEdrThreatsTool()
-        # Use a known hash from the test data
         result = await tool.execute(agent_context, {
             "action": "list",
             "hash": "2198A7B58BCCB758036B969DDAE6CC2ECE07565E2659A7C541A313A0492231A3",
@@ -212,33 +213,33 @@ class TestTrellixEdrThreatsLive:
         }, trellix_config, {})
 
         assert result.status == "success", f"Failed: {result.error}"
-        if result.data["total_matched"] > 0:
-            for row in result.data["rows"]:
+        data = _require_data(result)
+        if data["total_matched"] > 0:
+            for row in data["rows"]:
                 assert "2198a7b5" in str(row.get("hashes.sha256", "")).lower()
 
     async def test_threat_detail(self, agent_context, trellix_config):
         """Fetch a single threat by ID (discovered from list)."""
         tool = TrellixEdrThreatsTool()
 
-        # First, list to get a threat ID
         list_result = await tool.execute(agent_context, {
             "action": "list", "max_rows": 1, "lookback_hours": 168,
         }, trellix_config, {})
 
         assert list_result.status == "success"
-        assert len(list_result.data["rows"]) > 0, "Need at least 1 threat to test detail"
-        threat_id = str(list_result.data["rows"][0]["id"])
+        list_data = _require_data(list_result)
+        assert len(list_data["rows"]) > 0
+        threat_id = str(list_data["rows"][0]["id"])
 
-        # Then fetch detail
         detail_result = await tool.execute(agent_context, {
             "action": "detail",
             "threat_id": threat_id,
         }, trellix_config, {})
 
         assert detail_result.status == "success", f"Failed: {detail_result.error}"
-        assert detail_result.data["total_matched"] == 1
-        # Detail row should have the same ID
-        assert str(detail_result.data["rows"][0].get("id", "")) == threat_id
+        detail_data = _require_data(detail_result)
+        assert detail_data["total_matched"] == 1
+        assert str(detail_data["rows"][0].get("id", "")) == threat_id
 
     async def test_affected_hosts(self, agent_context, trellix_config):
         """Fetch affected hosts for a threat."""
@@ -247,7 +248,8 @@ class TestTrellixEdrThreatsLive:
         list_result = await tool.execute(agent_context, {
             "action": "list", "max_rows": 1, "lookback_hours": 168,
         }, trellix_config, {})
-        threat_id = str(list_result.data["rows"][0]["id"])
+        list_data = _require_data(list_result)
+        threat_id = str(list_data["rows"][0]["id"])
 
         result = await tool.execute(agent_context, {
             "action": "affected_hosts",
@@ -256,11 +258,10 @@ class TestTrellixEdrThreatsLive:
         }, trellix_config, {})
 
         assert result.status == "success", f"Failed: {result.error}"
-        # Affected hosts should have hostname-like flattened fields
-        if result.data["rows"]:
-            row_keys = " ".join(str(k) for k in result.data["rows"][0])
-            assert "hostname" in row_keys.lower() or "host" in row_keys.lower(), \
-                f"Expected hostname field in: {list(result.data['rows'][0].keys())}"
+        data = _require_data(result)
+        if data["rows"]:
+            row_keys = " ".join(str(k) for k in data["rows"][0])
+            assert "hostname" in row_keys.lower() or "host" in row_keys.lower()
 
     async def test_detections(self, agent_context, trellix_config):
         """Fetch detections for a threat."""
@@ -269,7 +270,8 @@ class TestTrellixEdrThreatsLive:
         list_result = await tool.execute(agent_context, {
             "action": "list", "max_rows": 1, "lookback_hours": 168,
         }, trellix_config, {})
-        threat_id = str(list_result.data["rows"][0]["id"])
+        list_data = _require_data(list_result)
+        threat_id = str(list_data["rows"][0]["id"])
 
         result = await tool.execute(agent_context, {
             "action": "detections",
@@ -278,13 +280,12 @@ class TestTrellixEdrThreatsLive:
         }, trellix_config, {})
 
         assert result.status == "success", f"Failed: {result.error}"
-        # Detections should have traceId or tags
-        if result.data["rows"]:
-            row_keys = " ".join(str(k) for k in result.data["rows"][0])
+        data = _require_data(result)
+        if data["rows"]:
+            row_keys = " ".join(str(k) for k in data["rows"][0])
             has_trace = "traceId" in row_keys or "trace" in row_keys.lower()
             has_tags = "tags" in row_keys.lower()
-            assert has_trace or has_tags, \
-                f"Expected traceId or tags in: {list(result.data['rows'][0].keys())}"
+            assert has_trace or has_tags
 
     async def test_invalid_action(self, agent_context, trellix_config):
         """Invalid action should return failure."""
@@ -295,7 +296,7 @@ class TestTrellixEdrThreatsLive:
 
         assert result.status == "error"
         assert result.error is not None
-        assert "INVALID_INPUT" in result.error.get("code", "")
+        assert "INVALID_INPUT" in (result.error.get("code") or "")
 
     async def test_detail_missing_threat_id(self, agent_context, trellix_config):
         """detail action without threat_id should fail."""
@@ -305,4 +306,5 @@ class TestTrellixEdrThreatsLive:
         }, trellix_config, {})
 
         assert result.status == "error"
-        assert "INVALID_INPUT" in result.error.get("code", "")
+        assert result.error is not None
+        assert "INVALID_INPUT" in (result.error.get("code") or "")

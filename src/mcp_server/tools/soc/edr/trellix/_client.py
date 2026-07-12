@@ -516,3 +516,28 @@ class TrellixEDRClient:
         }
         resp = await self._request("GET", url, params=params)
         return resp.json()
+
+    # ── Trace activity (search-service) ─────────────────────────────────────
+
+    async def get_trace_activity(
+        self,
+        *,
+        trace_id: str,
+        ma_guid: str,
+        detection_date_epoch_ms: int,
+    ) -> dict:
+        """Fetch the full activity timeline for a trace.
+
+        Uses the regional SOC search-service endpoint (same base as v1).
+        Returns the main-activity-by-trace-id response with ``items[]``
+        containing each event in the trace chain (process creations,
+        file modifications, image loads, etc.).
+        """
+        url = f"{self._base_v1}/search-service/api/v1/traces/main-activity-by-trace-id"
+        params: dict[str, str | int] = {
+            "detectionDate": detection_date_epoch_ms,
+            "maGuid": ma_guid,
+            "traceId": trace_id,
+        }
+        resp = await self._request("GET", url, params=params)
+        return resp.json()

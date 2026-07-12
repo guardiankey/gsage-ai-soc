@@ -109,6 +109,76 @@ async def test_mermaid_timeline_preserves_already_correct() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mermaid_timeline_date_with_time() -> None:
+    """Date + time spec (contains space): normalise the time portion only."""
+    f = MermaidTimelineTimeFilter()
+    text = "timeline\n  2026-07-10 12:38 UTC : evento detectado\n"
+    out = await f.apply(text, _ctx())
+    assert "2026-07-10 12h38m UTC : evento detectado" in out
+
+
+@pytest.mark.asyncio
+async def test_mermaid_timeline_date_with_time_range() -> None:
+    """Date + time range: normalise both time endpoints, preserve date."""
+    f = MermaidTimelineTimeFilter()
+    text = "timeline\n  2026-07-11 11:05-13:22 UTC : janela DNS\n"
+    out = await f.apply(text, _ctx())
+    assert "2026-07-11 11h05m-13h22m UTC : janela DNS" in out
+
+
+@pytest.mark.asyncio
+async def test_mermaid_timeline_date_only_unchanged() -> None:
+    """Plain date (no time) is left untouched."""
+    f = MermaidTimelineTimeFilter()
+    text = "timeline\n  2026-07-02 : PR7014453<br>wab.exe modificado\n"
+    out = await f.apply(text, _ctx())
+    assert "2026-07-02 : PR7014453" in out
+    assert ":" not in out.split(" : ")[0]  # no colon in time spec
+
+
+@pytest.mark.asyncio
+async def test_mermaid_timeline_text_time_spec_unchanged() -> None:
+    """Textual time spec with spaces (e.g. 'agora') is left untouched."""
+    f = MermaidTimelineTimeFilter()
+    text = "timeline\n  2026-07-11 agora : wab.exe nao esta mais rodando\n"
+    out = await f.apply(text, _ctx())
+    assert "2026-07-11 agora : wab.exe nao esta mais rodando" in out
+
+
+@pytest.mark.asyncio
+async def test_mermaid_timeline_incident_example() -> None:
+    """Real-world incident timeline — the example from the bug report."""
+    f = MermaidTimelineTimeFilter()
+    text = (
+        "timeline\n"
+        "    title Linha do Tempo — Incidente wab.exe\n"
+        "    2026-07-02 : PR7014453<br>wab.exe modificado (1KB maior)<br>Criado em C:\\Program Files x86\n"
+        "    2026-07-10 12:38 UTC : COBRE detectado<br>ppterreol.bat rouba autologin\n"
+        "    2026-07-11 11:05-13:22 UTC : COBRE (DNS Server)<br>wab.exe ativo<br>DNS queries + SMB\n"
+        "    2026-07-11 19:35 UTC : COBRE reboota\n"
+        "    2026-07-11 agora : wab.exe não está mais rodando<br>Mas arquivos persistem\n"
+    )
+    out = await f.apply(text, _ctx())
+    # Date-only line: untouched
+    assert "2026-07-02 : PR7014453" in out
+    # Date+time: colon in time replaced
+    assert "2026-07-10 12h38m UTC : COBRE detectado" in out
+    # Date+time range: both colons replaced
+    assert "2026-07-11 11h05m-13h22m UTC : COBRE (DNS Server)" in out
+    # Date+time: colon replaced
+    assert "2026-07-11 19h35m UTC : COBRE reboota" in out
+    # Textual time spec: untouched
+    assert "2026-07-11 agora : wab.exe" in out
+    # Title line: untouched
+    assert "title Linha do Tempo" in out
+    # No colon remains in any time spec
+    for line in out.splitlines():
+        if " : " in line and not line.strip().startswith(("title", "section")):
+            before = line.split(" : ")[0].strip()
+            assert ":" not in before, f"Colon in time spec: {before!r}"
+
+
+@pytest.mark.asyncio
 async def test_mermaid_timeline_with_leading_comment() -> None:
     f = MermaidTimelineTimeFilter()
     text = "%% comment\ntimeline\n  09:05 : evento\n"

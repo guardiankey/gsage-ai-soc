@@ -33,7 +33,8 @@ _ACTION_LIST = "list"
 _ACTION_DETAIL = "detail"
 _ACTION_AFFECTED_HOSTS = "affected_hosts"
 _ACTION_DETECTIONS = "detections"
-_VALID_ACTIONS = (_ACTION_LIST, _ACTION_DETAIL, _ACTION_AFFECTED_HOSTS, _ACTION_DETECTIONS)
+_ACTION_TRACE = "trace"
+_VALID_ACTIONS = (_ACTION_LIST, _ACTION_DETAIL, _ACTION_AFFECTED_HOSTS, _ACTION_DETECTIONS, _ACTION_TRACE)
 
 # ── Default group-by keys per action ────────────────────────────────────────
 
@@ -46,6 +47,36 @@ _DEFAULT_AFFECTED_HOST_GROUP_KEYS = (
 _DEFAULT_DETECTION_GROUP_KEYS = (
     "severity", "host.hostname", "host.hostOs",
 )
+
+
+def _coerce_epoch_ms(value: object) -> Optional[int]:
+    """Coerce a trace detection date to epoch milliseconds.
+
+    Accepts:
+    - ``int`` — already epoch milliseconds (returned as-is if > 10¹¹).
+    - ``str`` — ISO 8601 (e.g. ``"2026-07-10T12:24:35Z"``).
+    - ``str`` — numeric epoch milliseconds.
+    """
+    if isinstance(value, int):
+        return value if value > 10**11 else value * 1000  # seconds → ms fallback
+    if isinstance(value, float):
+        return int(value) if value > 10**11 else int(value * 1000)
+    if isinstance(value, str):
+        stripped = value.strip()
+        # Try numeric first
+        try:
+            num = int(stripped)
+            return num if num > 10**11 else num * 1000
+        except ValueError:
+            pass
+        # Try ISO 8601
+        try:
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(stripped.replace("Z", "+00:00"))
+            return int(dt.timestamp() * 1000)
+        except (ValueError, OSError):
+            pass
+    return None
 
 
 class TrellixEdrThreatsTool(BaseTool):
@@ -107,7 +138,9 @@ class TrellixEdrThreatsTool(BaseTool):
                     "'list' = paginated threat list, "
                     "'detail' = single threat by ID, "
                     "'affected_hosts' = hosts affected by a threat, "
-                    "'detections' = individual detections for a threat."
+                    "'detections' = individual detections for a threat, "
+                    "'trace' = full process activity timeline for a specific trace "
+                    "(requires trace_id, ma_guid, and detection_date_epoch_ms)."
                 ),
             },
             "threat_id": {
@@ -115,6 +148,28 @@ class TrellixEdrThreatsTool(BaseTool):
                 "description": (
                     "Threat ID (numeric string, e.g. '9257473'). "
                     "Required for action=detail|affected_hosts|detections."
+                ),
+            },
+            "trace_id": {
+                "type": "string",
+                "description": (
+                    "Trace UUID (e.g. from a detection's traceId or alert's Root_Trace_Id). "
+                    "Required for action=trace."
+                ),
+            },
+            "ma_guid": {
+                "type": "string",
+                "description": (
+                    "Trellix agent GUID (MAGUID) of the host. "
+                    "Required for action=trace."
+                ),
+            },
+            "detection_date_epoch_ms": {
+                "type": ["integer", "string"],
+                "description": (
+                    "Detection date for the trace. Accepts epoch milliseconds (e.g. 1783686275000) "
+                    "or ISO 8601 string (e.g. '2026-07-10T12:24:35Z'). "
+                    "Get this from a detection's 'firstDetected' field. Required for action=trace."
                 ),
             },
             "max_rows": {
@@ -146,7 +201,8 @@ class TrellixEdrThreatsTool(BaseTool):
             },
             "severity": {
                 "type": "string",
-                "description": "Filter by severity (e.g. 's0', 's1', ..., 's5').",
+                "enum": ["s0", "s1", "s2", "s3", "s4", "s5"],
+                "description": "Filter by severity level.",
             },
             "status": {
                 "type": "string",
@@ -178,6 +234,15 @@ class TrellixEdrThreatsTool(BaseTool):
                 "type": "boolean",
                 "default": False,
                 "description": "Export full results as JSON artifact.",
+            },
+            "include_trace": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "For action='detections': enrich each detection (up to 20) with the full "
+                    "process activity timeline. Adds 'trace_items' and 'trace_items_count' fields. "
+                    "Uses traceId + host.aGuid + firstDetected from each detection."
+                ),
             },
             "group_by": {
                 "type": "array",
@@ -221,6 +286,21 @@ class TrellixEdrThreatsTool(BaseTool):
                 f"'threat_id' is required for action='{action}'.",
             )
 
+        # Trace-specific params (auto-detect epoch ms vs ISO 8601)
+        trace_id_param = params.get("trace_id")
+        ma_guid = params.get("ma_guid")
+        detection_date_raw = params.get("detection_date_epoch_ms")
+        detection_date_epoch_ms: Optional[int] = None
+        if action == _ACTION_TRACE:
+            if detection_date_raw is not None:
+                detection_date_epoch_ms = _coerce_epoch_ms(detection_date_raw)
+            if not trace_id_param or not ma_guid or detection_date_epoch_ms is None:
+                return self._failure(
+                    "INVALID_INPUT",
+                    "'trace_id', 'ma_guid', and 'detection_date_epoch_ms' (epoch ms or ISO 8601) "
+                    "are required for action='trace'.",
+                )
+
         max_rows = Q.clamp_max_rows(params.get("max_rows"))
         page_limit = max(1, min(int(params.get("page_limit", 100) or 100), 500))
         lookback_h = int(params.get("lookback_hours", 168) or 168)
@@ -257,9 +337,17 @@ class TrellixEdrThreatsTool(BaseTool):
                     rows, total_rc, filename_prefix = await self._get_affected_hosts(
                         client, threat_id, max_rows, page_limit,  # type: ignore[arg-type]
                     )
-                else:  # _ACTION_DETECTIONS
+                elif action == _ACTION_DETECTIONS:
                     rows, total_rc, filename_prefix = await self._get_detections(
                         client, threat_id, max_rows, page_limit,  # type: ignore[arg-type]
+                    )
+                else:  # _ACTION_TRACE
+                    assert detection_date_epoch_ms is not None  # validated above
+                    rows, total_rc, filename_prefix = await self._get_trace(
+                        client,
+                        trace_id=trace_id_param,  # type: ignore[arg-type]
+                        ma_guid=ma_guid,  # type: ignore[arg-type]
+                        detection_date_epoch_ms=detection_date_epoch_ms,
                     )
         except TrellixEDRError as exc:
             elapsed = int((time.monotonic() - t0) * 1000)
@@ -464,6 +552,68 @@ class TrellixEdrThreatsTool(BaseTool):
             offset += len(data)
 
         return all_rows, total_rc, f"trellix_edr_threats_{threat_id}_detections"
+
+    # ── Action: trace ───────────────────────────────────────────────────────
+
+    async def _get_trace(
+        self,
+        client: TrellixEDRClient,
+        *,
+        trace_id: str,
+        ma_guid: str,
+        detection_date_epoch_ms: int,
+    ) -> tuple[list[dict], int, str]:
+        """Fetch the full process activity timeline for a trace."""
+        body = await client.get_trace_activity(
+            trace_id=trace_id,
+            ma_guid=ma_guid,
+            detection_date_epoch_ms=detection_date_epoch_ms,
+        )
+        items = (
+            body.get("data", {})
+            .get("attributes", {})
+            .get("items", [])
+        )
+        if not isinstance(items, list):
+            return [], 0, f"trellix_edr_trace_{trace_id[:8]}"
+
+        rows: list[dict] = []
+        for item in items:
+            flat: dict[str, object] = {
+                "eventType": item.get("eventType", "?"),
+                "processName": item.get("processName", ""),
+                "host": item.get("host", ""),
+            }
+            cmd = item.get("cmdLine", "")
+            if cmd:
+                flat["cmdLine"] = cmd
+            sev = item.get("severity", "")
+            if sev:
+                flat["severity"] = sev
+            tags = item.get("tags", [])
+            if tags:
+                flat["tags"] = ", ".join(str(t) for t in tags)
+            pid = item.get("pid")
+            if pid is not None:
+                flat["pid"] = pid
+            ppid = item.get("ppid")
+            if ppid is not None:
+                flat["ppid"] = ppid
+            user = item.get("user", {})
+            if isinstance(user, dict) and user.get("name"):
+                flat["user"] = user["name"]
+            dsets = item.get("detectionsSets", [])
+            if dsets:
+                flat["detectionsSets"] = ", ".join(
+                    f"{ds.get('sev','?')}:{','.join(ds.get('tags',[])[:3])}"
+                    for ds in dsets[:3] if isinstance(ds, dict)
+                )
+            pfa = item.get("procFileAttrs", {})
+            if isinstance(pfa, dict) and pfa.get("sha256"):
+                flat["sha256"] = pfa["sha256"]
+            rows.append(flat)
+
+        return rows, len(rows), f"trellix_edr_trace_{trace_id[:8]}"
 
     # ── Flatten helpers ─────────────────────────────────────────────────────
 

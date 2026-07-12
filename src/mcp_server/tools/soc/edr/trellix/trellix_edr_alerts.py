@@ -112,7 +112,8 @@ class TrellixEdrAlertsTool(BaseTool):
             },
             "severity": {
                 "type": "string",
-                "description": "Filter by severity (e.g. 's0', 's1', 's2', 's3', 's4', 's5').",
+                "enum": ["s0", "s1", "s2", "s3", "s4", "s5"],
+                "description": "Filter by severity level."
             },
             "hostname_contains": {
                 "type": "string",
@@ -134,11 +135,19 @@ class TrellixEdrAlertsTool(BaseTool):
                 "type": "string",
                 "description": "Filter by Root_Trace_Id (exact match).",
             },
+            "include_trace": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Enrich each alert (up to 50) with the full process activity "
+                    "timeline from the trace endpoint. Adds a 'trace_items' field "
+                    "with eventType, processName, cmdLine, severity, and MITRE tags."
+                ),
+            },
             "sort": {
                 "type": "string",
                 "enum": ["rank", "-rank"],
-                "default": "-rank",
-                "description": "Sort order: 'rank' (ascending) or '-rank' (descending, default).",
+                "description": "Sort order: 'rank' (ascending) or '-rank' (descending). Omit to use server default ordering."
             },
             "export_csv": {
                 "type": "boolean",
@@ -187,7 +196,8 @@ class TrellixEdrAlertsTool(BaseTool):
         proc_contains = params.get("process_name_contains")
         activity = params.get("activity")
         root_trace = params.get("root_trace_id")
-        sort = params.get("sort", "-rank")
+        sort = params.get("sort")  # optional — only send when explicitly requested
+        include_trace = bool(params.get("include_trace", False))
         export_csv = bool(params.get("export_csv", False))
         export_json = bool(params.get("export_json", False))
         group_by = params.get("group_by") or list(_DEFAULT_ALERT_GROUP_KEYS)
@@ -201,18 +211,51 @@ class TrellixEdrAlertsTool(BaseTool):
             from_ms = now_ms - (lookback_h * 3600 * 1000)
             to_ms = now_ms
 
-        # ── 3. Fetch alerts (paginated) ────────────────────────────────
+        # ── 3. Fetch alerts (paginated) + filter + enrich ──────────────
         try:
             async with Q.build_client(config) as client:
-                rows, total_resource_count = await self._fetch_all_pages(
-                    client,
-                    page_limit=page_limit,
-                    max_rows=max_rows,
-                    from_ms=from_ms,
-                    to_ms=to_ms,
-                    sort=sort,
-                    filter_str=None,
+                try:
+                    rows, total_resource_count = await self._fetch_all_pages(
+                        client,
+                        page_limit=page_limit,
+                        max_rows=max_rows,
+                        from_ms=from_ms,
+                        to_ms=to_ms,
+                        sort=sort,
+                        filter_str=None,
+                    )
+                except TrellixEDRError as exc:
+                    # Retry without time filter on HTTP 400 (API flakiness)
+                    if exc.status_code == 400 and (from_ms is not None or to_ms is not None):
+                        log.warning(
+                            "trellix_edr_alerts: HTTP 400 with time filter — retrying without from/to"
+                        )
+                        rows, total_resource_count = await self._fetch_all_pages(
+                            client,
+                            page_limit=page_limit,
+                            max_rows=max_rows,
+                            from_ms=None,
+                            to_ms=None,
+                            sort=sort,
+                            filter_str=None,
+                        )
+                    else:
+                        raise
+
+                # ── 4. Client-side filtering ───────────────────────────
+                rows = self._apply_filters(
+                    rows,
+                    severity=severity,
+                    host_contains=host_contains,
+                    host_equals=host_equals,
+                    proc_contains=proc_contains,
+                    activity=activity,
+                    root_trace=root_trace,
                 )
+
+                # ── 5. Enrich with traces (optional, up to 50 alerts) ──
+                if include_trace and rows:
+                    await self._enrich_traces(client, rows)
         except TrellixEDRError as exc:
             elapsed = int((time.monotonic() - t0) * 1000)
             return self._failure(
@@ -225,23 +268,13 @@ class TrellixEdrAlertsTool(BaseTool):
             elapsed = int((time.monotonic() - t0) * 1000)
             return self._failure("INTERNAL_ERROR", str(exc), execution_time_ms=elapsed)
 
-        # ── 4. Client-side filtering ───────────────────────────────────
-        rows = self._apply_filters(
-            rows,
-            severity=severity,
-            host_contains=host_contains,
-            host_equals=host_equals,
-            proc_contains=proc_contains,
-            activity=activity,
-            root_trace=root_trace,
-        )
         truncated = len(rows) >= max_rows
         total_after_filter = len(rows)
 
-        # ── 5. Summarise ───────────────────────────────────────────────
+        # ── 6. Summarise ───────────────────────────────────────────────
         summary = Q.summarize(rows, group_by=group_by, top_n=top_n)
 
-        # ── 6. Build agent payload (preview + CSV/JSON artifacts) ──────
+        # ── 7. Build agent payload (preview + CSV/JSON artifacts) ──────
         agent_payload = await build_agent_payload(
             self,
             rows=rows,
@@ -269,6 +302,85 @@ class TrellixEdrAlertsTool(BaseTool):
             },
             execution_time_ms=elapsed,
         )
+
+    # ── Trace enrichment ─────────────────────────────────────────────────────
+
+    _MAX_TRACE_ENRICH = 50  # max alerts to enrich with trace data
+
+    async def _enrich_traces(
+        self,
+        client: TrellixEDRClient,
+        rows: list[dict],
+    ) -> None:
+        """Fetch trace activity for the first N rows and attach as ``trace_items``.
+
+        Modifies ``rows`` in place.  Each call to the trace endpoint adds ~1 s
+        of latency, so we cap at ``_MAX_TRACE_ENRICH`` alerts.
+        """
+        enriched = 0
+        for row in rows[: self._MAX_TRACE_ENRICH]:
+            ma_guid = str(row.get("MAGUID", ""))
+            root_trace = str(row.get("Root_Trace_Id", ""))
+            detection_str = str(row.get("DetectionDate", ""))
+
+            if not ma_guid or not root_trace or not detection_str:
+                continue
+
+            # Convert DetectionDate (ISO 8601) → epoch milliseconds
+            try:
+                from datetime import datetime, timezone
+
+                dt = datetime.fromisoformat(detection_str.replace("Z", "+00:00"))
+                epoch_ms = int(dt.timestamp() * 1000)
+            except (ValueError, OSError):
+                continue
+
+            try:
+                body = await client.get_trace_activity(
+                    trace_id=root_trace,
+                    ma_guid=ma_guid,
+                    detection_date_epoch_ms=epoch_ms,
+                )
+            except TrellixEDRError:
+                continue
+
+            items = (
+                body.get("data", {})
+                .get("attributes", {})
+                .get("items", [])
+            )
+            if not isinstance(items, list):
+                continue
+
+            # Compact representation: keep only the most relevant fields
+            compact: list[dict] = []
+            for item in items:
+                entry: dict[str, object] = {
+                    "eventType": item.get("eventType", "?"),
+                    "processName": item.get("processName", ""),
+                    "host": item.get("host", ""),
+                }
+                cmd = item.get("cmdLine", "")
+                if cmd:
+                    entry["cmdLine"] = cmd
+                sev = item.get("severity", "")
+                if sev:
+                    entry["severity"] = sev
+                tags = item.get("tags", [])
+                if tags:
+                    entry["tags"] = tags[:5]  # top 5 tags
+                dsets = item.get("detectionsSets", [])
+                if dsets:
+                    entry["detectionsSets"] = [
+                        {"severity": ds.get("sev", ""), "tags": ds.get("tags", [])[:5]}
+                        for ds in dsets[:3]
+                        if isinstance(ds, dict)
+                    ]
+                compact.append(entry)
+
+            row["trace_items"] = compact
+            row["trace_items_count"] = len(compact)
+            enriched += 1
 
     # ── Pagination helper ────────────────────────────────────────────────────
 

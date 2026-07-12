@@ -935,6 +935,8 @@ async def list_messages(
                 ).strip()
                 if has_interaction_response and not content_str:
                     content_str = "📋 Form received."
+                elif not content_str:
+                    continue  # skip empty user messages
 
             # Assistant messages with no textual content are tool-call-only messages.
             # Enrich them with a summary of the tool(s) being invoked.
