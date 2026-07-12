@@ -549,7 +549,7 @@ def build_processes_payload(
     projections: list[dict] = []
     if include_host_info:
         projections.append(
-            {"name": "HostInfo", "outputs": ["hostname", "ip_address", "os_name"]}
+            {"name": "HostInfo", "outputs": ["hostname", "ip_address", "os"]}
         )
     projections.append({"name": collector, "outputs": base_outputs})
 
@@ -609,7 +609,7 @@ def build_host_locator_payload(
         "projections": [
             {
                 "name": "HostInfo",
-                "outputs": ["hostname", "ip_address", "os_name", "os_version"],
+                "outputs": ["hostname", "ip_address", "os"],
             },
         ],
         "condition": {"or": [{"and": conditions}]},

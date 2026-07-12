@@ -311,6 +311,7 @@ class TrellixEdrThreatsTool(BaseTool):
         sort = params.get("sort", "-rank")
         export_csv = bool(params.get("export_csv", False))
         export_json = bool(params.get("export_json", False))
+        include_trace = bool(params.get("include_trace", False))
         group_by = params.get("group_by") or None
         top_n = int(params.get("top_n", 10) or 10)
 
@@ -349,6 +350,10 @@ class TrellixEdrThreatsTool(BaseTool):
                         ma_guid=ma_guid,  # type: ignore[arg-type]
                         detection_date_epoch_ms=detection_date_epoch_ms,
                     )
+
+                # ── Enrich detections with trace data ──────────────────
+                if include_trace and action == _ACTION_DETECTIONS and rows:
+                    await self._enrich_detections_with_traces(client, rows)
         except TrellixEDRError as exc:
             elapsed = int((time.monotonic() - t0) * 1000)
             return self._failure(
@@ -614,6 +619,89 @@ class TrellixEdrThreatsTool(BaseTool):
             rows.append(flat)
 
         return rows, len(rows), f"trellix_edr_trace_{trace_id[:8]}"
+
+    # ── Detection trace enrichment ───────────────────────────────────────────
+
+    _MAX_DETECTION_TRACE_ENRICH = 20  # max detections to enrich with trace
+
+    async def _enrich_detections_with_traces(
+        self,
+        client: TrellixEDRClient,
+        rows: list[dict],
+    ) -> None:
+        """Fetch trace activity for each detection and attach ``trace_items``.
+
+        Modifies ``rows`` in place.  Uses ``traceId``, ``host.aGuid``, and
+        ``firstDetected`` from each detection row to call the trace endpoint.
+        Individual failures are silently skipped.
+        """
+        for row in rows[: self._MAX_DETECTION_TRACE_ENRICH]:
+            trace_id = str(row.get("traceId", ""))
+            ma_guid = str(row.get("host.aGuid", ""))
+            first_detected = str(row.get("firstDetected", ""))
+
+            if not trace_id or not ma_guid or not first_detected:
+                continue
+
+            epoch_ms = _coerce_epoch_ms(first_detected)
+            if epoch_ms is None:
+                continue
+
+            try:
+                body = await client.get_trace_activity(
+                    trace_id=trace_id,
+                    ma_guid=ma_guid,
+                    detection_date_epoch_ms=epoch_ms,
+                )
+            except TrellixEDRError:
+                continue
+
+            items = (
+                body.get("data", {})
+                .get("attributes", {})
+                .get("items", [])
+            )
+            if not isinstance(items, list):
+                continue
+
+            compact: list[dict] = []
+            for item in items:
+                entry: dict[str, object] = {
+                    "eventType": item.get("eventType", "?"),
+                    "processName": item.get("processName", ""),
+                    "host": item.get("host", ""),
+                }
+                cmd = item.get("cmdLine", "")
+                if cmd:
+                    entry["cmdLine"] = cmd
+                sev = item.get("severity", "")
+                if sev:
+                    entry["severity"] = sev
+                tags = item.get("tags", [])
+                if tags:
+                    entry["tags"] = tags[:5]
+                dsets = item.get("detectionsSets", [])
+                if dsets:
+                    entry["detectionsSets"] = [
+                        {"severity": ds.get("sev", ""), "tags": ds.get("tags", [])[:5]}
+                        for ds in dsets[:3]
+                        if isinstance(ds, dict)
+                    ]
+                compact.append(entry)
+
+            row["trace_items"] = compact
+            row["trace_items_count"] = len(compact)
+
+            # Extract the first meaningful command line to top-level for easy access
+            for entry in compact:
+                cmd = entry.get("cmdLine", "")
+                if cmd and str(entry.get("eventType", "")) in (
+                    "Process Created", "Script Executed", "Command Executed",
+                ):
+                    row["cmdline"] = cmd
+                    if entry.get("processName"):
+                        row["processName"] = entry["processName"]
+                    break
 
     # ── Flatten helpers ─────────────────────────────────────────────────────
 
