@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any, Iterable, Literal, Optional
 
 from src.mcp_server.tools.result_export import (
@@ -42,6 +43,173 @@ def is_retryable_error(exc: "TrellixEDRError") -> bool:
     if exc.status_code in TRELLIX_RETRYABLE_STATUS_CODES:
         return True
     return False
+
+
+# ── Timestamp normalization ─────────────────────────────────────────────────
+
+# Regex to detect ISO 8601 timestamps (with T separator, optional Z/+offset
+# and optional milliseconds). Capture groups:
+#   1: YYYY-MM-DD
+#   2: HH:MM:SS
+#   3: .SSS (milliseconds, optional)
+#   4: Z / +HH:MM / -HH:MM suffix (optional)
+_ISO_TS_RE = re.compile(
+    r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})?"
+)
+
+# Regex to find quoted timestamp values in v2 query strings, specifically
+# after "before" or "after" operators (case-insensitive).
+# Capture groups:
+#   1: the operator and whitespace (e.g. "before ")
+#   2: the inner quoted value
+_V2_QUOTED_TS_RE = re.compile(
+    r'(\b(?:before|after)\s)"([^"]*)"',
+    re.IGNORECASE,
+)
+
+
+def normalize_timestamp(value: Any) -> Optional[str]:
+    """Normalise a timestamp value to the format expected by the Trellix API.
+
+    The Trellix EDR API (v1 Active Response and v2 realtime search) expects
+    timestamps in ``YYYY-MM-DD HH:mm:ss`` format (space between date and time,
+    **no** timezone suffix such as ``Z`` or ``+00:00``).  Timestamps are
+    interpreted as UTC by the API.
+
+    This function accepts several common formats and normalises them:
+
+    * ``"2026-07-11T03:00:00Z"`` → ``"2026-07-11 03:00:00"``
+    * ``"2026-07-11T03:00:00.000Z"`` → ``"2026-07-11 03:00:00"``
+    * ``"2026-07-11T03:00:00+00:00"`` → ``"2026-07-11 03:00:00"``
+    * ``1783738800`` (epoch seconds) → ``"2026-07-11 03:00:00"``
+    * ``"2026-07-11 03:00:00"`` → returned as-is (already valid)
+
+    Returns ``None`` when the value cannot be parsed as a timestamp.
+    """
+    if value is None:
+        return None
+
+    # Already a string in the expected format? Return as-is.
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+
+        # If it already looks like "YYYY-MM-DD HH:MM:SS", return unchanged.
+        if re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", stripped):
+            return stripped
+
+        # Try ISO 8601 with T separator (e.g. "2026-07-11T03:00:00Z").
+        m = _ISO_TS_RE.match(stripped)
+        if m:
+            date_part = m.group(1)
+            time_part = m.group(2)
+            # Discard milliseconds and timezone suffix — Trellix doesn't
+            # accept them and interprets everything as UTC anyway.
+            return f"{date_part} {time_part}"
+
+        # Try epoch (numeric string).
+        try:
+            num = int(stripped)
+        except ValueError:
+            pass
+        else:
+            return _epoch_to_trellix(num)
+
+        # Try ISO 8601 via datetime.fromisoformat as a last resort.
+        try:
+            from datetime import datetime, timezone
+            # Replace Z with +00:00 for fromisoformat compatibility (Python < 3.11).
+            dt = datetime.fromisoformat(stripped.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, OSError):
+            return None
+
+    # Numeric epoch (int or float).
+    if isinstance(value, (int, float)):
+        return _epoch_to_trellix(int(value))
+
+    return None
+
+
+def _epoch_to_trellix(epoch_value: int) -> str:
+    """Convert an epoch value (seconds or milliseconds) to Trellix format."""
+    from datetime import datetime, timezone
+    # If the value is > 10^11, treat as milliseconds.
+    if epoch_value > 10**11:
+        epoch_value = epoch_value // 1000
+    return datetime.fromtimestamp(epoch_value, tz=timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+
+def normalize_v1_payload_timestamps(payload: dict) -> dict:
+    """Walk a v1 Active Response payload and normalise timestamp values.
+
+    Leaf predicates that use ``BEFORE``, ``AFTER``, ``GREATER_EQUAL``, or
+    ``LESS_EQUAL`` operators on timestamp fields (``started_at``,
+    ``created_at``, ``finished_at``, ``last_write``, ``installdate``, etc.)
+    have their ``value`` field normalised via :func:`normalize_timestamp`.
+    The payload is modified in place and also returned for convenience.
+    """
+    _TS_FIELDS: frozenset[str] = frozenset({
+        "started_at", "created_at", "finished_at", "last_write",
+        "installdate", "time", "detection_date",
+    })
+    _TS_OPS: frozenset[str] = frozenset({
+        "BEFORE", "AFTER", "GREATER_EQUAL", "LESS_EQUAL",
+        "GREATER_THAN", "LESS_THAN",
+    })
+
+    try:
+        or_clauses = payload.get("condition", {}).get("or", [])
+    except AttributeError:
+        return payload
+
+    for group in or_clauses:
+        if not isinstance(group, dict):
+            continue
+        and_clauses = group.get("and", [])
+        if not isinstance(and_clauses, list):
+            continue
+        for leaf in and_clauses:
+            if not isinstance(leaf, dict):
+                continue
+            op = leaf.get("op")
+            output = leaf.get("output")
+            val = leaf.get("value")
+            if (
+                isinstance(op, str) and op in _TS_OPS
+                and isinstance(output, str)
+                and output.lower() in {f.lower() for f in _TS_FIELDS}
+                and val is not None
+            ):
+                normalized = normalize_timestamp(val)
+                if normalized is not None:
+                    leaf["value"] = normalized
+
+    return payload
+
+
+def normalize_v2_query_timestamps(query: str) -> str:
+    """Normalise timestamp values inside a v2 SQL-like query string.
+
+    Finds quoted values that appear after ``before`` or ``after`` operators
+    and normalises ISO 8601 / epoch timestamps to ``YYYY-MM-DD HH:mm:ss``.
+
+    Returns the query unchanged if no timestamp patterns are found.
+    """
+    def _replace(m: re.Match) -> str:
+        op_part = m.group(1)       # e.g. "before "
+        inner = m.group(2)          # the quoted value
+        normalized = normalize_timestamp(inner)
+        if normalized is not None:
+            return f'{op_part}"{normalized}"'
+        return m.group(0)  # keep original if not a timestamp
+
+    return _V2_QUOTED_TS_RE.sub(_replace, query)
 
 
 # Re-export AGENT_PREVIEW_ROWS / serialisers from the shared helper so existing
@@ -492,10 +660,17 @@ def build_processes_payload(
     if execution_mode:
         _add("execution_mode", "EQUALS", execution_mode)
     if started_after:
-        # Trellix v1 supports GREATER_EQUAL on timestamp fields (ISO 8601).
-        _add("started_at", "GREATER_EQUAL", started_after)
+        normalized = normalize_timestamp(started_after)
+        if normalized is None:
+            log.warning("trellix: could not normalise started_after=%r, passing as-is", started_after)
+            normalized = started_after
+        _add("started_at", "GREATER_EQUAL", normalized)
     if started_before:
-        _add("started_at", "LESS_EQUAL", started_before)
+        normalized = normalize_timestamp(started_before)
+        if normalized is None:
+            log.warning("trellix: could not normalise started_before=%r, passing as-is", started_before)
+            normalized = started_before
+        _add("started_at", "LESS_EQUAL", normalized)
     if suspicious_reputation_only:
         # Reputation is a single-valued string; OR it across the suspicious
         # buckets within the same AND group is not expressible — the caller
@@ -775,8 +950,6 @@ def validate_v1_payload(payload: dict) -> Optional[str]:
     return None
 
 
-import re
-
 _V2_FIRST_TOKEN_RE = re.compile(r"\s*([A-Za-z][A-Za-z0-9]*)")
 
 
@@ -1003,6 +1176,11 @@ async def run_search_pipeline(
     if api_version == "v2":
         if not query:
             raise TrellixEDRError("v2 search requires a query string.", code="INVALID_INPUT")
+        # Normalise ISO 8601 / epoch timestamps inside quoted values after
+        # "before"/"after" operators to the format Trellix expects
+        # ("YYYY-MM-DD HH:mm:ss").  This prevents AR-914 / HTTP 400 errors
+        # when the LLM sends ISO 8601 timestamps.
+        query = normalize_v2_query_timestamps(query)
         validation_error = validate_v2_query(query)
         if validation_error:
             raise TrellixEDRError(
@@ -1013,6 +1191,11 @@ async def run_search_pipeline(
     else:
         if not payload:
             raise TrellixEDRError("v1 search requires a payload object.", code="INVALID_INPUT")
+        # Normalise timestamp values in leaf predicates with
+        # BEFORE/AFTER/GREATER_EQUAL/LESS_EQUAL operators on timestamp
+        # fields.  This prevents AR-914 errors when the LLM sends ISO 8601
+        # or epoch timestamps.
+        normalize_v1_payload_timestamps(payload)
         validation_error = validate_v1_payload(payload)
         if validation_error:
             raise TrellixEDRError(

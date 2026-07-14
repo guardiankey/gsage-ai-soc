@@ -193,13 +193,20 @@ class TrellixEdrSearchProcessesTool(BaseTool):
                 "type": "string",
                 "description": (
                     "Filter Processes.started_at GREATER_EQUAL <value>. "
-                    "ISO-8601 timestamp (e.g. '2026-04-15T00:00:00Z')."
+                    "Accepts ISO 8601 ('2026-04-15T00:00:00Z'), epoch "
+                    "seconds/milliseconds, or the native Trellix format "
+                    "'YYYY-MM-DD HH:mm:ss'. Values are automatically "
+                    "normalised to the format Trellix expects."
                 ),
             },
             "started_before": {
                 "type": "string",
                 "description": (
-                    "Filter Processes.started_at LESS_EQUAL <value>. ISO-8601 timestamp."
+                    "Filter Processes.started_at LESS_EQUAL <value>. "
+                    "Accepts ISO 8601 ('2026-04-15T23:59:59Z'), epoch "
+                    "seconds/milliseconds, or the native Trellix format "
+                    "'YYYY-MM-DD HH:mm:ss'. Values are automatically "
+                    "normalised."
                 ),
             },
             "hostname_contains": {

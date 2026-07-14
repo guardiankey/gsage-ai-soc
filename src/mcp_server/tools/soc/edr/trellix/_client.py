@@ -72,6 +72,49 @@ def _cache_key(token_url: str, client_id: str, x_api_key: str) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _enrich_error_message(resp: httpx.Response, method: str, url: str) -> str:
+    """Build an error message with hints for common Trellix error codes.
+
+    Detects known Trellix error patterns in the response body and appends
+    actionable suggestions (e.g. timestamp format for AR-914).
+    """
+    base = f"Trellix HTTP {resp.status_code} ({method} {url}): {resp.text[:300]}"
+    text = resp.text or ""
+
+    hints: list[str] = []
+
+    # AR-914: invalid value (often timestamp format)
+    if "AR-914" in text or "value not valid" in text.lower():
+        hints.append(
+            "💡 Time values must use the format 'YYYY-MM-DD HH:mm:ss' "
+            "(space between date and time, no 'T', no 'Z' suffix). "
+            "Example: '2026-07-11 03:00:00'. The tool now auto-converts "
+            "ISO 8601 and epoch timestamps."
+        )
+
+    # AR-806: unknown field name
+    if "AR-806" in text:
+        hints.append(
+            "💡 One or more field names are not recognised by the collector. "
+            "Run trellix_edr_collectors to discover valid field names — "
+            "do NOT guess names from other tools (Sysinternals, WMI, etc.)."
+        )
+
+    # "Invalid value provided for query" (v2)
+    if "Invalid value provided for query" in text:
+        hints.append(
+            "💡 The v2 query syntax may be invalid. Check: (1) are projections "
+            "present? (2) are string values wrapped in double quotes? "
+            "(3) are numeric/IP values unquoted? (4) are time values in "
+            "'YYYY-MM-DD HH:mm:ss' format? If the issue persists, switch "
+            "to v1 payload form."
+        )
+
+    if hints:
+        return base + "\n" + "\n".join(hints)
+    return base
+
+
 class TrellixEDRClient:
     """Async Trellix EDR API client (OAuth2 + v1/v2 + remediation).
 
@@ -268,9 +311,9 @@ class TrellixEDRClient:
 
             if not resp.is_success and not (allow_303 and resp.status_code == 303):
                 raise TrellixEDRError(
-                    f"Trellix HTTP {resp.status_code} ({method} {url}): {resp.text[:300]}",
+                    _enrich_error_message(resp, method, url),
                     status_code=resp.status_code,
-                    code=f"HTTP_{resp.status_code}",
+                    code=resp.text[:300] if resp.text else f"HTTP_{resp.status_code}",
                 )
             return resp
 
