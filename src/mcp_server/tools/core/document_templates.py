@@ -1,6 +1,7 @@
-"""gSage AI — list_templates MCP tool.
+"""gSage AI — document_templates MCP tool.
 
-Lists document templates available to the current org.
+Lists document templates available to the current org and downloads individual
+templates into the conversation context.
 
 Scope filtering
 ---------------
@@ -18,17 +19,23 @@ import time
 import logging
 from typing import ClassVar, Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.shared.security.context import AgentContext
 
 log = logging.getLogger(__name__)
 
+_MIME_DOCX = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+_MIME_MD = "text/markdown"
+_MIME_ZIP = "application/zip"
 
-class ListTemplatesTool(BaseTool):
+
+class DocumentTemplatesTool(BaseTool):
     """
-    List document templates available to the current organisation.
+    List and download document templates available to the current organisation.
 
     Templates are uploaded via the Files API (``POST /v1/orgs/{org_id}/files/upload-template``).
     Each template has a ``scope``:
@@ -54,24 +61,41 @@ class ListTemplatesTool(BaseTool):
     is auto-selected based on ``output_format`` and ``pandoc``. For CSV
     output no template is needed at all.
 
+    **Downloading a template into the conversation**
+
+    Pass ``download_template_id`` with a ``template_id`` obtained from a
+    previous listing to download the template in its original format into
+    the conversation context.  The tool creates an artifact (file reference)
+    and, for Markdown templates, also returns the full text inline so the
+    LLM can inspect the template structure and placeholders.
+
     Optional parameters
     -------------------
     scope (str):
         Filter by template scope.
         ``"all"`` (default), ``"organization"``, ``"department"``, or ``"user"``.
+        Ignored when ``download_template_id`` is set.
     content_type (str):
         Filter by MIME type (e.g. ``"application/vnd.openxmlformats-officedocument.wordprocessingml.document"``
         for DOCX, ``"text/markdown"`` for Markdown templates, or
         ``"application/zip"`` for Pandoc bundles).
+        Ignored when ``download_template_id`` is set.
+    download_template_id (str):
+        When set, download a single template by its ``template_id`` instead of
+        listing all templates.  The template is made available as a conversation
+        artifact.  For Markdown templates the full text is also returned inline.
 
-    Permission: ``files:read``
+    Permission: ``files:read`` (list), ``files:read`` + ``files:write`` (download)
     """
 
-    name: ClassVar[str] = "list_templates"
-    version: ClassVar[str] = "1.0.0"
-    summary: ClassVar[str] = "List document templates (DOCX, Markdown) available to the organization for use with generate_document"
+    name: ClassVar[str] = "document_templates"
+    version: ClassVar[str] = "1.2.0"
+    summary: ClassVar[str] = (
+        "List (with optional search filter) and download document templates "
+        "(DOCX, Markdown) available to the organization for use with generate_document"
+    )
     category: ClassVar[str] = "document"
-    permissions: ClassVar[list[str]] = ["files:read"]
+    permissions: ClassVar[list[str]] = ["files:read", "files:write"]
     rate_limit_per_minute: ClassVar[int] = 60
     timeout_seconds: ClassVar[int] = 15
     use_circuit_breaker: ClassVar[bool] = False
@@ -89,7 +113,8 @@ class ListTemplatesTool(BaseTool):
                     "'all' (default): org-wide + department + personal templates. "
                     "'organization': only org-wide templates. "
                     "'department': only templates shared with the current department. "
-                    "'user': only templates uploaded by the current user."
+                    "'user': only templates uploaded by the current user. "
+                    "Ignored when 'download_template_id' is set."
                 ),
             },
             "content_type": {
@@ -98,7 +123,8 @@ class ListTemplatesTool(BaseTool):
                     "Optional MIME type filter. "
                     "Example: 'text/markdown' for Markdown templates, "
                     "'application/vnd.openxmlformats-officedocument."
-                    "wordprocessingml.document' for DOCX templates."
+                    "wordprocessingml.document' for DOCX templates. "
+                    "Ignored when 'download_template_id' is set."
                 ),
             },
             "include_variables": {
@@ -109,7 +135,31 @@ class ListTemplatesTool(BaseTool):
                     "placeholder variable names (e.g. '{{title}}', '{{content}}'). "
                     "These variable names MUST be passed via the 'variables' parameter "
                     "when calling generate_document. "
-                    "Set to false to skip variable extraction for faster listing."
+                    "Set to false to skip variable extraction for faster listing. "
+                    "Ignored when 'download_template_id' is set (variables are "
+                    "always extracted for the downloaded template)."
+                ),
+            },
+            "download_template_id": {
+                "type": "string",
+                "description": (
+                    "When set, download a single template by its UUID (obtained "
+                    "from a previous listing) into the conversation context. "
+                    "The template is stored as a conversation artifact and its "
+                    "metadata + file reference are returned. "
+                    "For Markdown templates the full text is also returned inline. "
+                    "When this parameter is provided, 'scope', 'content_type', "
+                    "'search', and 'include_variables' are ignored."
+                ),
+            },
+            "search": {
+                "type": "string",
+                "description": (
+                    "Optional case-insensitive substring filter on template "
+                    "filename and description. "
+                    "Example: 'ata' matches 'exemplo_ata_assefaz.md' or a "
+                    "template with 'Modelo de ata' in its description. "
+                    "Ignored when 'download_template_id' is set."
                 ),
             },
         },
@@ -124,13 +174,26 @@ class ListTemplatesTool(BaseTool):
         state: dict,
     ) -> ToolResult:
         from src.shared.database import _get_session_maker  # noqa: PLC0415
-        from src.shared.models.generated_file import GSageFile  # noqa: PLC0415
 
         t0 = time.monotonic()
+
+        # ── Download mode ────────────────────────────────────────────────
+        download_id: str = str(params.get("download_template_id") or "").strip()
+        if download_id:
+            return await self._download_single_template(
+                template_id=download_id,
+                agent_context=agent_context,
+                t0=t0,
+                session_maker_factory=_get_session_maker,
+            )
+
+        # ── List mode ────────────────────────────────────────────────────
+        from src.shared.models.generated_file import GSageFile  # noqa: PLC0415
 
         scope: str = params.get("scope", "all")
         content_type_filter: Optional[str] = params.get("content_type")
         include_variables: bool = bool(params.get("include_variables", True))
+        search: str = (params.get("search") or "").strip()
 
         if scope not in ("all", "organization", "department", "user"):
             scope = "all"
@@ -178,6 +241,15 @@ class ListTemplatesTool(BaseTool):
             if content_type_filter:
                 stmt = stmt.where(GSageFile.content_type == content_type_filter)
 
+            if search:
+                pattern = f"%{search}%"
+                stmt = stmt.where(
+                    or_(
+                        GSageFile.filename.ilike(pattern),
+                        GSageFile.description.ilike(pattern),
+                    )
+                )
+
             stmt = stmt.order_by(GSageFile.created_at.desc())
             result = await db.execute(stmt)
             rows = result.scalars().all()
@@ -212,6 +284,95 @@ class ListTemplatesTool(BaseTool):
         )
 
     # ------------------------------------------------------------------
+    # Download single template
+    # ------------------------------------------------------------------
+
+    async def _download_single_template(
+        self,
+        template_id: str,
+        agent_context: AgentContext,
+        t0: float,
+        session_maker_factory,
+    ) -> ToolResult:
+        """Download a single template into the conversation context.
+
+        Loads the template bytes via ``_load_file``, stores a copy as a
+        conversation artifact via ``_store_file``, and returns the artifact
+        reference plus inline text for Markdown templates.
+        """
+        # 1. Load the template bytes
+        load_result = await self._load_file(
+            file_id=template_id,
+            org_id=str(agent_context.org_id),
+            user_id=str(agent_context.user_id),
+            dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
+            max_bytes=10 * 1024 * 1024,  # 10 MB — same cap as generate_document
+        )
+        if load_result is None:
+            return self._failure(
+                "TEMPLATE_NOT_FOUND",
+                f"Template '{template_id}' not found or access denied. "
+                "Verify the template_id with a listing call first.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        template_bytes: bytes = load_result["data"]
+        filename: str = load_result["filename"]
+        content_type: str = load_result["content_type"]
+        size_bytes: int = load_result["size_bytes"]
+        truncated: bool = load_result.get("truncated", False)
+
+        # 2. Extract variables
+        variables: list[str] = []
+        if content_type == _MIME_MD:
+            variables = self._vars_from_md(
+                template_bytes.decode("utf-8", errors="replace")
+            )
+        elif content_type in (_MIME_DOCX, _MIME_ZIP):
+            variables = self._vars_from_docx(template_bytes)
+
+        # 3. Store a copy as a conversation artifact
+        file_info: Optional[dict] = None
+        async with session_maker_factory()() as db_session:
+            file_info = await self._store_file(
+                data=template_bytes,
+                filename=filename,
+                content_type=content_type,
+                agent_context=agent_context,
+                session=db_session,
+                description=f"Template: {filename}",
+                scope="user",
+            )
+            if file_info is None:
+                return self._failure(
+                    "STORE_FAILED",
+                    f"Failed to store template '{filename}' as a conversation artifact. "
+                    "The template was loaded but could not be saved to the file store.",
+                    retryable=True,
+                    execution_time_ms=int((time.monotonic() - t0) * 1000),
+                )
+
+        # 4. Build response
+        data: dict = {
+            "template_id": template_id,
+            "filename": filename,
+            "content_type": content_type,
+            "size_bytes": size_bytes,
+            "variables": variables,
+            "file": file_info,
+        }
+
+        # Include inline content for Markdown templates
+        if content_type == _MIME_MD:
+            data["content"] = template_bytes.decode("utf-8", errors="replace")
+            data["content_truncated"] = truncated
+
+        return self._success(
+            data=data,
+            execution_time_ms=int((time.monotonic() - t0) * 1000),
+        )
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
@@ -235,11 +396,6 @@ class ListTemplatesTool(BaseTool):
             return []
 
         data: bytes = load_result["data"]
-
-        _MIME_DOCX = (
-            "application/vnd.openxmlformats-officedocument"
-            ".wordprocessingml.document"
-        )
 
         if content_type == "text/markdown":
             return self._vars_from_md(data.decode("utf-8", errors="replace"))

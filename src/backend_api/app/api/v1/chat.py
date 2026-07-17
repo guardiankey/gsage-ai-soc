@@ -1180,6 +1180,18 @@ async def send_message(
         dept_id=ctx.dept_id,
     )
 
+    # ── Release the DB connection before the (potentially long) agent run ──
+    # The agent may call MCP tools that take 30-90 s (e.g. PDF conversion).
+    # If we hold a transaction open across that wait, PostgreSQL's
+    # idle_in_transaction_session_timeout will kill the connection and the
+    # post-run DB operations + session teardown will fail with InterfaceError.
+    # Best-effort: if the connection is already dead, swallow the error —
+    # the transaction is already gone anyway.
+    try:
+        await db.commit()
+    except Exception:
+        pass
+
     try:
         from src.backend_api.app.services.agno_session_lock import (  # noqa: PLC0415
             LockAcquireError,
@@ -1798,6 +1810,18 @@ async def stream_message(
         user_id=ctx.user_id,
         dept_id=ctx.dept_id,
     )
+
+    # ── Release the DB connection before the (potentially long) SSE stream ──
+    # The stream may call MCP tools that take 30-90 s.  Committing now closes
+    # the transaction so PostgreSQL's idle_in_transaction_session_timeout
+    # doesn't kill the connection while we wait.  Post-stream DB operations
+    # (e.g. _mark_bg_tasks_notified) will get a fresh connection from the
+    # pool, validated by pool_pre_ping.
+    # Best-effort: if the connection is already dead, swallow the error.
+    try:
+        await db.commit()
+    except Exception:
+        pass
 
     return StreamingResponse(
         _sse_stream(

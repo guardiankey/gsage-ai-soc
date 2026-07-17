@@ -62,7 +62,7 @@ async def _lookup_file(
 
 
 class WriteFileTool(BaseTool):
-    """Create, edit, diff, and delete text files in the current conversation scope.
+    """Create, edit, append, diff, and delete text files in the current conversation scope.
 
     Works with text-based formats: Markdown (.md), HTML (.html), plain text
     (.txt), CSV (.csv), JSON (.json), YAML (.yaml), and similar.
@@ -85,6 +85,12 @@ class WriteFileTool(BaseTool):
         inclusive), and ``new_content`` to replace only those lines — useful
         for large files. The lines are spliced: content before line_start +
         new_content + content after line_end.
+
+    ``append``
+      Add text to the end of an existing file. Provide ``file_id`` and
+      ``content``. A newline separator is inserted automatically when the
+      existing content does not already end with one. Useful for building
+      files incrementally (e.g. accumulating summaries from chunked reads).
 
     ``diff``
       Compare two files line-by-line. Provide ``file_id_a`` (as ``file_id``)
@@ -111,9 +117,9 @@ class WriteFileTool(BaseTool):
     """
 
     name: ClassVar[str] = "write_file"
-    version: ClassVar[str] = "1.1.0"
+    version: ClassVar[str] = "1.2.0"
     summary: ClassVar[str] = (
-        "Create, edit (line-range or full replace), diff (unified + HTML), "
+        "Create, edit (line-range or full replace), append, diff (unified + HTML), "
         "rename, copy, or soft-delete text files (MD, HTML, TXT, CSV, JSON) "
         "in the current conversation scope."
     )
@@ -130,7 +136,7 @@ class WriteFileTool(BaseTool):
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["create", "edit", "diff", "rename", "copy", "delete"],
+                "enum": ["create", "edit", "diff", "rename", "copy", "delete", "append"],
                 "description": (
                     "Action to perform: "
                     "create — create a new text file; "
@@ -138,7 +144,8 @@ class WriteFileTool(BaseTool):
                     "diff — compare two files line-by-line; "
                     "rename — change a file's name (and content_type if extension changes); "
                     "copy — duplicate a file (new file_id, same content); "
-                    "delete — soft-delete a file (hidden from listings)."
+                    "delete — soft-delete a file (hidden from listings); "
+                    "append — add content to the end of an existing file."
                 ),
             },
             # ── create params ──
@@ -282,6 +289,8 @@ class WriteFileTool(BaseTool):
             return await self._copy(agent_context, params, session, t0)
         if action == "delete":
             return await self._delete(agent_context, params, session, t0)
+        if action == "append":
+            return await self._append(agent_context, params, session, t0)
 
         return self._failure(
             "INVALID_ACTION",
@@ -415,6 +424,8 @@ class WriteFileTool(BaseTool):
         loaded = await self._load_file(
             file_id=file_id,
             org_id=str(agent_context.org_id),
+            user_id=str(agent_context.user_id) if agent_context.user_id else None,
+            dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
             session=session,
             max_bytes=MAX_FILE_BYTES,
         )
@@ -530,12 +541,16 @@ class WriteFileTool(BaseTool):
         loaded_a = await self._load_file(
             file_id=file_id_a,
             org_id=str(agent_context.org_id),
+            user_id=str(agent_context.user_id) if agent_context.user_id else None,
+            dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
             session=session,
             max_bytes=MAX_FILE_BYTES,
         )
         loaded_b = await self._load_file(
             file_id=file_id_b,
             org_id=str(agent_context.org_id),
+            user_id=str(agent_context.user_id) if agent_context.user_id else None,
+            dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
             session=session,
             max_bytes=MAX_FILE_BYTES,
         )
@@ -797,6 +812,8 @@ class WriteFileTool(BaseTool):
         loaded = await self._load_file(
             file_id=file_id,
             org_id=str(agent_context.org_id),
+            user_id=str(agent_context.user_id) if agent_context.user_id else None,
+            dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
             session=session,
             max_bytes=MAX_FILE_BYTES,
         )
@@ -842,6 +859,125 @@ class WriteFileTool(BaseTool):
                 "action": "copy",
                 "original_file_id": file_id,
                 **result,
+            },
+            execution_time_ms=int((time.monotonic() - t0) * 1000),
+        )
+
+    async def _append(
+        self,
+        agent_context: AgentContext,
+        params: dict,
+        session,
+        t0: float,
+    ) -> ToolResult:
+        """Append text to the end of an existing file.
+
+        Requires ``file_id`` and ``content`` (the text to append).
+        A newline (``\\n``) is automatically inserted between the existing
+        content and the appended text when the existing content does not
+        already end with one — this ensures each append starts on its own
+        line.
+        """
+        file_id: str | None = (params.get("file_id") or "").strip() or None
+        content_str: str | None = params.get("content")
+
+        if not file_id:
+            return self._failure(
+                "PARAM_MISSING",
+                "'file_id' is required for append.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if content_str is None:
+            return self._failure(
+                "PARAM_MISSING",
+                "'content' is required for append.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        # Look up the file
+        row = await _lookup_file(session, file_id, agent_context.org_id)
+        if row is None:
+            return self._failure(
+                "FILE_NOT_FOUND",
+                f"File '{file_id}' not found or access denied.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if row.purged_at is not None:
+            return self._failure(
+                "FILE_PURGED",
+                f"File '{row.filename}' has been deleted and cannot be appended to.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if not is_text_content(row.content_type):
+            return self._failure(
+                "NOT_TEXT_FILE",
+                f"File '{row.filename}' is not a text file (type: {row.content_type}). "
+                "write_file only supports text-based formats.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        # Load current content
+        loaded = await self._load_file(
+            file_id=file_id,
+            org_id=str(agent_context.org_id),
+            user_id=str(agent_context.user_id) if agent_context.user_id else None,
+            dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
+            session=session,
+            max_bytes=MAX_FILE_BYTES,
+        )
+        if loaded is None:
+            return self._failure(
+                "LOAD_FAILED",
+                f"Failed to load current content for file '{file_id}'.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        current_bytes: bytes = loaded["data"]
+        size_before = len(current_bytes)
+        current_text = current_bytes.decode("utf-8")
+
+        # Ensure a newline separator between existing content and appended text
+        separator = "" if current_text.endswith("\n") else "\n"
+        new_text = current_text + separator + content_str
+        new_bytes = new_text.encode("utf-8")
+
+        if len(new_bytes) > MAX_FILE_BYTES:
+            return self._failure(
+                "CONTENT_TOO_LARGE",
+                f"Resulting content size ({len(new_bytes)} bytes) exceeds the "
+                f"maximum ({MAX_FILE_BYTES} bytes).",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        result = await self._replace_file_content(
+            file_id=file_id,
+            data=new_bytes,
+            agent_context=agent_context,
+            session=session,
+        )
+
+        if result is None:
+            return self._failure(
+                "REPLACE_FAILED",
+                f"Failed to append content to file '{file_id}'.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        log.info(
+            "write_file append: %s → %d + %d = %d bytes",
+            file_id, size_before, len(content_str),
+            result["size_bytes"],
+        )
+
+        return self._success(
+            {
+                "action": "append",
+                "file_id": result["file_id"],
+                "filename": result["filename"],
+                "content_type": result["content_type"],
+                "size_bytes_before": size_before,
+                "size_bytes_appended": len(content_str.encode("utf-8")),
+                "size_bytes_after": result["size_bytes"],
             },
             execution_time_ms=int((time.monotonic() - t0) * 1000),
         )

@@ -307,7 +307,13 @@ async def _async_continue_bg_task(task_id: str) -> None:
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     try:
-        async with session_factory() as db:
+        # ── Best-effort session management ──────────────────────────
+        # The agent run inside continue_after_bg_task may take many
+        # seconds (LLM calls, tool executions).  We commit before the
+        # long call to release the transaction, and swallow close errors
+        # so a dead connection doesn't crash the already-computed result.
+        session = session_factory()
+        try:
             from src.backend_api.app.services.agent_continuation import (
                 ContinuationSkipped,
                 continue_after_bg_task,
@@ -317,12 +323,10 @@ async def _async_continue_bg_task(task_id: str) -> None:
             )
             from src.backend_api.app.services.channel_sender import deliver_response
 
-            tenant_session, response_text = await continue_after_bg_task(task_id, db)
+            tenant_session, response_text = await continue_after_bg_task(task_id, session)
             if response_text:
-                await deliver_response(tenant_session, response_text, db)
+                await deliver_response(tenant_session, response_text, session)
 
-            # Notify SSE subscribers (web clients viewing the conversation) so
-            # they refetch immediately instead of waiting for the 5s poll.
             await publish_conversation_updated(
                 tenant_session.id, reason="bg_task_completed"
             )
@@ -331,6 +335,11 @@ async def _async_continue_bg_task(task_id: str) -> None:
                 "continue_after_bg_task_completed: delivered task=%s session=%s source=%s",
                 task_id, tenant_session.id, tenant_session.source,
             )
+        finally:
+            try:
+                await session.close()
+            except Exception:
+                pass
     finally:
         await engine.dispose()
 
@@ -349,7 +358,8 @@ async def _async_continue_approval(approval_id: str, org_id: str) -> None:
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     try:
-        async with session_factory() as db:
+        session = session_factory()
+        try:
             from src.backend_api.app.services.agent_continuation import continue_after_approval
             from src.backend_api.app.services.agno_session_lock import (
                 publish_conversation_updated,
@@ -357,12 +367,10 @@ async def _async_continue_approval(approval_id: str, org_id: str) -> None:
             from src.backend_api.app.services.channel_sender import deliver_response
 
             tenant_session, response_text = await continue_after_approval(
-                approval_id, uuid.UUID(org_id), db
+                approval_id, uuid.UUID(org_id), session
             )
-            await deliver_response(tenant_session, response_text, db)
+            await deliver_response(tenant_session, response_text, session)
 
-            # Notify SSE subscribers (web clients viewing the conversation) so
-            # they refetch immediately instead of waiting for the 5s poll.
             await publish_conversation_updated(
                 tenant_session.id, reason="approval_resolved"
             )
@@ -371,5 +379,10 @@ async def _async_continue_approval(approval_id: str, org_id: str) -> None:
                 "continue_after_approval_resolved: delivered approval=%s session=%s source=%s",
                 approval_id, tenant_session.id, tenant_session.source,
             )
+        finally:
+            try:
+                await session.close()
+            except Exception:
+                pass
     finally:
         await engine.dispose()

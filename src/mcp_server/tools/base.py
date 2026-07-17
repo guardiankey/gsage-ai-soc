@@ -1410,9 +1410,13 @@ class BaseTool(ABC):
             Current request context (used for ``org_id`` / ``user_id`` /
             ``dept_id``).
         session:
-            Open ``AsyncSession``.  The new file row is added to the
-            session but **not committed** — the caller (or BaseTool.run) handles
-            the commit lifecycle.
+            Open ``AsyncSession`` from the tool execution context.
+            **Not used for the DB write.**  The method creates an
+            independent fresh session (from the same engine /
+            ``pool_pre_ping``) to guard against stale connections
+            that were closed by PostgreSQL during long-running tool
+            executions.  The incoming *session* is only consulted for
+            its bind (engine reference); it is never modified.
         description:
             Optional human-readable description to store with the file.
         trace_id:
@@ -1478,38 +1482,59 @@ class BaseTool(ABC):
                 else None
             )
 
-            store = get_file_store()
-            gfile = await store.upload(
-                data=data,
-                filename=filename,
-                content_type=content_type,
-                org_id=str(agent_context.org_id),
-                user_id=str(agent_context.user_id),
-                tool_name=self.name,
-                db=session,
-                description=description,
-                trace_id=trace_id,
-                ttl_hours=ttl_hours,
-                session_id=session_id,
-                scope=normalized_scope,
-                dept_id=effective_dept_id,
-            )
-            await session.commit()
-            return {
-                "file_id": str(gfile.id),
-                "filename": gfile.filename,
-                "content_type": gfile.content_type,
-                "size_bytes": gfile.size_bytes,
-                "download_path": f"/v1/orgs/{agent_context.org_id}/files/{gfile.id}/download",
-                "expires_at": gfile.expires_at.isoformat() if gfile.expires_at else None,
-                "description": gfile.description,
-            }
+            # ── Use a fresh, independent session for the DB write ───────
+            # The incoming *session* may hold a connection that was closed
+            # by PostgreSQL during long-running tool executions (idle
+            # timeout, ~49 s PDF conversions, etc.).  We derive a fresh
+            # session from the same session factory so pool_pre_ping
+            # validates the connection before use.
+            from src.shared.database import _get_session_maker  # noqa: PLC0415
+
+            store_session = _get_session_maker()()
+            try:
+                store = get_file_store()
+                gfile = await store.upload(
+                    data=data,
+                    filename=filename,
+                    content_type=content_type,
+                    org_id=str(agent_context.org_id),
+                    user_id=str(agent_context.user_id),
+                    tool_name=self.name,
+                    db=store_session,
+                    description=description,
+                    trace_id=trace_id,
+                    ttl_hours=ttl_hours,
+                    session_id=session_id,
+                    scope=normalized_scope,
+                    dept_id=effective_dept_id,
+                )
+                await store_session.commit()
+                return {
+                    "file_id": str(gfile.id),
+                    "filename": gfile.filename,
+                    "content_type": gfile.content_type,
+                    "size_bytes": gfile.size_bytes,
+                    "download_path": f"/v1/orgs/{agent_context.org_id}/files/{gfile.id}/download",
+                    "expires_at": gfile.expires_at.isoformat() if gfile.expires_at else None,
+                    "description": gfile.description,
+                }
+            except Exception:
+                try:
+                    await store_session.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                try:
+                    await store_session.close()
+                except Exception:
+                    pass
         except Exception as exc:
-            logger.error(
-                "Tool %s: failed to store file '%s': %s",
-                self.name, filename, exc,
+            logger.exception(
+                "Tool %s: failed to store file '%s' (%d bytes, type=%s): %s",
+                self.name, filename, len(data), type(exc).__name__, exc,
             )
-            # ── Clean up the (possibly broken) session ───────────────────
+            # ── Clean up the (possibly broken) original session ─────────
             # After a long-running tool execution, the underlying asyncpg
             # connection may have been closed by PostgreSQL (idle timeout).
             # Any attempt to rollback or close will raise InterfaceError.
@@ -1539,6 +1564,10 @@ class BaseTool(ABC):
 
         Access control: the file must belong to ``agent_context.org_id``.
 
+        Uses an independent fresh session for the DB write (same pattern as
+        :meth:`_store_file`) so the size update is committed atomically with
+        the MinIO write, regardless of the outer session lifecycle.
+
         Parameters
         ----------
         file_id:
@@ -1548,8 +1577,8 @@ class BaseTool(ABC):
         agent_context:
             Current request context.  Used to enforce ``org_id`` ownership.
         session:
-            Open ``AsyncSession``.  Changes are flushed but **not committed** —
-            the caller (or ``BaseTool.run``) handles the commit lifecycle.
+            Open ``AsyncSession`` from the tool execution context.
+            **Not used for the DB write** — only for cleanup on error.
 
         Returns
         -------
@@ -1561,51 +1590,71 @@ class BaseTool(ABC):
             from src.shared.services.file_store import get_file_store  # noqa: PLC0415
             from src.shared.models.generated_file import GSageFile  # noqa: PLC0415
             from sqlalchemy import select  # noqa: PLC0415
+            from src.shared.database import _get_session_maker  # noqa: PLC0415
 
             org_id = str(agent_context.org_id)
-            stmt = (
-                select(GSageFile)
-                .where(
-                    GSageFile.id == uuid.UUID(file_id),
-                    GSageFile.org_id == uuid.UUID(org_id),
-                    GSageFile.purged_at.is_(None),
+
+            # ── Use a fresh, independent session for the DB write ───────
+            # Same pattern as _store_file: the incoming *session* may have
+            # a stale connection or be rolled back by the outer caller.
+            # We use a fresh session so the MinIO + DB update is atomic
+            # and survives the outer session lifecycle.
+            store_session = _get_session_maker()()
+            try:
+                stmt = (
+                    select(GSageFile)
+                    .where(
+                        GSageFile.id == uuid.UUID(file_id),
+                        GSageFile.org_id == uuid.UUID(org_id),
+                        GSageFile.purged_at.is_(None),
+                    )
                 )
-            )
-            result = await session.execute(stmt)
-            gfile = result.scalar_one_or_none()
-            if gfile is None:
-                logger.warning(
-                    "Tool %s: _replace_file_content: file %s not found or access denied (org=%s)",
-                    self.name, file_id, org_id,
+                result = await store_session.execute(stmt)
+                gfile = result.scalar_one_or_none()
+                if gfile is None:
+                    logger.warning(
+                        "Tool %s: _replace_file_content: file %s not found or access denied (org=%s)",
+                        self.name, file_id, org_id,
+                    )
+                    return None
+
+                store = get_file_store()
+                new_size = await store.replace_content(
+                    storage_key=gfile.storage_key,
+                    data=data,
+                    content_type=gfile.content_type,
+                    category=gfile.category,
                 )
-                return None
 
-            store = get_file_store()
-            new_size = await store.replace_content(
-                storage_key=gfile.storage_key,
-                data=data,
-                content_type=gfile.content_type,
-                category=gfile.category,
-            )
+                gfile.size_bytes = new_size
+                await store_session.commit()
 
-            gfile.size_bytes = new_size
-            await session.flush()
-
-            return {
-                "file_id": str(gfile.id),
-                "filename": gfile.filename,
-                "content_type": gfile.content_type,
-                "size_bytes": new_size,
-                "download_path": f"/v1/orgs/{org_id}/files/{gfile.id}/download",
-                "expires_at": gfile.expires_at.isoformat() if gfile.expires_at else None,
-                "description": gfile.description,
-            }
+                return {
+                    "file_id": str(gfile.id),
+                    "filename": gfile.filename,
+                    "content_type": gfile.content_type,
+                    "size_bytes": new_size,
+                    "download_path": f"/v1/orgs/{org_id}/files/{gfile.id}/download",
+                    "expires_at": gfile.expires_at.isoformat() if gfile.expires_at else None,
+                    "description": gfile.description,
+                }
+            except Exception:
+                try:
+                    await store_session.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                try:
+                    await store_session.close()
+                except Exception:
+                    pass
         except Exception as exc:
-            logger.error(
+            logger.exception(
                 "Tool %s: _replace_file_content failed for file %s: %s",
                 self.name, file_id, exc,
             )
-            # ── Clean up the (possibly broken) session ───────────────────
+            # ── Clean up the (possibly broken) original session ─────────
             try:
                 await session.rollback()
             except Exception:

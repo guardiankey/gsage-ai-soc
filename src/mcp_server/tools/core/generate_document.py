@@ -64,6 +64,7 @@ _MIME_DOCX = (
 _MIME_PDF = "application/pdf"
 _MIME_HTML = "text/html"
 _MIME_MD = "text/markdown"
+_MIME_TXT = "text/plain"
 _MIME_CSV = "text/csv"
 _MIME_ZIP = "application/zip"
 
@@ -103,7 +104,7 @@ class GenerateDocumentTool(BaseTool):
     **Conversion** relies on pandoc and (for ``pdf`` via Pandoc bundles) a
     LaTeX engine — both must be installed in the container.
 
-    **Template variables:** Use ``list_templates`` with
+    **Template variables:** Use ``document_templates`` with
     ``include_variables=true`` to discover which ``{{placeholders}}`` a
     template expects. The ``content`` variable is always available.
 
@@ -171,7 +172,7 @@ class GenerateDocumentTool(BaseTool):
     """
 
     name: ClassVar[str] = "generate_document"
-    version: ClassVar[str] = "1.0.0"
+    version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = (
         "Generate PDF, DOCX, HTML or CSV documents from Markdown content or templates. "
         "Fenced 'mermaid' and 'dot' blocks become inline diagrams in PDF output (pandoc bundle)."
@@ -186,7 +187,7 @@ class GenerateDocumentTool(BaseTool):
 
     params_schema: ClassVar[dict] = {
         "type": "object",
-        "required": ["content"],
+        "required": [],
         "properties": {
             "template_id": {
                 "type": "string",
@@ -200,7 +201,9 @@ class GenerateDocumentTool(BaseTool):
             "content": {
                 "type": "string",
                 "description": (
-                    "Markdown content. For output_format='csv': either (a) a "
+                    "Markdown content. Either 'content' or 'content_file_id' "
+                    "must be provided (but not both). "
+                    "For output_format='csv': either (a) a "
                     "JSON array of objects — '[{\"col\": \"val\"}]' — or (b) a "
                     "GitHub-flavoured pipe-table "
                     "('| col |\\n|-----|\\n| val |'). "
@@ -233,6 +236,17 @@ class GenerateDocumentTool(BaseTool):
                     "diagrams with the 'mermaid_validate' tool BEFORE embedding "
                     "them here. Do NOT include surrounding emojis, HTML tags, or "
                     "non-ASCII control characters inside diagram blocks."
+                ),
+            },
+            "content_file_id": {
+                "type": "string",
+                "description": (
+                    "UUID of a Markdown or plain-text file in the conversation "
+                    "context to use as document content. The tool loads the file "
+                    "automatically — no need to inline large documents. "
+                    "Either 'content' or 'content_file_id' must be provided "
+                    "(but not both). Use this for large documents that would "
+                    "exceed inline limits or consume excessive LLM context."
                 ),
             },
             "output_format": {
@@ -351,7 +365,8 @@ class GenerateDocumentTool(BaseTool):
 
         # ── Validate params ───────────────────────────────────────────────
         template_id_raw: str = str(params.get("template_id") or "").strip()
-        content: str = str(params.get("content", ""))
+        content: str = str(params.get("content") or "")
+        content_file_id: str = str(params.get("content_file_id") or "").strip()
         output_format: str = str(params.get("output_format") or "docx").lower()
         raw_variables = params.get("variables") or {}
         output_filename_override: Optional[str] = params.get("output_filename")
@@ -359,6 +374,39 @@ class GenerateDocumentTool(BaseTool):
         rows_param = params.get("rows")
         headers_param = params.get("headers")
         scope_param: str = str(params.get("scope") or "user").strip().lower()
+
+        # ── Resolve content source ────────────────────────────────────
+        if content_file_id:
+            if content:
+                return self._failure(
+                    "INVALID_INPUT",
+                    "Provide either 'content' or 'content_file_id', not both.",
+                )
+            file_meta = await self._load_file(
+                file_id=content_file_id,
+                org_id=str(agent_context.org_id),
+                user_id=str(agent_context.user_id),
+                dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
+                max_bytes=10 * 1024 * 1024,  # 10 MB
+            )
+            if file_meta is None:
+                return self._failure(
+                    "FILE_NOT_FOUND",
+                    f"File '{content_file_id}' not found or access denied.",
+                )
+            ct = file_meta.get("content_type", "")
+            if ct not in (_MIME_MD, _MIME_TXT):
+                return self._failure(
+                    "NOT_TEXT_FILE",
+                    f"content_file_id must reference a Markdown (.md) or plain "
+                    f"text (.txt) file. Got: {ct}",
+                )
+            content = file_meta["data"].decode("utf-8", errors="replace")
+        elif not content and not rows_param:
+            return self._failure(
+                "INVALID_INPUT",
+                "Either 'content', 'content_file_id', or 'rows' must be provided.",
+            )
         if scope_param not in ("user", "department"):
             return self._failure(
                 "INVALID_INPUT",

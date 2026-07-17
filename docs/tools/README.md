@@ -75,7 +75,7 @@ framework (audience: developers).
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `generate_document` | 1 | `files:read`, `files:write` | — | — | — | [core/generate_document.md](core/generate_document.md) |
-| `list_templates` | 1 | `files:read` | — | — | — | [core/list_templates.md](core/list_templates.md) |
+| `document_templates` | 1 | `files:read`, `files:write` | — | — | — | [core/document_templates.md](core/document_templates.md) |
 | `process_catalog_document` | 1 | — | — | — | — | [enterprise/process_catalog/process_catalog_document.md](enterprise/process_catalog/process_catalog_document.md) |
 | `sei_pen` | 3 | `sei:read`, `sei:write` | ✓ | ✓ | — | [enterprise/gov/sei_pen.md](enterprise/gov/sei_pen.md) |
 

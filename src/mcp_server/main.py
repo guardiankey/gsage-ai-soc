@@ -401,9 +401,14 @@ async def handle_call_tool(
             sorted(k for k, v in injected_credential.items() if v is not None),
         )
 
-    async with _state.session_factory() as session:
-        # Generate a unique ID for this tool invocation — used for
-        # tracing across logs, audit, interactions, and DB records.
+    # ── Manual session management (not async with) ────────────────────
+    # We serialise the result BEFORE closing the session because
+    # session.close() may raise InterfaceError if the connection was
+    # killed by PostgreSQL during a long-running tool execution (e.g.
+    # 49 s PDF conversion).  Swallowing the close error ensures the
+    # already-computed success result reaches the client.
+    session = _state.session_factory()
+    try:
         tool_call_id = uuid.uuid4()
         result = await tool.run(
             agent_context=agent_ctx,
@@ -414,10 +419,18 @@ async def handle_call_tool(
             gsage_session_id=tenant.gsage_session_id,
             tool_call_id=tool_call_id,
         )
+        response_text = json.dumps(result.to_dict())
+    finally:
+        try:
+            await session.close()
+        except Exception:
+            # Connection may be dead after long tool execution;
+            # the useful work was already done.
+            pass
 
     return [mcp_types.TextContent(
         type="text",
-        text=json.dumps(result.to_dict()),
+        text=response_text,
     )]
 
 

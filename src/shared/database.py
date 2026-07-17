@@ -160,7 +160,21 @@ def create_pooled_engine(settings_override=None):
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency: yield an async database session per request."""
+    """FastAPI dependency: yield an async database session per request.
+
+    The session is closed on teardown.  If the underlying connection was
+    killed by PostgreSQL during a long-running operation (e.g. a 49 s MCP
+    tool call), the close is best-effort — we swallow the InterfaceError
+    so it doesn't crash the response that was already computed.
+    """
     session_maker = _get_session_maker()
-    async with session_maker() as session:
+    session = session_maker()
+    try:
         yield session
+    finally:
+        try:
+            await session.close()
+        except Exception:
+            # Connection may be dead after long-running operations;
+            # the session's useful work was already committed.
+            pass

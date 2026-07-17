@@ -83,7 +83,7 @@ export function PromptForm({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
             {isEdit ? t('prompts.editPrompt') : t('prompts.newPrompt')}

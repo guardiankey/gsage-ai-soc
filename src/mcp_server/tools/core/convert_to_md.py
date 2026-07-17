@@ -22,7 +22,9 @@ log = logging.getLogger(__name__)
 # ── Constants ────────────────────────────────────────────────────────────────
 _MAX_FILE_BYTES = 200 * 1024 * 1024  # 200 MB
 _MAX_MD_CHARS = 5 * 1024 * 1024  # 5 MB generated Markdown
-_PREVIEW_CHARS = 200  # Fixed inline preview size
+_PREVIEW_CHARS = 300  # Fixed inline preview size (kept small to avoid
+                       # blowing up LLM context; the full content is always
+                       # available as a downloadable artifact).
 _OCR_MAX_PAGES = 50  # Max PDF pages to process via OCR (limits timeout risk)
 
 # Content-type → internal format label
@@ -275,17 +277,18 @@ class ConvertToMdTool(BaseTool):
     Provide the ``file_id`` of an attachment already uploaded to the chat.
     The tool detects the format automatically, converts the content to
     Markdown, saves it as a downloadable artifact, and returns a short
-    inline preview (200 characters).
+    inline preview (~300 characters).
 
     Plain-text files (TXT, CSV, JSON, XML, …) are passed through unchanged.
     """
 
     name: ClassVar[str] = "convert_to_md"
-    version: ClassVar[str] = "1.1.0"
+    version: ClassVar[str] = "1.2.0"
     summary: ClassVar[str] = (
         "Convert an attached document (PDF, DOCX, PPTX, XLSX, HTML, RTF, TXT) "
         "to Markdown. PDFs are auto-detected as text or image; image PDFs "
-        "use OCR (Docling). Saves the result as a downloadable artifact."
+        "use OCR (Docling). Saves the result as a downloadable artifact "
+        "and returns a short preview."
     )
     category: ClassVar[str] = "file"
     permissions: ClassVar[list[str]] = ["core:convert_md"]
@@ -366,7 +369,17 @@ class ConvertToMdTool(BaseTool):
 
         session = _tool_session_ctx.get()
         if session is None:
+            log.warning(
+                "convert_to_md: _store_or_fallback — no DB session in context; "
+                "cannot persist artifact %r",
+                filename,
+            )
             return None, "no DB session available"
+
+        log.debug(
+            "convert_to_md: _store_or_fallback — storing %d bytes as %r (%s)",
+            len(data), filename, content_type,
+        )
 
         try:
             artifact = await self._store_file(
@@ -377,9 +390,32 @@ class ConvertToMdTool(BaseTool):
                 session=session,
                 description=description,
             )
-            return artifact, None
         except Exception as exc:
-            return None, str(exc)
+            log.exception(
+                "convert_to_md: _store_file raised for %r: %s",
+                filename, exc,
+            )
+            return None, f"_store_file exception: {exc}"
+
+        if artifact is None:
+            # _store_file returned None without raising — it caught an
+            # internal error (MinIO upload failure, DB commit failure,
+            # closed/idle session, etc.) and already logged it.
+            log.warning(
+                "convert_to_md: _store_file returned None for %r "
+                "(check MCP server logs for MinIO/DB errors)",
+                filename,
+            )
+            return None, (
+                "Artifact storage failed — _store_file returned None. "
+                "Check MCP server logs for MinIO or database errors."
+            )
+
+        log.debug(
+            "convert_to_md: artifact stored successfully — file_id=%s size=%d",
+            artifact.get("file_id"), artifact.get("size_bytes"),
+        )
+        return artifact, None
 
     # ── Execute ───────────────────────────────────────────────────────────
 
@@ -559,15 +595,27 @@ class ConvertToMdTool(BaseTool):
                     break
 
         # ── Build preview ────────────────────────────────────────────────
-        # When artifact storage failed, return the full Markdown inline
-        # (up to 50K chars) so the agent can still read the content.
-        if artifact is None:
-            _INLINE_MAX = 50000
-            preview = md_content[:_INLINE_MAX]
-            preview_truncated = len(md_content) > _INLINE_MAX
-        else:
-            preview = md_content[:_PREVIEW_CHARS]
-            preview_truncated = md_chars > _PREVIEW_CHARS
+        # ALWAYS keep the preview small (~300 chars).  The full content is
+        # meant to be consumed via the downloadable artifact.  Blowing up
+        # the LLM context with a 50 KB inline preview causes more problems
+        # than it solves.
+        preview = md_content[:_PREVIEW_CHARS]
+        preview_truncated = md_chars > _PREVIEW_CHARS
+
+        # ── Build debug info (helps diagnose storage issues) ─────────────
+        debug_info: dict = {
+            "storage_attempted": True,
+            "storage_ok": artifact is not None,
+            "storage_error": store_error,
+        }
+        if not debug_info["storage_ok"]:
+            debug_info["storage_hint"] = (
+                "The Markdown was generated successfully (%d chars) but "
+                "could not be persisted as a downloadable artifact. "
+                "Check MCP server logs for MinIO connectivity or database "
+                "errors (idle session timeout, connection refused, etc.). "
+                "The inline preview below contains the first %d characters."
+            ) % (md_chars, _PREVIEW_CHARS)
 
         elapsed = int((time.monotonic() - t0) * 1000)
         return self._success(
@@ -584,6 +632,7 @@ class ConvertToMdTool(BaseTool):
                 "artifact_error": store_error,
                 "title": title,
                 "pipeline": pipeline_meta,
+                "debug_info": debug_info,
             },
             execution_time_ms=elapsed,
         )
