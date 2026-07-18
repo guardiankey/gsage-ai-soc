@@ -79,11 +79,24 @@ def _unwrap_proxy_tool(tool_name: str | None, tool_args: dict | None) -> tuple[s
     """If *tool_name* is a proxy function, extract the real tool name and args.
 
     Returns ``(real_tool_name, real_tool_args)``.
+
+    Handles two shapes the LLM may produce:
+    1. Well-formed: ``{tool_name, params: {...}}``
+    2. Flattened (LLM bug): ``{tool_name, action, file_id, ...}`` —
+       repack everything except proxy-level keys as the real args.
     """
     if tool_name in _PROXY_TOOL_NAMES and isinstance(tool_args, dict):
         real_name = tool_args.get("tool_name") or tool_name
-        real_args = tool_args.get("params") if isinstance(tool_args.get("params"), dict) else tool_args
-        return real_name, real_args
+        real_params = tool_args.get("params")
+        if isinstance(real_params, dict):
+            return real_name, real_params
+        # Flattened fallback: repack non-proxy keys as the real args
+        _proxy_keys = {"tool_name", "params", "_approval_summary"}
+        _repacked = {
+            k: v for k, v in tool_args.items()
+            if k not in _proxy_keys
+        }
+        return real_name, _repacked if _repacked else tool_args
     return tool_name, tool_args
 
 

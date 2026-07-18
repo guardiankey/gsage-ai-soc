@@ -951,7 +951,15 @@ async def process_auto_approvals(
             tool_args: dict = dict(ap_row.get("tool_args") or {})
             # Unwrap proxy tool names (run_discovered_tool / run_approved_tool)
             if tool_name in ("run_discovered_tool", "run_approved_tool") and "tool_name" in tool_args:
-                tool_name = tool_args["tool_name"] or tool_name
+                inner_name = tool_args["tool_name"] or tool_name
+                real_params = tool_args.get("params")
+                if isinstance(real_params, dict):
+                    tool_name = inner_name
+                else:
+                    # Defensive: LLM may have flattened the real tool's
+                    # params as top-level keys.  The inner tool_name is
+                    # still extractable from the flattened dict.
+                    tool_name = inner_name
 
             enabled = await is_auto_approve(
                 org_id=ctx.org_id, tool_name=tool_name,

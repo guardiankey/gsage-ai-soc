@@ -71,10 +71,29 @@ async def process_approval_delegations(
 
             # Unwrap proxy tool names (run_discovered_tool / run_approved_tool)
             if tool_name in ("run_discovered_tool", "run_approved_tool") and "tool_name" in tool_args:
+                inner_name = tool_args["tool_name"] or tool_name
                 real_params = tool_args.get("params")
-                tool_name = tool_args["tool_name"] or tool_name
                 if isinstance(real_params, dict):
+                    tool_name = inner_name
                     tool_args = dict(real_params)
+                else:
+                    # Defensive: LLM may have flattened the real tool's
+                    # params as top-level keys instead of nesting them
+                    # under "params".  Repack everything except the
+                    # proxy-level keys (tool_name, params, _approval_summary).
+                    _proxy_keys = {"tool_name", "params", "_approval_summary"}
+                    _repacked = {
+                        k: v for k, v in tool_args.items()
+                        if k not in _proxy_keys
+                    }
+                    if _repacked:
+                        log.info(
+                            "delegation: repacking flattened params for "
+                            "inner tool '%s': %s",
+                            inner_name, sorted(_repacked.keys()),
+                        )
+                        tool_name = inner_name
+                        tool_args = _repacked
 
             # Extract agent-generated summary (pop to keep tool_args clean)
             summary: Optional[str] = tool_args.pop("_approval_summary", None)

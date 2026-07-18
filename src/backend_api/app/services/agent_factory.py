@@ -894,11 +894,31 @@ def _build_model(org: Optional["GSageOrganization"] = None):
 
     Uses org-level overrides (provider, model, API key) when available,
     falling back to global ``.env`` settings.
+
+    Derives ``max_tokens`` (output token limit) from the org-level
+    ``max_context_tokens`` (context window size).  A generous fraction
+    of the context window is reserved for input; the remainder caps the
+    model's response length to avoid runaway generations that would
+    exhaust the context budget.
     """
     settings = get_settings()
 
     # Resolve provider: org override → .env default
     provider = (org.llm_provider if org else settings.llm_provider).lower()
+
+    # ── Derive output token limit from org max_context_tokens ─────────
+    # max_context_tokens = total context window (input + output).
+    # Reserve at least 4 096 tokens for output, up to half the window.
+    _ctx_tokens = (
+        org.max_context_tokens
+        if org and org.max_context_tokens
+        else 32768
+    )
+    max_output_tokens = max(4096, _ctx_tokens // 2)
+    log.info(
+        "_build_model: provider=%s max_context_tokens=%d max_output_tokens=%d",
+        provider, _ctx_tokens, max_output_tokens,
+    )
 
     # Resolve maker model and API key from org (if set) or .env
     if provider == "openai":
@@ -908,7 +928,7 @@ def _build_model(org: Optional["GSageOrganization"] = None):
         api_key = (org.llm_api_key if org else None) or settings.openai_api_key
         base_url = settings.openai_base_url
 
-        kwargs: dict = {"id": model_id}
+        kwargs: dict = {"id": model_id, "max_tokens": max_output_tokens}
         if api_key:
             kwargs["api_key"] = api_key
         if base_url:
@@ -923,25 +943,30 @@ def _build_model(org: Optional["GSageOrganization"] = None):
             id=model_id,
             api_key=api_key,
             base_url=settings.deepseek_base_url,
+            max_tokens=max_output_tokens,
         )
 
     if provider == "gemini":
         from agno.models.google import Gemini
         model_id = (org.default_maker_model.strip() if org and org.default_maker_model else None) or settings.gemini_maker_model
         api_key = (org.llm_api_key if org else None) or settings.gemini_api_key
-        return Gemini(
+        model = Gemini(
             id=model_id,
-            api_key=api_key
+            api_key=api_key,
         )
+        model.max_tokens = max_output_tokens  # type: ignore[attr-defined]
+        return model
 
     if provider == "anthropic":
         from agno.models.anthropic import Claude
         model_id = (org.default_maker_model.strip() if org and org.default_maker_model else None) or settings.anthropic_maker_model
         api_key = (org.llm_api_key if org else None) or settings.anthropic_api_key
-        return Claude(
+        model = Claude(
             id=model_id,
-            api_key=api_key
+            api_key=api_key,
         )
+        model.max_tokens = max_output_tokens  # type: ignore[attr-defined]
+        return model
 
     if provider == "vllm":
         model_id = (org.default_maker_model.strip() if org and org.default_maker_model else None) or settings.vllm_maker_model
@@ -963,7 +988,7 @@ def _build_model(org: Optional["GSageOrganization"] = None):
             sampling_kwargs["top_p"] = settings.vllm_top_p
         if settings.vllm_presence_penalty is not None:
             sampling_kwargs["presence_penalty"] = settings.vllm_presence_penalty
-        return RecoveringToolCallVLLM(
+        model = RecoveringToolCallVLLM(
             id=model_id,
             api_key=api_key,
             base_url=settings.vllm_base_url,
@@ -973,6 +998,12 @@ def _build_model(org: Optional["GSageOrganization"] = None):
             enable_thinking=enable_thinking,
             **sampling_kwargs,
         )
+        # max_tokens is inherited from OpenAIChat but the
+        # RecoveringToolCallVLLM dataclass does not re-expose it as a
+        # constructor parameter.  Set it as an attribute so it is
+        # forwarded in API requests.
+        model.max_tokens = max_output_tokens  # type: ignore[attr-defined]
+        return model
 
     # Default: Ollama
     from agno.models.ollama import Ollama
@@ -1124,18 +1155,39 @@ class ApprovalAwareMCPTools(MCPTools):
                 return ToolResult(content="Error: tool_name is required.")
 
             # Defensive: the LLM (especially vLLM with tool_call_parser=none)
-            # may emit a tool call without a params dict.  Treat it as an
-            # empty params object so the proxy can still produce a clear
-            # validation error instead of a cryptic TypeError crash.
+            # may emit a tool call without a params dict — either omitting
+            # it entirely or (more commonly) flattening the target tool's
+            # parameters as top-level keys alongside tool_name.  When we
+            # detect the flattened-params pattern (extra kwargs present),
+            # repack them into ``params`` automatically so the proxy can
+            # proceed instead of failing with a hard error.
             if params is None:
-                return ToolResult(
-                    content=(
-                        f"Error: tool '{tool_name}' requires a 'params' "
-                        "argument. The LLM did not provide parameters. "
-                        "Retry with explicit params matching the tool's "
-                        "params_schema."
+                # Filter out framework-internal kwargs that may leak through
+                # certain agno versions (defensive list; in practice _extra
+                # should only contain LLM-provided args for this entrypoint).
+                _framework_keys = {
+                    "run_context", "agent", "team", "fc",
+                    "images", "videos", "audios", "files",
+                }
+                _flattened = {
+                    k: v for k, v in _extra.items()
+                    if k not in _framework_keys
+                }
+                if _flattened:
+                    log.info(
+                        "proxy: repacking flattened params for tool '%s': %s",
+                        tool_name, sorted(_flattened.keys()),
                     )
-                )
+                    params = _flattened
+                else:
+                    return ToolResult(
+                        content=(
+                            f"Error: tool '{tool_name}' requires a 'params' "
+                            "argument. The LLM did not provide parameters. "
+                            "Retry with explicit params matching the tool's "
+                            "params_schema."
+                        )
+                    )
 
             # Safety net: reject approval-required tools via the wrong proxy
             if not require_approval and "_approval_summary" in (params or {}):

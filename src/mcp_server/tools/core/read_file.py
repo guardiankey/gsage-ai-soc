@@ -30,6 +30,12 @@ log = logging.getLogger(__name__)
 # Default maximum lines returned for text content (no filters applied).
 _DEFAULT_MAX_LINES = 200
 
+# Maximum characters returned in a single read_file response.  When the
+# selected content exceeds this limit it is truncated and a [TRUNCATED]
+# marker with guidance is appended.  ~16 000 chars ≈ 4 000 tokens, leaving
+# headroom for the rest of the context window (~32K tokens for vLLM).
+_MAX_CONTENT_CHARS = 16000
+
 # Markdown content types and extensions for section-aware features.
 _MD_CONTENT_TYPES: tuple[str, ...] = ("text/markdown",)
 _MD_EXTENSIONS: tuple[str, ...] = (".md", ".mdx", ".markdown")
@@ -611,6 +617,33 @@ class ReadFileTool(BaseTool):
 
         content_out = "\n".join(selected)
 
+        # ── Character-level truncation ────────────────────────────────────
+        # Even with line-based pagination, 200 dense lines can exceed the
+        # context budget.  Truncate at _MAX_CONTENT_CHARS and append a
+        # [TRUNCATED] marker with actionable guidance so the agent can
+        # switch to a more appropriate strategy (chunked reads, summarize,
+        # or insert_file for merge operations).
+        content_truncated = False
+        if len(content_out) > _MAX_CONTENT_CHARS:
+            content_truncated = True
+            truncated_at = _MAX_CONTENT_CHARS
+            # Try to break at the last newline before the limit for readability
+            last_nl = content_out.rfind("\n", 0, _MAX_CONTENT_CHARS)
+            if last_nl > _MAX_CONTENT_CHARS // 2:
+                truncated_at = last_nl
+            content_out = content_out[:truncated_at]
+            content_out += (
+                f"\n\n[TRUNCATED] Content truncated at {truncated_at:_} characters. "
+                f"File has {total_lines:_} lines ({total_chars:_} chars, "
+                f"{total_words:_} words, {size_bytes:_} bytes). "
+                "To continue reading, use offset/limit pagination "
+                "(e.g. offset=N, limit=100). "
+                "For large documents, consider summarize_file to extract "
+                "key information without consuming your context window. "
+                "To merge this file into another, use write_file with "
+                "action=insert_file instead of reading inline."
+            )
+
         # ── Pagination metadata ───────────────────────────────────────────
         has_more = end_line < total_lines
         # Compute next_offset from original offset/limit if available,
@@ -647,10 +680,25 @@ class ReadFileTool(BaseTool):
             "grep_matches": grep_matches,
             "grep_context": grep_context if grep_context > 0 else 0,
             "capped_at_max_lines": capped,
+            "content_truncated": content_truncated,
             "file_truncated_by_size": truncated_by_cap,
         }
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
+
+        if content_truncated:
+            return self._partial(
+                data=out_data,
+                code="TRUNCATED",
+                message=(
+                    f"Content truncated at {_MAX_CONTENT_CHARS:_} chars. "
+                    f"File: {total_lines:_} lines, {total_chars:_} chars, "
+                    f"{size_bytes:_} bytes. "
+                    "Use offset/limit to paginate, summarize_file for large "
+                    "documents, or insert_file to merge files."
+                ),
+                execution_time_ms=elapsed_ms,
+            )
 
         if capped or truncated_by_cap:
             # Build a helpful guidance message
