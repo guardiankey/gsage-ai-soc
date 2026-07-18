@@ -246,7 +246,8 @@ class ReadFileTool(BaseTool):
                 "minimum": 1,
                 "description": (
                     "First line to return (1-indexed, inclusive). "
-                    "Defaults to 1. Ignored when tail_lines is set. Text files only."
+                    "Defaults to 1. Ignored when tail_lines is set. "
+                    "Mutually exclusive with 'offset'/'limit'. Text files only."
                 ),
             },
             "end_line": {
@@ -254,7 +255,30 @@ class ReadFileTool(BaseTool):
                 "minimum": 1,
                 "description": (
                     "Last line to return (1-indexed, inclusive). "
-                    "Defaults to start_line + max_lines - 1. Text files only."
+                    "Defaults to start_line + max_lines - 1. "
+                    "Mutually exclusive with 'offset'/'limit'. Text files only."
+                ),
+            },
+            "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": (
+                    "0-indexed start line for paginated reads (like array index). "
+                    "Maps to start_line = offset + 1. "
+                    "Mutually exclusive with start_line/end_line. "
+                    "Use with 'limit': offset=8, limit=8 returns lines 9-16 (8 lines)."
+                ),
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000,
+                "description": (
+                    "Maximum number of lines to return starting from 'offset' — "
+                    "a COUNT, not an absolute line number. "
+                    "Maps to end_line = offset + limit. "
+                    "Subject to max_lines cap. "
+                    "Only valid when 'offset' is also provided."
                 ),
             },
             "tail_lines": {
@@ -479,10 +503,33 @@ class ReadFileTool(BaseTool):
                 params["end_line"],
             )
 
-        # ── Tail mode or line range ───────────────────────────────────────
+        # ── Normalize offset/limit to start_line/end_line ──────────────────
         tail_lines: int | None = params.get("tail_lines") or None
         max_lines = min(int(params.get("max_lines") or _DEFAULT_MAX_LINES), 1000)
+        raw_offset = params.get("offset")
+        if raw_offset is not None:
+            if params.get("start_line") is not None or params.get("end_line") is not None:
+                return self._failure(
+                    "INVALID_PARAMS",
+                    "'offset'/'limit' are mutually exclusive with 'start_line'/'end_line'.",
+                    execution_time_ms=int((time.monotonic() - t0) * 1000),
+                )
+            if tail_lines is not None:
+                return self._failure(
+                    "INVALID_PARAMS",
+                    "'offset'/'limit' are incompatible with 'tail_lines'.",
+                    execution_time_ms=int((time.monotonic() - t0) * 1000),
+                )
+            offset_val = int(raw_offset)
+            limit_val = int(params.get("limit") or max_lines)
+            effective_limit = min(limit_val, max_lines)
+            params["start_line"] = offset_val + 1
+            params["end_line"] = offset_val + effective_limit
+            # Preserve original offset/limit for response metadata
+            params["_offset"] = offset_val
+            params["_limit"] = effective_limit
 
+        # ── Tail mode or line range ───────────────────────────────────────
         if tail_lines is not None:
             # Tail mode: read last N lines (ignores start_line/end_line)
             if not section_applied and params.get("start_line") is not None:
@@ -564,6 +611,21 @@ class ReadFileTool(BaseTool):
 
         content_out = "\n".join(selected)
 
+        # ── Pagination metadata ───────────────────────────────────────────
+        has_more = end_line < total_lines
+        # Compute next_offset from original offset/limit if available,
+        # otherwise derive from start_line
+        _orig_offset = params.get("_offset")
+        _orig_limit = params.get("_limit")
+        if _orig_offset is not None and _orig_limit is not None:
+            next_offset = _orig_offset + _orig_limit if has_more else None
+        else:
+            next_offset = end_line if has_more else None  # 0-based next
+
+        # ── Revision token (opaque) ───────────────────────────────────────
+        updated_at = result.get("updated_at")
+        revision = updated_at.isoformat() if updated_at is not None else None
+
         # ── Build output ──────────────────────────────────────────────────
         out_data: dict = {
             **base_meta,
@@ -576,6 +638,9 @@ class ReadFileTool(BaseTool):
             "returned_lines": len(selected),
             "start_line": start_line,
             "end_line": end_line,
+            "has_more": has_more,
+            "next_offset": next_offset,
+            "revision": revision,
             "tail_applied": tail_applied,
             "section_applied": section_applied,
             "grep_applied": grep_applied,

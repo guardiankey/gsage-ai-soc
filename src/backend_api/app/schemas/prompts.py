@@ -64,7 +64,7 @@ class PromptCreate(BaseModel):
     """Payload to create a prompt."""
 
     title: str = Field(min_length=1, max_length=255)
-    content: str = Field(min_length=1, max_length=10000)
+    content: str = Field(min_length=1, max_length=50000)
     description: Optional[str] = Field(None, max_length=500)
     category_id: Optional[uuid.UUID] = None
     scope: _Scope = Field(
@@ -77,7 +77,7 @@ class PromptUpdate(BaseModel):
     """Payload to update a prompt."""
 
     title: Optional[str] = Field(None, min_length=1, max_length=255)
-    content: Optional[str] = Field(None, min_length=1, max_length=10000)
+    content: Optional[str] = Field(None, min_length=1, max_length=50000)
     description: Optional[str] = Field(None, max_length=500)
     category_id: Optional[uuid.UUID] = None
     scope: Optional[_Scope] = None

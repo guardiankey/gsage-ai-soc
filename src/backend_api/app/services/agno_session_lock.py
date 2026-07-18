@@ -139,8 +139,18 @@ end
 async def _release(client: redis.Redis, key: str, token: str) -> None:
     try:
         await client.eval(_RELEASE_SCRIPT, 1, key, token)  # type: ignore[arg-type]
-    except Exception as exc:
-        log.warning("agno_session_lock: release failed key=%s: %s", key, exc)
+    except BaseException as exc:
+        # Catch CancelledError and KeyboardInterrupt too — swallowing
+        # them here prevents cancel-scope corruption upstream (the
+        # anyio cancel stack must never see a CancelledError escape
+        # from a finally block).
+        if isinstance(exc, Exception):
+            log.warning("agno_session_lock: release failed key=%s: %s", key, exc)
+        else:
+            log.debug(
+                "agno_session_lock: release interrupted key=%s: %s",
+                key, type(exc).__name__,
+            )
 
 
 @contextlib.asynccontextmanager

@@ -1,17 +1,18 @@
 """gSage AI — WriteFile tool.
 
-Allows the agent to create, edit, diff, and soft-delete text files
-in the current conversation scope.  Works with Markdown, HTML, plain
-text, CSV, JSON, YAML, and similar text-based formats.
+Allows the agent to create, edit, insert_file, diff, and soft-delete
+text files in the current conversation scope.  Works with Markdown,
+HTML, plain text, CSV, JSON, YAML, and similar text-based formats.
 
 Use ``read_file`` to inspect file contents after creation or editing.
 
 Actions
 -------
-create  — Create a new text file (returns file_id)
-edit    — Edit an existing file (full replace or line-range splice)
-diff    — Compare two files (unified diff + optional HTML side-by-side)
-delete  — Soft-delete a file (hidden from read_file listings)
+create      — Create a new text file (returns file_id)
+edit        — Edit an existing file (full replace or line-range splice)
+insert_file — Insert the entire content of one file into another at a line
+diff        — Compare two files (unified diff + optional HTML side-by-side)
+delete      — Soft-delete a file (hidden from read_file listings)
 
 Permissions: ``agents:run``
 """
@@ -62,7 +63,7 @@ async def _lookup_file(
 
 
 class WriteFileTool(BaseTool):
-    """Create, edit, append, diff, and delete text files in the current conversation scope.
+    """Create, edit, insert_file, append, diff, and delete text files in the current conversation scope.
 
     Works with text-based formats: Markdown (.md), HTML (.html), plain text
     (.txt), CSV (.csv), JSON (.json), YAML (.yaml), and similar.
@@ -81,10 +82,25 @@ class WriteFileTool(BaseTool):
 
       - **full replace** (default): Provide ``new_content`` to replace the
         entire file content.
-      - **line_range**: Provide ``line_start``, ``line_end`` (1-based,
-        inclusive), and ``new_content`` to replace only those lines — useful
-        for large files. The lines are spliced: content before line_start +
-        new_content + content after line_end.
+      - **splice** / **line_range**: Provide ``line_start`` with
+        ``line_count`` (preferred) or ``line_end`` (legacy) to remove N
+        lines starting at ``line_start`` and insert ``new_content`` at
+        that position — a textual splice. ``line_count=0`` inserts
+        without removing. ``new_content=""`` removes without inserting.
+        All edit operations (replace, insert, delete, expand, shrink)
+        are special cases of this single splice primitive.
+
+    ``insert_file``
+      Insert the **entire content** of a source file into a target file at
+      a specific line. Provide ``source_file_id`` (the file whose content
+      will be inserted), ``file_id`` (the target file), and ``line_start``
+      (1-based line where insertion begins). Optionally set ``line_count``
+      to remove N lines from the target before inserting (default 0 = pure
+      insert). Both files must be accessible and text-based. Source and
+      target must be different files.
+
+      Example — insert file A's content at line 15 of file B (pure insert):
+      ``action="insert_file", source_file_id="<A>", file_id="<B>", line_start=15``
 
     ``append``
       Add text to the end of an existing file. Provide ``file_id`` and
@@ -117,11 +133,11 @@ class WriteFileTool(BaseTool):
     """
 
     name: ClassVar[str] = "write_file"
-    version: ClassVar[str] = "1.2.0"
+    version: ClassVar[str] = "1.3.0"
     summary: ClassVar[str] = (
-        "Create, edit (line-range or full replace), append, diff (unified + HTML), "
-        "rename, copy, or soft-delete text files (MD, HTML, TXT, CSV, JSON) "
-        "in the current conversation scope."
+        "Create, edit (line-range or full replace), insert_file (merge files), "
+        "append, diff (unified + HTML), rename, copy, or soft-delete text files "
+        "(MD, HTML, TXT, CSV, JSON) in the current conversation scope."
     )
     category: ClassVar[str] = "file"
     core_tool: ClassVar[bool] = False
@@ -136,11 +152,12 @@ class WriteFileTool(BaseTool):
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["create", "edit", "diff", "rename", "copy", "delete", "append"],
+                "enum": ["create", "edit", "insert_file", "diff", "rename", "copy", "delete", "append"],
                 "description": (
                     "Action to perform: "
                     "create — create a new text file; "
                     "edit — edit an existing file (full replace or line range); "
+                    "insert_file — insert the entire content of a source file into a target file at a line; "
                     "diff — compare two files line-by-line; "
                     "rename — change a file's name (and content_type if extension changes); "
                     "copy — duplicate a file (new file_id, same content); "
@@ -160,7 +177,8 @@ class WriteFileTool(BaseTool):
             "content": {
                 "type": "string",
                 "description": (
-                    "Full text content for the new file. Required for 'create'."
+                    "Text content. Required for 'create' (full file content) "
+                    "and 'append' (text to add to the end of the file)."
                 ),
             },
             "content_type": {
@@ -178,14 +196,25 @@ class WriteFileTool(BaseTool):
                     "(for 'create' action)."
                 ),
             },
-            # ── edit / delete / diff / rename / copy params ──
+            # ── insert_file params ──
+            "source_file_id": {
+                "type": "string",
+                "description": (
+                    "UUID of the source file whose entire content will be "
+                    "inserted. Required for 'insert_file'. The file must be "
+                    "text-based and accessible (same org). Must be different "
+                    "from the target file_id."
+                ),
+            },
+            # ── edit / delete / diff / rename / copy / insert_file params ──
             "file_id": {
                 "type": "string",
                 "description": (
                     "UUID of the file to operate on. Required for 'edit', "
-                    "'rename', 'copy', 'delete', and for 'diff' as file_id_a "
-                    "(when file_id_b is also provided). Obtain from a prior "
-                    "'create' call or from 'read_file' (mode='list')."
+                    "'insert_file' (as target), 'rename', 'copy', 'delete', "
+                    "and for 'diff' as file_id_a (when file_id_b is also "
+                    "provided). Obtain from a prior 'create' call or from "
+                    "'read_file' (mode='list')."
                 ),
             },
             # ── rename / copy params ──
@@ -202,27 +231,52 @@ class WriteFileTool(BaseTool):
             "new_content": {
                 "type": "string",
                 "description": (
-                    "Replacement text. For 'edit' with full replace: the new "
-                    "full file content. For 'edit' with line_range: the text "
-                    "to insert in place of lines [line_start, line_end]."
+                    "Replacement text for the splice: remove line_count lines "
+                    "starting at line_start, insert this text at that position. "
+                    "When empty (''), the splice inserts 0 replacement lines — "
+                    "pure deletion when line_count > 0, no-op when line_count = 0. "
+                    "For 'edit' with full replace (no line_start): the new full file content."
                 ),
             },
             "line_start": {
                 "type": "integer",
                 "minimum": 1,
                 "description": (
-                    "First line to replace (1-based inclusive). "
-                    "When provided with line_end, enables line_range editing "
-                    "instead of full replace. Requires 'edit' action."
+                    "First line to operate on (1-based inclusive). "
+                    "When provided with line_count or line_end, enables splice/line_range "
+                    "editing instead of full replace. Required for 'edit' (splice mode) "
+                    "and 'insert_file' actions."
+                ),
+            },
+            "line_count": {
+                "type": "integer",
+                "minimum": 0,
+                "description": (
+                    "Number of lines to REMOVE starting at line_start. "
+                    "0 = pure insert (remove nothing, insert before line_start). "
+                    "For 'edit': together with new_content this forms a splice. "
+                    "For 'insert_file': together with source_file_id this forms a splice. "
+                    "Mutually exclusive with line_end. "
+                    "Preferred over line_end for new code."
                 ),
             },
             "line_end": {
                 "type": "integer",
                 "minimum": 1,
                 "description": (
-                    "Last line to replace (1-based inclusive). "
-                    "Must be >= line_start. "
+                    "Last line to replace (1-based inclusive, ABSOLUTE line number). "
+                    "Legacy parameter — prefer line_count for new code. "
+                    "Mutually exclusive with line_count. "
                     "When provided with line_start, enables line_range editing."
+                ),
+            },
+            "expected_revision": {
+                "type": "string",
+                "description": (
+                    "Optional opaque revision token from a prior read_file response. "
+                    "When provided, the edit is rejected with REVISION_CONFLICT if "
+                    "the file has been modified since that read. "
+                    "Prevents lost updates from concurrent edits."
                 ),
             },
             # ── diff params ──
@@ -281,6 +335,8 @@ class WriteFileTool(BaseTool):
             return await self._create(agent_context, params, session, t0)
         if action == "edit":
             return await self._edit(agent_context, params, session, t0)
+        if action == "insert_file":
+            return await self._insert_file(agent_context, params, session, t0)
         if action == "diff":
             return await self._diff(agent_context, params, session, t0)
         if action == "rename":
@@ -384,6 +440,8 @@ class WriteFileTool(BaseTool):
         new_content: str | None = params.get("new_content")
         line_start: int | None = params.get("line_start")
         line_end: int | None = params.get("line_end")
+        line_count: int | None = params.get("line_count")
+        expected_revision: str | None = (params.get("expected_revision") or "").strip() or None
 
         if not file_id:
             return self._failure(
@@ -397,6 +455,19 @@ class WriteFileTool(BaseTool):
                 "'new_content' is required for edit.",
                 execution_time_ms=int((time.monotonic() - t0) * 1000),
             )
+
+        # ── Mutual exclusion: line_count vs line_end ──────────────────
+        has_line_count = line_count is not None
+        has_line_end = line_end is not None
+        if has_line_count and has_line_end:
+            return self._failure(
+                "INVALID_PARAMS",
+                "'line_count' and 'line_end' are mutually exclusive. "
+                "Use 'line_count' for new code.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        # For splice/line_range mode, at least one is needed alongside line_start
+        is_splice_mode = line_start is not None and (has_line_count or has_line_end)
 
         # Look up the file
         row = await _lookup_file(session, file_id, agent_context.org_id)
@@ -420,7 +491,20 @@ class WriteFileTool(BaseTool):
                 execution_time_ms=int((time.monotonic() - t0) * 1000),
             )
 
-        # Load current content (needed for line_range strategy)
+        # ── Revision check (optimistic concurrency) ───────────────────
+        if expected_revision:
+            current_revision = row.updated_at.isoformat() if row.updated_at else None
+            if current_revision is None or current_revision != expected_revision:
+                return self._failure(
+                    "REVISION_CONFLICT",
+                    f"File was modified since last read. "
+                    f"Expected revision {expected_revision}, "
+                    f"current is {current_revision or 'unknown'}. "
+                    f"Re-read the file to get the latest content.",
+                    execution_time_ms=int((time.monotonic() - t0) * 1000),
+                )
+
+        # Load current content (needed for splice/line_range strategy)
         loaded = await self._load_file(
             file_id=file_id,
             org_id=str(agent_context.org_id),
@@ -440,24 +524,61 @@ class WriteFileTool(BaseTool):
         size_before = len(current_bytes)
 
         # Determine edit strategy
-        if line_start is not None and line_end is not None:
-            # ── line_range strategy (same algorithm as wikijs_editor._edit_page) ──
+        if is_splice_mode:
+            # ── Splice / line_range strategy ──────────────────────────
             current_text = current_bytes.decode("utf-8")
-            lines = current_text.split("\n")
+            # Detect line separator (LF vs CRLF)
+            line_sep = _detect_line_separator(current_text)
+            # Logical lines (see SPEC Section 0.1)
+            lines = current_text.splitlines()
             total_lines = len(lines)
-            ls = max(1, line_start)
-            le = min(total_lines, line_end)
-            if ls > le:
-                return self._failure(
-                    "PARAM_INVALID",
-                    f"line_start ({line_start}) must be <= line_end ({line_end}). "
-                    f"File has {total_lines} lines.",
-                    execution_time_ms=int((time.monotonic() - t0) * 1000),
-                )
-            replacement_lines = new_content.split("\n")
+            ls = max(1, line_start)  # type: ignore[arg-type]
+
+            if has_line_count:
+                line_count = int(line_count)  # type: ignore[arg-type]
+                if line_count < 0:
+                    return self._failure(
+                        "INVALID_PARAMS",
+                        "'line_count' must be >= 0.",
+                        execution_time_ms=int((time.monotonic() - t0) * 1000),
+                    )
+                if ls > total_lines + 1:
+                    return self._failure(
+                        "LINE_OUT_OF_RANGE",
+                        f"line_start ({line_start}) out of range. "
+                        f"File has {total_lines} lines. "
+                        f"Use line_start={total_lines + 1} to append.",
+                        execution_time_ms=int((time.monotonic() - t0) * 1000),
+                    )
+                le = ls - 1 + line_count  # 0 → le = ls-1 (insert mode)
+            else:
+                # Legacy line_end mode
+                le = min(total_lines, line_end)  # type: ignore[arg-type]
+                if ls > le:
+                    return self._failure(
+                        "PARAM_INVALID",
+                        f"line_start ({line_start}) must be <= line_end ({line_end}). "
+                        f"File has {total_lines} lines. "
+                        f"Use line_count=0 for insert mode.",
+                        execution_time_ms=int((time.monotonic() - t0) * 1000),
+                    )
+
+            # Splice: remove lines [ls-1 : le], insert replacement_lines
+            # new_content="" → 0 replacement lines (pure delete when line_count > 0)
+            if new_content == "":
+                replacement_lines: list[str] = []
+            else:
+                replacement_lines = new_content.splitlines()
+
             new_lines_list = lines[: ls - 1] + replacement_lines + lines[le:]
-            new_bytes = "\n".join(new_lines_list).encode("utf-8")
-            strategy = "line_range"
+            new_text = line_sep.join(new_lines_list)
+            # Preserve trailing newline if original had one
+            if current_text.endswith("\n") and not new_text.endswith("\n"):
+                new_text += "\n"
+            elif current_text.endswith("\r\n") and not new_text.endswith("\r\n"):
+                new_text += "\r\n"
+            new_bytes = new_text.encode("utf-8")
+            strategy = "splice" if has_line_count else "line_range"
         else:
             # ── full replace strategy ──
             new_bytes = new_content.encode("utf-8")
@@ -983,6 +1104,215 @@ class WriteFileTool(BaseTool):
         )
 
 
+    async def _insert_file(
+        self,
+        agent_context: AgentContext,
+        params: dict,
+        session,
+        t0: float,
+    ) -> ToolResult:
+        """Insert the entire content of a source file into a target file at a line.
+
+        Uses the same splice logic as ``_edit``, but the replacement text
+        comes from a source file instead of an inline ``new_content`` string.
+        """
+        source_file_id: str | None = (params.get("source_file_id") or "").strip() or None
+        target_file_id: str | None = (params.get("file_id") or "").strip() or None
+        line_start: int | None = params.get("line_start")
+        line_count: int | None = params.get("line_count")
+
+        # ── Validate required params ─────────────────────────────────
+        if not source_file_id:
+            return self._failure(
+                "PARAM_MISSING",
+                "'source_file_id' is required for insert_file.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if not target_file_id:
+            return self._failure(
+                "PARAM_MISSING",
+                "'file_id' (target) is required for insert_file.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if source_file_id == target_file_id:
+            return self._failure(
+                "PARAM_INVALID",
+                "source_file_id and file_id must be different files.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if line_start is None:
+            return self._failure(
+                "PARAM_MISSING",
+                "'line_start' is required for insert_file.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if line_count is not None and line_count < 0:
+            return self._failure(
+                "INVALID_PARAMS",
+                "'line_count' must be >= 0.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        # ── Look up both files ───────────────────────────────────────
+        source_row = await _lookup_file(session, source_file_id, agent_context.org_id)
+        if source_row is None:
+            return self._failure(
+                "FILE_NOT_FOUND",
+                f"Source file '{source_file_id}' not found or access denied.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if source_row.purged_at is not None:
+            return self._failure(
+                "FILE_PURGED",
+                f"Source file '{source_row.filename}' has been deleted.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if not is_text_content(source_row.content_type):
+            return self._failure(
+                "NOT_TEXT_FILE",
+                f"Source file '{source_row.filename}' is not a text file "
+                f"(type: {source_row.content_type}).",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        target_row = await _lookup_file(session, target_file_id, agent_context.org_id)
+        if target_row is None:
+            return self._failure(
+                "FILE_NOT_FOUND",
+                f"Target file '{target_file_id}' not found or access denied.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if target_row.purged_at is not None:
+            return self._failure(
+                "FILE_PURGED",
+                f"Target file '{target_row.filename}' has been deleted.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if not is_text_content(target_row.content_type):
+            return self._failure(
+                "NOT_TEXT_FILE",
+                f"Target file '{target_row.filename}' is not a text file "
+                f"(type: {target_row.content_type}).",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        # ── Load source file content ──────────────────────────────────
+        source_loaded = await self._load_file(
+            file_id=source_file_id,
+            org_id=str(agent_context.org_id),
+            user_id=str(agent_context.user_id) if agent_context.user_id else None,
+            dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
+            session=session,
+            max_bytes=MAX_FILE_BYTES,
+        )
+        if source_loaded is None:
+            return self._failure(
+                "LOAD_FAILED",
+                f"Failed to load source file '{source_file_id}'.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        source_text = source_loaded["data"].decode("utf-8")
+
+        # ── Load target file content ──────────────────────────────────
+        target_loaded = await self._load_file(
+            file_id=target_file_id,
+            org_id=str(agent_context.org_id),
+            user_id=str(agent_context.user_id) if agent_context.user_id else None,
+            dept_id=str(agent_context.dept_id) if agent_context.dept_id else None,
+            session=session,
+            max_bytes=MAX_FILE_BYTES,
+        )
+        if target_loaded is None:
+            return self._failure(
+                "LOAD_FAILED",
+                f"Failed to load target file '{target_file_id}'.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        target_bytes: bytes = target_loaded["data"]
+        size_before = len(target_bytes)
+        target_text = target_bytes.decode("utf-8")
+
+        # ── Splice: same logic as _edit ───────────────────────────────
+        line_sep = _detect_line_separator(target_text)
+        lines = target_text.splitlines()
+        total_lines = len(lines)
+        ls = max(1, line_start)
+        lc = line_count if line_count is not None else 0
+
+        if ls > total_lines + 1:
+            return self._failure(
+                "LINE_OUT_OF_RANGE",
+                f"line_start ({line_start}) out of range. "
+                f"Target file has {total_lines} lines. "
+                f"Use line_start={total_lines + 1} to append at end.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        le = ls - 1 + lc  # 0-based index after removal
+        source_lines = source_text.splitlines()
+
+        new_lines_list = lines[: ls - 1] + source_lines + lines[le:]
+        new_text = line_sep.join(new_lines_list)
+        # Preserve trailing newline if target had one
+        if target_text.endswith("\n") and not new_text.endswith("\n"):
+            new_text += "\n"
+        elif target_text.endswith("\r\n") and not new_text.endswith("\r\n"):
+            new_text += "\r\n"
+        new_bytes = new_text.encode("utf-8")
+
+        # ── Validate resulting size ───────────────────────────────────
+        if len(new_bytes) > MAX_FILE_BYTES:
+            return self._failure(
+                "CONTENT_TOO_LARGE",
+                f"Resulting content size ({len(new_bytes)} bytes) exceeds the "
+                f"maximum ({MAX_FILE_BYTES} bytes).",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        # ── Persist ───────────────────────────────────────────────────
+        result = await self._replace_file_content(
+            file_id=target_file_id,
+            data=new_bytes,
+            agent_context=agent_context,
+            session=session,
+        )
+
+        if result is None:
+            return self._failure(
+                "REPLACE_FAILED",
+                f"Failed to update target file '{target_file_id}'.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+
+        log.info(
+            "write_file insert_file: src=%s → dst=%s @line %d, "
+            "%d → %d bytes (%d source lines, %d removed)",
+            source_file_id, target_file_id, line_start,
+            size_before, result["size_bytes"],
+            len(source_lines), lc,
+        )
+
+        return self._success(
+            {
+                "action": "insert_file",
+                "source_file_id": source_file_id,
+                "source_filename": source_row.filename,
+                "target_file_id": result["file_id"],
+                "target_filename": result["filename"],
+                "content_type": result["content_type"],
+                "size_bytes_before": size_before,
+                "size_bytes_after": result["size_bytes"],
+                "source_lines": len(source_lines),
+                "target_lines_before": total_lines,
+                "line_start": line_start,
+                "line_count": lc,
+                "download_path": result["download_path"],
+            },
+            execution_time_ms=int((time.monotonic() - t0) * 1000),
+        )
+
+
 def _safe_basename(filename: str) -> str:
     """Return a filesystem-safe base name for use in generated filenames."""
     # Strip extension and replace problematic characters
@@ -991,3 +1321,15 @@ def _safe_basename(filename: str) -> str:
     # Replace anything that isn't alphanumeric, dash, underscore, or dot
     safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in base)
     return safe or "file"
+
+
+def _detect_line_separator(text: str) -> str:
+    """Detect the dominant line separator in *text*.
+
+    Returns ``\\r\\n`` if any CRLF is found, otherwise ``\\n``.
+    For mixed-endings files, CRLF takes precedence to avoid corrupting
+    Windows-style lines.
+    """
+    if "\r\n" in text:
+        return "\r\n"
+    return "\n"

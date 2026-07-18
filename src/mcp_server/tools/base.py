@@ -1813,6 +1813,7 @@ class BaseTool(ABC):
                 "size_bytes": row.size_bytes,
                 "data": data,
                 "truncated": truncated,
+                "updated_at": row.updated_at,
             }, None
         except Exception as exc:
             logger.error("Tool %s: failed to load file '%s': %s", self.name, file_id, exc)

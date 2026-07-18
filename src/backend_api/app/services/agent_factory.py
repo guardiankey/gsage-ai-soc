@@ -449,6 +449,10 @@ You are gSage AI, a cybersecurity analyst assistant. Expertise: network
 security (DNS, WHOIS, port scanning, IP reputation), threat intel/OSINT,
 vulnerability assessment, incident response, log analysis, hardening.
 
+Never repeat the same reasoning after receiving the same information.
+If no new information is available, either emit the next tool call or
+produce the final answer.
+
 # Output
 - Structured output with severity ratings; tables for multiple findings.
 - Cite sources (tool output, CVE IDs). Never expose credentials/tokens.
@@ -963,6 +967,7 @@ def _build_model(org: Optional["GSageOrganization"] = None):
             id=model_id,
             api_key=api_key,
             base_url=settings.vllm_base_url,
+            timeout=300.0,
             tool_call_dialect=None if parser_mode in ("", "none") else parser_mode,
             force_non_streaming=force_non_streaming,
             enable_thinking=enable_thinking,
@@ -1109,7 +1114,7 @@ class ApprovalAwareMCPTools(MCPTools):
 
         async def _proxy_entrypoint(
             tool_name: str,
-            params: dict[str, Any],
+            params: dict[str, Any] | None = None,
             run_context=None,
             agent=None,
             team=None,
@@ -1117,6 +1122,20 @@ class ApprovalAwareMCPTools(MCPTools):
         ) -> ToolResult:
             if not tool_name:
                 return ToolResult(content="Error: tool_name is required.")
+
+            # Defensive: the LLM (especially vLLM with tool_call_parser=none)
+            # may emit a tool call without a params dict.  Treat it as an
+            # empty params object so the proxy can still produce a clear
+            # validation error instead of a cryptic TypeError crash.
+            if params is None:
+                return ToolResult(
+                    content=(
+                        f"Error: tool '{tool_name}' requires a 'params' "
+                        "argument. The LLM did not provide parameters. "
+                        "Retry with explicit params matching the tool's "
+                        "params_schema."
+                    )
+                )
 
             # Safety net: reject approval-required tools via the wrong proxy
             if not require_approval and "_approval_summary" in (params or {}):

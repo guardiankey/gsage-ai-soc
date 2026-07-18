@@ -48,16 +48,35 @@ def cleanup_inactive_sessions() -> dict:
     async def _run() -> int:
         agno_db = get_agno_db()
         cutoff = int(time.time()) - _SESSION_IDLE_SECONDS
-        sessions, _ = await agno_db.get_sessions(limit=1000, deserialize=False)  # type: ignore[misc]
-
+        # Load sessions in small pages to avoid OOM — each session's
+        # JSONB ``runs`` column can be multiple MB.  Processing 50 at a
+        # time keeps peak memory under ~250 MB even with large runs.
+        batch_size = 50
+        page = 1
         deleted = 0
-        for session in sessions:  # type: ignore[union-attr]
-            updated_at = session.get("updated_at") or session.get("created_at") or 0
-            if updated_at < cutoff:
-                session_id = session.get("session_id") or session.get("id")
-                if session_id:
-                    await agno_db.delete_session(session_id)
-                    deleted += 1
+
+        while True:
+            result = await agno_db.get_sessions(
+                limit=batch_size,
+                page=page,
+                deserialize=False,
+            )
+            sessions: list = result[0] if isinstance(result, tuple) else []
+            total: int = result[1] if isinstance(result, tuple) else 0
+            if not sessions:
+                break
+
+            for session in sessions:
+                updated_at = session.get("updated_at") or session.get("created_at") or 0
+                if updated_at < cutoff:
+                    session_id = session.get("session_id") or session.get("id")
+                    if session_id:
+                        await agno_db.delete_session(session_id)
+                        deleted += 1
+
+            page += 1
+            if total > 0 and page > (total // batch_size) + 1:
+                break
 
         return deleted
 

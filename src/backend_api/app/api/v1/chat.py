@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any, AsyncIterator, List, Optional, cast
@@ -853,18 +854,20 @@ async def list_messages(
 
     for run in runs:
         run_status = getattr(run, "status", None)
-        # Skip cancelled runs entirely (user-initiated cancellation has no
-        # value in the chat history).
-        if run_status == RunStatus.cancelled:
-            continue
 
         # Map the run status to a user-visible message status badge.
-        # ``error`` and ``paused`` are surfaced; everything else is None.
+        # ``error``, ``paused``, and ``cancelled`` are surfaced so the
+        # frontend can render an indicator; everything else is None.
+        # Cancelled runs are NOT skipped — they may contain valid
+        # conversation history (e.g. a run cancelled by a background-task
+        # timeout still has all the tool calls and agent reasoning).
         status_str: Optional[str] = None
         if run_status == RunStatus.error:
             status_str = "error"
         elif run_status == RunStatus.paused:
             status_str = "paused"
+        elif run_status == RunStatus.cancelled:
+            status_str = "cancelled"
 
         run_messages = list(getattr(run, "messages", None) or [])
 
@@ -1075,17 +1078,13 @@ async def check_messages(
     if agno_session is not None:
         runs = list(getattr(agno_session, "runs", None) or [])
         # Include all runs — nested continuations create child runs.
+        # Cancelled runs are included in the count (they may contain
+        # valid conversation history).
 
-        message_count = sum(
-            1 for r in runs
-            if getattr(r, "status", None) != RunStatus.cancelled
-        )
+        message_count = len(runs)
 
-        # Find the id of the last user/assistant message in the last
-        # non-cancelled run.
+        # Find the id of the last user/assistant message in the last run.
         for run in reversed(runs):
-            if getattr(run, "status", None) == RunStatus.cancelled:
-                continue
             for msg in reversed(list(getattr(run, "messages", None) or [])):
                 role = getattr(msg, "role", None)
                 if role in ("user", "assistant"):
@@ -1496,11 +1495,14 @@ async def _sse_stream(
         publish_conversation_updated,
     )
 
+    _drained = False
+    _lock_held = False
+    _lock_cm = None
+
     try:
         _lock_cm = _acquire_session_lock(
             agno_session_id, owner="sse:stream_message"
         )
-        _lock_held = False
         try:
             await _lock_cm.__aenter__()
             _lock_held = True
@@ -1519,9 +1521,97 @@ async def _sse_stream(
             )
             return
 
-        while True:
+        # ── H1 validation probe (§14.3 of sse-agent-isolation.md) ──────
+        # Set GSAGE_TEST_DETACHED_EXECUTION=1 in the backend container env,
+        # send a prompt, close the browser tab mid-stream, then check logs
+        # for [H1_TEST] messages.  No external test harness needed.
+        if os.environ.get("GSAGE_TEST_DETACHED_EXECUTION"):
+            _h1_survived = False
+
+            async def _h1_probe() -> None:
+                nonlocal _h1_survived
+                log.warning(
+                    "[H1_TEST] Detached probe started. "
+                    "Close the browser tab NOW, then wait 10s."
+                )
+                await asyncio.sleep(5)  # give time to disconnect
+                try:
+                    import httpx
+                    async with httpx.AsyncClient() as client:
+                        r = await client.get(
+                            "http://mcp-server:8001/health", timeout=5.0
+                        )
+                    _h1_survived = True
+                    log.warning(
+                        "[H1_TEST] SURVIVED — HTTP request succeeded "
+                        "after SSE disconnect (status=%d). H1: PASS ✅",
+                        r.status_code,
+                    )
+                except asyncio.CancelledError:
+                    log.error(
+                        "[H1_TEST] FAILED — probe was cancelled. "
+                        "asyncio.create_task() inherited the anyio CancelScope. "
+                        "H1: FAIL ❌ — architecture INVALID."
+                    )
+                except Exception as exc:
+                    log.error(
+                        "[H1_TEST] INDETERMINATE — probe error: %s. "
+                        "H1: INCONCLUSIVE ⚠️",
+                        exc,
+                    )
+
+            asyncio.create_task(_h1_probe())
+            log.warning(
+                "[H1_TEST] Detached probe spawned via asyncio.create_task(). "
+                "Disconnect the SSE client within 5s to test H1 survival."
+            )
+        # ── end H1 probe ──────────────────────────────────────────────
+
+        # Wrap the agent stream with keep-alive pings so nginx / load-balancers
+        # don't kill the SSE connection during long tool calls (>60 s).
+        # Each chunk is awaited with a 30 s timeout; if no chunk arrives
+        # within that window, a keep-alive SSE comment is yielded to reset
+        # the proxy's read timeout.
+        _agent_stream = agent.arun(message, stream=True)
+
+        # When the SSE client disconnects we spawn a background drain task
+        # so the agent run completes with the correct status.  The drain
+        # task OWNS the session lock until the agent finishes — this
+        # preserves mutual exclusion (no concurrent agent.arun() on the
+        # same Agno session).
+
+        async def _drain_and_cleanup() -> None:
+            nonlocal _drained, _lock_held
+            _drained = True
             try:
-                async for chunk in agent.arun(message, stream=True):
+                async for _chunk in _agent_stream:
+                    pass
+            except Exception:
+                pass
+            finally:
+                await _cleanup_agent_mcp(agent)
+                if _lock_held:
+                    try:
+                        await _lock_cm.__aexit__(None, None, None)
+                    except BaseException:
+                        pass
+
+        while True:
+            retry_needed = False
+            try:
+                # Read chunks from the agent stream with keep-alive.
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            _agent_stream.__anext__(),
+                            timeout=30.0,
+                        )
+                    except StopAsyncIteration:
+                        break  # stream completed normally
+                    except asyncio.TimeoutError:
+                        yield ": keep-alive\n\n"
+                        continue
+
                     event_type = getattr(chunk, "event", None)
 
                     if event_type == RunEvent.run_content:
@@ -1563,9 +1653,6 @@ async def _sse_stream(
                             )
                             auto_ids, manual_ids = [], list(pending_approval_ids)
                         auto_approved_ids.extend(auto_ids)
-                        # Replace pending list with the manual subset so the
-                        # SSE event / metadata only mentions approvals that
-                        # actually require user action.
                         pending_approval_ids = manual_ids
 
                         # Process approval delegations (same as sync path)
@@ -1585,11 +1672,6 @@ async def _sse_stream(
                                 exc_info=True,
                             )
 
-                        # Skip the run_paused SSE event entirely when every
-                        # pending approval was auto-resolved — the UI should
-                        # not flash an approval banner. The continuation
-                        # Celery task will deliver the assistant's next
-                        # message through the conversation's SSE channel.
                         if pending_approval_ids:
                             yield _fmt_sse("run_paused", {
                                 "pending_approvals": pending_approval_ids,
@@ -1611,13 +1693,13 @@ async def _sse_stream(
                                 "LLM run_error event, retrying in %.1fs (%d left): %s",
                                 delay, retries_left, err_str,
                             )
-                            # Reset per-attempt state before retry
                             final_metrics = {}
                             pending_approval_ids = []
                             auto_approved_ids = []
                             paused_run_id = None
                             await asyncio.sleep(delay)
-                            break  # break inner for-loop → re-enter while
+                            retry_needed = True
+                            break  # break inner while → re-enter outer while
                         # Non-transient or content already started or retries exhausted
                         log.error("SSE run_error: %s", err_str)
                         yield _fmt_sse("content_delta", {"delta": _LLM_UNAVAILABLE_MSG})
@@ -1634,17 +1716,21 @@ async def _sse_stream(
                                 "input": getattr(m, "input_tokens", None),
                                 "output": getattr(m, "output_tokens", None),
                             }
-                else:
-                    # for-loop completed without break → stream finished
-                    break
 
-                # for-loop was broken (retry) → continue the while-loop
-                continue
+                # Inner while loop exited.
+                if retry_needed:
+                    continue  # re-enter outer while loop
+                break  # stream finished normally → exit outer while
 
             except asyncio.CancelledError:
                 log.warning("SSE stream cancelled (client disconnected?)")
                 if not content_started:
                     yield _fmt_sse("error", {"detail": _LLM_UNAVAILABLE_MSG})
+                # Drain the agent stream in a fresh Task so the run
+                # completes with the correct status.  The anyio cancel
+                # scope will tear down after we return, so the drain
+                # Task must be already scheduled on the event loop.
+                asyncio.create_task(_drain_and_cleanup())
                 return
 
             except Exception as exc:
@@ -1655,7 +1741,6 @@ async def _sse_stream(
                         "Transient LLM SSE error, retrying in %.1fs (%d left): %s",
                         delay, retries_left, exc,
                     )
-                    # Reset per-attempt state before retry
                     final_metrics = {}
                     pending_approval_ids = []
                     auto_approved_ids = []
@@ -1731,13 +1816,16 @@ async def _sse_stream(
             )
 
     finally:
-        # Release the session lock if it was acquired (no-op on failure path).
-        if _lock_held:  # type: ignore[possibly-unbound]
+        # Release the session lock ONLY when the SSE stream completed
+        # normally.  If the agent was handed off to a drain task, that
+        # task owns the lock + MCP lifecycle and will release both.
+        if _lock_held and not _drained and _lock_cm is not None:
             try:
-                await _lock_cm.__aexit__(None, None, None)  # type: ignore[possibly-unbound]
-            except Exception:
+                await _lock_cm.__aexit__(None, None, None)
+            except BaseException:
                 pass
-        await _cleanup_agent_mcp(agent)
+        if not _drained:
+            await _cleanup_agent_mcp(agent)
 
 
 @stream_router.post(

@@ -111,11 +111,11 @@ export function PromptForm({
               onChange={(e) => setContent(e.target.value)}
               placeholder="Write your prompt template here..."
               rows={6}
-              maxLength={10000}
+              maxLength={50000}
               required
             />
             <p className="text-xs text-muted-foreground">
-              {content.length}/10000
+              {content.length}/50000
             </p>
           </div>
 

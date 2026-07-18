@@ -66,8 +66,10 @@ class DocumentTemplatesTool(BaseTool):
     Pass ``download_template_id`` with a ``template_id`` obtained from a
     previous listing to download the template in its original format into
     the conversation context.  The tool creates an artifact (file reference)
-    and, for Markdown templates, also returns the full text inline so the
-    LLM can inspect the template structure and placeholders.
+    and returns its metadata + ``file_id``.  Use ``read_file`` on the
+    returned ``file.file_id`` to inspect the template structure and
+    placeholders — the content is NOT returned inline to avoid consuming
+    context tokens.
 
     Optional parameters
     -------------------
@@ -82,14 +84,15 @@ class DocumentTemplatesTool(BaseTool):
         Ignored when ``download_template_id`` is set.
     download_template_id (str):
         When set, download a single template by its ``template_id`` instead of
-        listing all templates.  The template is made available as a conversation
-        artifact.  For Markdown templates the full text is also returned inline.
+        listing all templates.  The template is stored as a conversation
+        artifact — use ``read_file`` on the returned ``file.file_id`` to
+        inspect its content.  Template content is NOT returned inline.
 
     Permission: ``files:read`` (list), ``files:read`` + ``files:write`` (download)
     """
 
     name: ClassVar[str] = "document_templates"
-    version: ClassVar[str] = "1.2.0"
+    version: ClassVar[str] = "1.3.0"
     summary: ClassVar[str] = (
         "List (with optional search filter) and download document templates "
         "(DOCX, Markdown) available to the organization for use with generate_document"
@@ -147,7 +150,8 @@ class DocumentTemplatesTool(BaseTool):
                     "from a previous listing) into the conversation context. "
                     "The template is stored as a conversation artifact and its "
                     "metadata + file reference are returned. "
-                    "For Markdown templates the full text is also returned inline. "
+                    "Use read_file on the returned file.file_id to inspect "
+                    "the template content — it is NOT returned inline. "
                     "When this parameter is provided, 'scope', 'content_type', "
                     "'search', and 'include_variables' are ignored."
                 ),
@@ -352,7 +356,11 @@ class DocumentTemplatesTool(BaseTool):
                     execution_time_ms=int((time.monotonic() - t0) * 1000),
                 )
 
-        # 4. Build response
+        # 4. Build response — NEVER include content inline.
+        #    The agent must use read_file on file.file_id to inspect
+        #    the template.  Returning 60+ KB of Markdown inline would
+        #    waste context tokens and duplicate data already available
+        #    via the file store.
         data: dict = {
             "template_id": template_id,
             "filename": filename,
@@ -361,11 +369,6 @@ class DocumentTemplatesTool(BaseTool):
             "variables": variables,
             "file": file_info,
         }
-
-        # Include inline content for Markdown templates
-        if content_type == _MIME_MD:
-            data["content"] = template_bytes.decode("utf-8", errors="replace")
-            data["content_truncated"] = truncated
 
         return self._success(
             data=data,

@@ -39,13 +39,20 @@ def _build_additional_config() -> AdditionalConfig:
     # (peer container restarted, NAT entry expired, etc.) are detected and
     # the channel is torn down quickly instead of becoming a black hole
     # that hangs queries until the kernel TCP timeout (minutes).
+    #
+    # IMPORTANT: weaviate 1.28 enforces a server-side limit of ~2 pings
+    # without data (ENHANCE_YOUR_CALM / too_many_pings GOAWAY).  Setting
+    # max_pings_without_data=0 (unlimited) triggers this on the first
+    # keepalive probe.  The keepalive interval must be >= 5 min
+    # (Weaviate's default minimum); with max 2 pings, this gives ~10 min
+    # of idle before disconnect — sufficient for long agent runs.
     grpc_options = [
-        ("grpc.keepalive_time_ms", 30_000),       # ping every 30s when idle
-        ("grpc.keepalive_timeout_ms", 10_000),    # wait 10s for ping ack
+        ("grpc.keepalive_time_ms", 300_000),      # ping every 5 min when idle
+        ("grpc.keepalive_timeout_ms", 20_000),    # wait 20s for ping ack
         ("grpc.keepalive_permit_without_calls", 1),
-        ("grpc.http2.max_pings_without_data", 0),
-        ("grpc.http2.min_time_between_pings_ms", 30_000),
-        ("grpc.http2.min_ping_interval_without_data_ms", 30_000),
+        ("grpc.http2.max_pings_without_data", 2),  # weaviate 1.28 limit
+        ("grpc.http2.min_time_between_pings_ms", 60_000),
+        ("grpc.http2.min_ping_interval_without_data_ms", 300_000),
     ]
     return AdditionalConfig(
         timeout=Timeout(init=s.weaviate_init_timeout, query=30, insert=60),

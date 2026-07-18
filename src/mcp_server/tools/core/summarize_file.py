@@ -272,6 +272,7 @@ def _build_model_for_summarize(
             id=model_id,
             api_key=settings.vllm_api_key or "EMPTY",
             base_url=settings.vllm_base_url,
+            timeout=300.0,
         ), provider
 
     # Default: Ollama
@@ -355,7 +356,7 @@ class SummarizeFileTool(BaseTool):
     requires_approval: ClassVar[bool] = False
     use_circuit_breaker: ClassVar[bool] = False
     always_background: ClassVar[bool] = True
-    background_timeout_seconds: ClassVar[Optional[int]] = 900
+    background_timeout_seconds: ClassVar[Optional[int]] = 52000  # 20 h
     requires_config: ClassVar[bool] = False
 
     params_schema: ClassVar[dict] = {
@@ -490,6 +491,7 @@ class SummarizeFileTool(BaseTool):
         "llm_provider": "inherit",
         "llm_model": "",
         "llm_temperature": 0.1,
+        "llm_timeout": 300,
         "chunk_token_target": 12000,
         "chunk_min_chars": 4000,
         "chunk_overlap_chars": 500,
@@ -545,6 +547,14 @@ class SummarizeFileTool(BaseTool):
     ) -> ToolResult:
         t0 = time.monotonic()
 
+        # ── Calculate deadline for graceful timeout ────────────────────
+        # Reserve 120 s for the final LLM call + cleanup (store artifact,
+        # build output).  The background worker's asyncio.wait_for will
+        # hard-cancel us once bg_timeout is reached; the deadline check
+        # below gives us a chance to save a checkpoint *before* that happens.
+        _bg_timeout = self.background_timeout_seconds or 900
+        deadline = t0 + _bg_timeout - 120
+
         # ── Validate file_id ───────────────────────────────────────────
         file_id = params.get("file_id", "")
         if not isinstance(file_id, str) or not file_id.strip():
@@ -592,6 +602,7 @@ class SummarizeFileTool(BaseTool):
         )
         max_iter = int(config.get("max_iterations", 500))
         checkpoint_every = int(config.get("checkpoint_interval", 5))
+        llm_timeout = int(config.get("llm_timeout", 300))
         instructions = params.get("instructions", "")
 
         # ── Build model ────────────────────────────────────────────────
@@ -618,7 +629,7 @@ class SummarizeFileTool(BaseTool):
                 pass
 
         # ── Check for checkpoint resume ────────────────────────────────
-        checkpoint = getattr(self, "_checkpoint", None)
+        checkpoint = getattr(self, "_checkpoint", None) or state.get("_checkpoint")
         if checkpoint and checkpoint.get("position", 0) > 0:
             accumulated = checkpoint["accumulated"]
             pos = checkpoint["position"]
@@ -640,129 +651,177 @@ class SummarizeFileTool(BaseTool):
         search_window = int(chunk_chars * 0.1)  # 10% for smart cut
 
         # ── Main loop ──────────────────────────────────────────────────
-        while pos < total_chars and iteration < max_iter:
-            # Smart cut: find natural delimiter.
-            # For the LAST chunk (target_end == total_chars), skip smart cut
-            # and take everything to the end — we must not leave content behind.
-            target_end = min(pos + chunk_chars, total_chars)
-            if target_end >= total_chars:
-                smart_end = total_chars  # last chunk: grab all remaining
-            else:
-                smart_end = _find_smart_cut_point(
-                    content, target_end, search_window
-                )
-
-            # Overlap from previous chunk
-            start = max(0, pos - overlap) if iteration > 0 else 0
-            chunk_text = content[start:smart_end]
-
-            # Summary tail for context
-            summary_tail = ""
-            if accumulated and tail_chars > 0:
-                summary_tail = accumulated[-tail_chars:]
-
-            # Build prompt
-            if iteration == 0:
-                prompt = _build_initial_prompt(chunk_text, instructions)
-            else:
-                prompt = _build_continuation_prompt(
-                    chunk_text, summary_tail, instructions,
-                )
-
-            # LLM call with retry + auto-reduction
-            response_text = None
-            token_limit_hit = False
-
-            for retry in range(3):
-                try:
-                    response_text = await _call_llm(
-                        model=model,
-                        provider=resolved_provider,
-                        prompt=prompt,
-                        temperature=config.get("llm_temperature", 0.1),
-                        timeout=120,
-                    )
-                    break  # success
-                except asyncio.TimeoutError:
-                    if retry < 2:
-                        backoff = 2 ** retry
-                        log.warning(
-                            "summarize_file: timeout (attempt %d/3), "
-                            "retrying in %ds",
-                            retry + 1, backoff,
-                        )
-                        await asyncio.sleep(backoff)
-                    else:
-                        return self._failure(
-                            "LLM_ERROR",
-                            "LLM call timed out after 3 attempts.",
-                        )
-                except Exception as exc:
-                    if self._extract_token_limit_error(exc):
-                        token_limit_hit = True
-                        break  # break retry loop to auto-reduce
-                    if retry < 2:
-                        backoff = 2 ** retry
-                        log.warning(
-                            "summarize_file: LLM error (attempt %d/3): %s",
-                            retry + 1, exc,
-                        )
-                        await asyncio.sleep(backoff)
-                    else:
-                        return self._failure(
-                            "LLM_ERROR",
-                            f"LLM call failed after 3 attempts: {exc}",
-                        )
-
-            # Handle token limit: reduce chunk and retry same position
-            if token_limit_hit:
-                if chunk_chars > chunk_min:
-                    chunk_chars = max(int(chunk_chars * 0.75), chunk_min)
-                    auto_reductions += 1
-                    search_window = int(chunk_chars * 0.1)
-                    log.info(
-                        "summarize_file: token limit — reduced chunk to "
-                        "%d chars (reduction #%d)",
-                        chunk_chars, auto_reductions,
-                    )
-                    continue  # retry same position with smaller chunk
+        try:
+            while pos < total_chars and iteration < max_iter:
+                # Smart cut: find natural delimiter.
+                # For the LAST chunk (target_end == total_chars), skip smart cut
+                # and take everything to the end — we must not leave content behind.
+                target_end = min(pos + chunk_chars, total_chars)
+                if target_end >= total_chars:
+                    smart_end = total_chars  # last chunk: grab all remaining
                 else:
+                    smart_end = _find_smart_cut_point(
+                        content, target_end, search_window
+                    )
+
+                # Overlap from previous chunk
+                start = max(0, pos - overlap) if iteration > 0 else 0
+                chunk_text = content[start:smart_end]
+
+                # Summary tail for context
+                summary_tail = ""
+                if accumulated and tail_chars > 0:
+                    summary_tail = accumulated[-tail_chars:]
+
+                # Build prompt
+                if iteration == 0:
+                    prompt = _build_initial_prompt(chunk_text, instructions)
+                else:
+                    prompt = _build_continuation_prompt(
+                        chunk_text, summary_tail, instructions,
+                    )
+
+                # LLM call with retry + auto-reduction
+                response_text = None
+                token_limit_hit = False
+
+                for retry in range(3):
+                    try:
+                        # ── Deadline check ──────────────────────────────
+                        # Stop gracefully before the background timeout
+                        # fires, saving a checkpoint so the next run can
+                        # resume.
+                        if time.monotonic() > deadline:
+                            await self._save_checkpoint(
+                                accumulated, pos, iteration, chunk_chars
+                            )
+                            state["_checkpoint"] = {
+                                "accumulated": accumulated,
+                                "position": pos,
+                                "iteration": iteration,
+                                "chunk_size": chunk_chars,
+                            }
+                            pct = (pos / total_chars * 100) if total_chars else 0
+                            return self._failure(
+                                "TIMEOUT_PARTIAL",
+                                f"Background timeout approaching — "
+                                f"{pos}/{total_chars} chars "
+                                f"({pct:.1f}%) processed in "
+                                f"{iteration} iterations. "
+                                f"Progress saved. Retry to resume.",
+                                retryable=True,
+                            )
+
+                        response_text = await _call_llm(
+                            model=model,
+                            provider=resolved_provider,
+                            prompt=prompt,
+                            temperature=config.get("llm_temperature", 0.1),
+                            timeout=llm_timeout,
+                        )
+                        break  # success
+                    except asyncio.TimeoutError:
+                        if retry < 2:
+                            backoff = 2 ** retry
+                            log.warning(
+                                "summarize_file: timeout (attempt %d/3), "
+                                "retrying in %ds",
+                                retry + 1, backoff,
+                            )
+                            await asyncio.sleep(backoff)
+                        else:
+                            return self._failure(
+                                "LLM_ERROR",
+                                "LLM call timed out after 3 attempts.",
+                            )
+                    except Exception as exc:
+                        if self._extract_token_limit_error(exc):
+                            token_limit_hit = True
+                            break  # break retry loop to auto-reduce
+                        if retry < 2:
+                            backoff = 2 ** retry
+                            log.warning(
+                                "summarize_file: LLM error "
+                                "(attempt %d/3): %s",
+                                retry + 1, exc,
+                            )
+                            await asyncio.sleep(backoff)
+                        else:
+                            return self._failure(
+                                "LLM_ERROR",
+                                f"LLM call failed after 3 attempts: {exc}",
+                            )
+
+                # Handle token limit: reduce chunk and retry same position
+                if token_limit_hit:
+                    if chunk_chars > chunk_min:
+                        chunk_chars = max(int(chunk_chars * 0.75), chunk_min)
+                        auto_reductions += 1
+                        search_window = int(chunk_chars * 0.1)
+                        log.info(
+                            "summarize_file: token limit — reduced chunk "
+                            "to %d chars (reduction #%d)",
+                            chunk_chars, auto_reductions,
+                        )
+                        continue  # retry same position with smaller chunk
+                    else:
+                        return self._failure(
+                            "LLM_ERROR",
+                            f"Chunk size at minimum ({chunk_min} chars) "
+                            f"but LLM still reports token limit.",
+                        )
+
+                # Success — update state
+                if response_text is None or not response_text.strip():
                     return self._failure(
                         "LLM_ERROR",
-                        f"Chunk size at minimum ({chunk_min} chars) but "
-                        f"LLM still reports token limit.",
+                        "LLM returned empty response.",
+                    )
+                # First chunk: set accumulated. Subsequent: append-only.
+                if iteration == 0:
+                    accumulated = response_text
+                else:
+                    accumulated = accumulated + "\n\n" + response_text
+                pos = smart_end
+                iteration += 1
+
+                log.debug(
+                    "summarize_file: chunk %d done — pos=%d/%d (+%d chars, "
+                    "smart_end=%d, total=%d)",
+                    iteration, pos, total_chars,
+                    len(response_text), smart_end, total_chars,
+                )
+
+                # Checkpoint
+                if checkpoint_every > 0 and iteration % checkpoint_every == 0:
+                    await self._save_checkpoint(
+                        accumulated, pos, iteration, chunk_chars
+                    )
+                    log.debug(
+                        "summarize_file: checkpoint saved at iteration %d",
+                        iteration,
                     )
 
-            # Success — update state
-            if response_text is None or not response_text.strip():
-                return self._failure(
-                    "LLM_ERROR",
-                    "LLM returned empty response.",
-                )
-            # First chunk: set accumulated. Subsequent: append-only.
-            if iteration == 0:
-                accumulated = response_text
-            else:
-                accumulated = accumulated + "\n\n" + response_text
-            pos = smart_end
-            iteration += 1
-
-            log.debug(
-                "summarize_file: chunk %d done — pos=%d/%d (+%d chars, "
-                "smart_end=%d, total=%d)",
-                iteration, pos, total_chars,
-                len(response_text), smart_end, total_chars,
+        except asyncio.CancelledError:
+            # Hard timeout from the background worker — save checkpoint
+            # so the next run can resume from this point.
+            await self._save_checkpoint(
+                accumulated, pos, iteration, chunk_chars
             )
-
-            # Checkpoint
-            if checkpoint_every > 0 and iteration % checkpoint_every == 0:
-                await self._save_checkpoint(
-                    accumulated, pos, iteration, chunk_chars
-                )
-                log.debug(
-                    "summarize_file: checkpoint saved at iteration %d",
-                    iteration,
-                )
+            state["_checkpoint"] = {
+                "accumulated": accumulated,
+                "position": pos,
+                "iteration": iteration,
+                "chunk_size": chunk_chars,
+            }
+            pct = (pos / total_chars * 100) if total_chars else 0
+            return self._failure(
+                "TIMEOUT",
+                f"Background timeout reached — {pos}/{total_chars} chars "
+                f"({pct:.1f}%) processed in {iteration} iterations. "
+                f"Progress saved. Retry the tool to resume from this point.",
+                retryable=True,
+            )
 
         # ── Build output ───────────────────────────────────────────────
         summary_chars = len(accumulated)
