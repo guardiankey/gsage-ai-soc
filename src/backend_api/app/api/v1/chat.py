@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
-import os
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any, AsyncIterator, List, Optional, cast
@@ -1445,8 +1445,36 @@ async def continue_run(
 
 
 # ---------------------------------------------------------------------------
-# 9. Stream message (SSE)
+# 9. Stream message (SSE) — detached execution architecture
 # ---------------------------------------------------------------------------
+#
+# See docs-local/architecture/sse-agent-isolation.md for the full design.
+# H1 (detached task survival) validated 2026-07-18: PASS ✅.
+#
+# Architecture summary:
+#   agent.arun() runs in asyncio.create_task() → pushes chunks to
+#   asyncio.Queue → SSE generator reads queue + yields frames.
+#   The agent Task owns the session lock and MCP cleanup for its
+#   entire lifetime.  The SSE generator never touches either.
+
+import enum
+
+
+class _EventKind(enum.Enum):
+    """Single event type for agent → SSE communication."""
+    CHUNK = "chunk"   # agno RunOutput chunk
+    ERROR = "error"   # Exception raised in agent Task
+    END = "end"       # agent Task finished (success or error)
+
+
+@dataclasses.dataclass(slots=True)
+class _AgentEvent:
+    """Immutable event from agent Task → SSE generator.
+
+    Using one type avoids isinstance() checks and sentinel objects.
+    """
+    kind: _EventKind
+    payload: Any = None  # RunOutput for CHUNK, Exception for ERROR
 
 
 async def _sse_stream(
@@ -1480,7 +1508,6 @@ async def _sse_stream(
     auto_approved_ids: list[str] = []
     paused_run_id: Optional[str] = None
     content_started = False
-    retries_left = _LLM_RETRY_ATTEMPTS
     stream_filter = StreamFilter(
         FilterContext(org_id=ctx.org_id, interface=ctx.interface, db=db)
     )
@@ -1495,167 +1522,323 @@ async def _sse_stream(
         publish_conversation_updated,
     )
 
-    _drained = False
-    _lock_held = False
-    _lock_cm = None
+    # ── Detached execution: agent Task → asyncio.Queue → SSE generator ──
+    # The agent Task owns the session lock and MCP cleanup for its entire
+    # lifetime.  The SSE generator never touches either.  See §2 of
+    # docs-local/architecture/sse-agent-isolation.md.
 
-    try:
+    # Bounded queue — maxsize=16 is ~128 KB of text at 8 KB/chunk.
+    # Design: after client disconnect, preserving agent execution (tool
+    # calls, correct run status) > preserving streamed deltas.
+    # The queue is LOSSY — chunks may be dropped when full or after
+    # disconnect.  _dropped_events tracks drops for instrumentation.
+    queue: asyncio.Queue[_AgentEvent] = asyncio.Queue(maxsize=16)
+    _publishing = True  # False → consumer gone, stop pushing chunks
+    _dropped_events = 0
+
+    # ── Agent Task (runs in asyncio.create_task) ──────────────────────
+
+    def _log_agent_exception(task: asyncio.Task) -> None:
+        """Prevent 'Task exception was never retrieved' warnings."""
+        if task.done() and not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                log.error("Agent task failed: %s", exc, exc_info=exc)
+
+    async def _run_agent() -> None:
+        """Execute agent.arun() with retries in a detached execution context.
+
+        This Task is spawned via :func:`asyncio.create_task` and is
+        expected to survive anyio cancel scope teardown (§14 of
+        sse-agent-isolation.md, H1 validated 2026-07-18).
+
+        Responsibilities (single owner):
+        - Session lock acquisition + release
+        - agent.arun() with retry on transient LLM errors
+        - MCP cleanup (_cleanup_agent_mcp)
+        - Push chunks/errors to the queue for the SSE generator
+        """
+        nonlocal _publishing, _dropped_events
+
+        # ── Acquire session lock ───────────────────────────────────
         _lock_cm = _acquire_session_lock(
-            agno_session_id, owner="sse:stream_message"
+            agno_session_id, owner="sse:agent_task"
         )
         try:
             await _lock_cm.__aenter__()
-            _lock_held = True
         except LockAcquireError as exc:
             log.warning(
                 "SSE: could not acquire session lock for %s: %s",
                 agno_session_id, exc,
             )
-            yield _fmt_sse(
-                "content_delta",
-                {"delta": _LLM_SESSION_BUSY_MSG},
+            queue.put_nowait(
+                _AgentEvent(
+                    _EventKind.ERROR,
+                    RuntimeError(_LLM_SESSION_BUSY_MSG),
+                )
             )
-            yield _fmt_sse(
-                "message_end",
-                {"id": msg_id, "metadata": {}, "status": "busy"},
-            )
+            queue.put_nowait(_AgentEvent(_EventKind.END))
             return
 
-        # ── H1 validation probe (§14.3 of sse-agent-isolation.md) ──────
-        # Set GSAGE_TEST_DETACHED_EXECUTION=1 in the backend container env,
-        # send a prompt, close the browser tab mid-stream, then check logs
-        # for [H1_TEST] messages.  No external test harness needed.
-        if os.environ.get("GSAGE_TEST_DETACHED_EXECUTION"):
-            _h1_survived = False
+        _retries_left = _LLM_RETRY_ATTEMPTS
+        _agent_content_started = False  # local to agent Task (retry gate)
 
-            async def _h1_probe() -> None:
-                nonlocal _h1_survived
-                log.warning(
-                    "[H1_TEST] Detached probe started. "
-                    "Close the browser tab NOW, then wait 10s."
-                )
-                await asyncio.sleep(5)  # give time to disconnect
+        try:
+            # ── Retry loop ─────────────────────────────────────────
+            while True:
+                retry_needed = False
                 try:
-                    import httpx
-                    async with httpx.AsyncClient() as client:
-                        r = await client.get(
-                            "http://mcp-server:8001/health", timeout=5.0
-                        )
-                    _h1_survived = True
-                    log.warning(
-                        "[H1_TEST] SURVIVED — HTTP request succeeded "
-                        "after SSE disconnect (status=%d). H1: PASS ✅",
-                        r.status_code,
-                    )
-                except asyncio.CancelledError:
-                    log.error(
-                        "[H1_TEST] FAILED — probe was cancelled. "
-                        "asyncio.create_task() inherited the anyio CancelScope. "
-                        "H1: FAIL ❌ — architecture INVALID."
-                    )
+                    async for chunk in agent.arun(message, stream=True):
+                        event_type = getattr(chunk, "event", None)
+
+                        # Track content-started locally so we can gate
+                        # retries inside the agent Task.
+                        if event_type == RunEvent.run_content:
+                            delta = _extract_text(
+                                getattr(chunk, "content", None)
+                            )
+                            if delta:
+                                _agent_content_started = True
+
+                        # Transient LLM error before any content →
+                        # retry inside the agent Task.
+                        if event_type == RunEvent.run_error:
+                            err_str = str(getattr(chunk, "content", ""))
+                            if (
+                                not _agent_content_started
+                                and _retries_left > 0
+                                and _is_transient_llm_error(err_str)
+                            ):
+                                _retries_left -= 1
+                                delay = _LLM_RETRY_BASE_DELAY_SECONDS * (
+                                    2
+                                    ** (_LLM_RETRY_ATTEMPTS - _retries_left - 1)
+                                )
+                                log.warning(
+                                    "LLM run_error event, retrying in "
+                                    "%.1fs (%d left): %s",
+                                    delay, _retries_left, err_str,
+                                )
+                                await asyncio.sleep(delay)
+                                retry_needed = True
+                                break  # break inner for → retry outer while
+
+                        # Push chunk to queue (lossy — skip if consumer gone
+                        # or queue is full).
+                        if _publishing:
+                            try:
+                                queue.put_nowait(
+                                    _AgentEvent(_EventKind.CHUNK, chunk)
+                                )
+                            except asyncio.QueueFull:
+                                _dropped_events += 1
+
+                    # ── Normal completion (async for exited) ────────
+                    if retry_needed:
+                        continue  # re-enter outer while for retry
+                    break  # exit outer while → agent finished
+
                 except Exception as exc:
-                    log.error(
-                        "[H1_TEST] INDETERMINATE — probe error: %s. "
-                        "H1: INCONCLUSIVE ⚠️",
-                        exc,
+                    if (
+                        not _agent_content_started
+                        and _retries_left > 0
+                        and _is_transient_llm_error(str(exc))
+                    ):
+                        _retries_left -= 1
+                        delay = _LLM_RETRY_BASE_DELAY_SECONDS * (
+                            2 ** (_LLM_RETRY_ATTEMPTS - _retries_left - 1)
+                        )
+                        log.warning(
+                            "Transient LLM SSE error, retrying in "
+                            "%.1fs (%d left): %s",
+                            delay, _retries_left, exc,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        if _publishing:
+                            try:
+                                queue.put_nowait(
+                                    _AgentEvent(_EventKind.ERROR, exc)
+                                )
+                            except asyncio.QueueFull:
+                                pass
+                        break  # exit outer while → unrecoverable error
+
+        except asyncio.CancelledError:
+            # Never swallow CancelledError — let it propagate to agno's
+            # run handler so the run status is set correctly.
+            raise
+        except Exception as exc:
+            log.error("Agent task unhandled error: %s", exc, exc_info=True)
+            if _publishing:
+                try:
+                    queue.put_nowait(
+                        _AgentEvent(_EventKind.ERROR, exc)
                     )
-
-            asyncio.create_task(_h1_probe())
-            log.warning(
-                "[H1_TEST] Detached probe spawned via asyncio.create_task(). "
-                "Disconnect the SSE client within 5s to test H1 survival."
-            )
-        # ── end H1 probe ──────────────────────────────────────────────
-
-        # Wrap the agent stream with keep-alive pings so nginx / load-balancers
-        # don't kill the SSE connection during long tool calls (>60 s).
-        # Each chunk is awaited with a 30 s timeout; if no chunk arrives
-        # within that window, a keep-alive SSE comment is yielded to reset
-        # the proxy's read timeout.
-        _agent_stream = agent.arun(message, stream=True)
-
-        # When the SSE client disconnects we spawn a background drain task
-        # so the agent run completes with the correct status.  The drain
-        # task OWNS the session lock until the agent finishes — this
-        # preserves mutual exclusion (no concurrent agent.arun() on the
-        # same Agno session).
-
-        async def _drain_and_cleanup() -> None:
-            nonlocal _drained, _lock_held
-            _drained = True
-            try:
-                async for _chunk in _agent_stream:
+                except asyncio.QueueFull:
                     pass
-            except Exception:
-                pass
-            finally:
+        finally:
+            # Signal end (best-effort — consumer may already be gone).
+            if _publishing:
+                try:
+                    queue.put_nowait(_AgentEvent(_EventKind.END))
+                except asyncio.QueueFull:
+                    pass
+            # Cleanup MCP + release lock in nested finally blocks so
+            # the lock is ALWAYS released, even if cleanup raises.
+            cleanup_exc: BaseException | None = None
+            try:
                 await _cleanup_agent_mcp(agent)
-                if _lock_held:
-                    try:
-                        await _lock_cm.__aexit__(None, None, None)
-                    except BaseException:
-                        pass
+            except BaseException as exc:
+                cleanup_exc = exc
+            finally:
+                try:
+                    await _lock_cm.__aexit__(None, None, None)
+                except BaseException:
+                    pass
+                if cleanup_exc is not None:
+                    raise cleanup_exc
 
+    # ── Spawn agent Task BEFORE the SSE loop ─────────────────────────
+    # The task is intended to be detached: we never await it.  It owns
+    # the complete run lifecycle (lock + agent.arun + MCP cleanup).
+    agent_task = asyncio.create_task(_run_agent())
+    agent_task.add_done_callback(_log_agent_exception)
+    log.debug(
+        "SSE: agent task spawned session=%s task=%s",
+        agno_session_id, id(agent_task),
+    )
+
+    # ── SSE event loop (reads queue, yields frames) ──────────────────
+
+    try:
         while True:
             retry_needed = False
             try:
-                # Read chunks from the agent stream with keep-alive.
                 while True:
+                    # Wait for next event with keep-alive timeout.
                     try:
-                        chunk = await asyncio.wait_for(
-                            _agent_stream.__anext__(),
-                            timeout=30.0,
+                        event = await asyncio.wait_for(
+                            queue.get(), timeout=30.0
                         )
-                    except StopAsyncIteration:
-                        break  # stream completed normally
                     except asyncio.TimeoutError:
                         yield ": keep-alive\n\n"
                         continue
 
+                    if event.kind == _EventKind.END:
+                        # Agent Task finished (success or error).
+                        break
+
+                    if event.kind == _EventKind.ERROR:
+                        exc = event.payload
+                        err_msg = str(exc)
+                        # Lock-busy → show specific "session busy" message.
+                        if err_msg == _LLM_SESSION_BUSY_MSG:
+                            log.warning(
+                                "SSE: session busy: %s", err_msg
+                            )
+                            yield _fmt_sse(
+                                "content_delta",
+                                {"delta": _LLM_SESSION_BUSY_MSG},
+                            )
+                            yield _fmt_sse(
+                                "message_end",
+                                {
+                                    "id": msg_id,
+                                    "metadata": {},
+                                    "status": "busy",
+                                },
+                            )
+                            return
+
+                        log.error(
+                            "SSE agent error (content_started=%s): %s",
+                            content_started, exc, exc_info=exc,
+                        )
+                        yield _fmt_sse(
+                            "content_delta",
+                            {"delta": _LLM_UNAVAILABLE_MSG},
+                        )
+                        yield _fmt_sse(
+                            "message_end",
+                            {
+                                "id": msg_id,
+                                "metadata": {},
+                                "status": "error",
+                            },
+                        )
+                        return
+
+                    # event.kind == _EventKind.CHUNK
+                    chunk = event.payload
                     event_type = getattr(chunk, "event", None)
 
                     if event_type == RunEvent.run_content:
-                        delta = _extract_text(getattr(chunk, "content", None))
+                        delta = _extract_text(
+                            getattr(chunk, "content", None)
+                        )
                         if delta:
                             content_started = True
                             emit = await stream_filter.feed(delta)
                             if emit:
-                                yield _fmt_sse("content_delta", {"delta": emit})
+                                yield _fmt_sse(
+                                    "content_delta", {"delta": emit}
+                                )
 
                     elif event_type == RunEvent.run_paused:
                         # Emit any remaining content from the paused chunk
-                        paused_content = _extract_text(getattr(chunk, "content", None))
+                        paused_content = _extract_text(
+                            getattr(chunk, "content", None)
+                        )
                         if paused_content:
                             content_started = True
                             emit = await stream_filter.feed(paused_content)
                             if emit:
-                                yield _fmt_sse("content_delta", {"delta": emit})
+                                yield _fmt_sse(
+                                    "content_delta", {"delta": emit}
+                                )
 
                         paused_run_id = getattr(chunk, "run_id", None)
-                        for req in getattr(chunk, "requirements", None) or []:
-                            te = getattr(req, "tool_execution", None)
-                            approval_id = getattr(te, "approval_id", None) if te else None
+                        for req in (
+                            getattr(chunk, "requirements", None) or []
+                        ):
+                            te = (
+                                getattr(req, "tool_execution", None)
+                                if req
+                                else None
+                            )
+                            approval_id = (
+                                getattr(te, "approval_id", None)
+                                if te
+                                else None
+                            )
                             if approval_id:
                                 pending_approval_ids.append(str(approval_id))
 
-                        # Auto-approval pass: resolve flagged tools immediately
-                        # and only delegate / notify for the manual remainder.
+                        # Auto-approval pass
                         try:
-                            auto_ids, manual_ids = await _process_auto_approvals(
-                                approval_ids=pending_approval_ids,
-                                ctx=ctx,
-                                db=db,
+                            auto_ids, manual_ids = (
+                                await _process_auto_approvals(
+                                    approval_ids=pending_approval_ids,
+                                    ctx=ctx,
+                                    db=db,
+                                )
                             )
                         except Exception as auto_exc:
                             log.error(
                                 "SSE auto-approval processing error: %s",
-                                auto_exc, exc_info=True,
+                                auto_exc,
+                                exc_info=True,
                             )
-                            auto_ids, manual_ids = [], list(pending_approval_ids)
+                            auto_ids, manual_ids = (
+                                [],
+                                list(pending_approval_ids),
+                            )
                         auto_approved_ids.extend(auto_ids)
                         pending_approval_ids = manual_ids
 
-                        # Process approval delegations (same as sync path)
+                        # Process approval delegations
                         try:
                             await _process_approval_delegations(
                                 approval_ids=pending_approval_ids,
@@ -1673,39 +1856,39 @@ async def _sse_stream(
                             )
 
                         if pending_approval_ids:
-                            yield _fmt_sse("run_paused", {
-                                "pending_approvals": pending_approval_ids,
-                                "run_id": paused_run_id,
-                            })
+                            yield _fmt_sse(
+                                "run_paused",
+                                {
+                                    "pending_approvals": pending_approval_ids,
+                                    "run_id": paused_run_id,
+                                },
+                            )
                         else:
                             log.info(
-                                "SSE: all %d pending approvals were auto-resolved "
-                                "(run_id=%s); skipping run_paused emit",
-                                len(auto_ids), paused_run_id,
+                                "SSE: all %d pending approvals were "
+                                "auto-resolved (run_id=%s); skipping "
+                                "run_paused emit",
+                                len(auto_ids),
+                                paused_run_id,
                             )
 
                     elif event_type == RunEvent.run_error:
+                        # run_error is handled in the agent Task for retries.
+                        # If it reaches the SSE generator, it's a non-retryable
+                        # error or retries exhausted.
                         err_str = str(getattr(chunk, "content", ""))
-                        if not content_started and retries_left > 0 and _is_transient_llm_error(err_str):
-                            retries_left -= 1
-                            delay = _LLM_RETRY_BASE_DELAY_SECONDS * (2 ** (_LLM_RETRY_ATTEMPTS - retries_left - 1))
-                            log.warning(
-                                "LLM run_error event, retrying in %.1fs (%d left): %s",
-                                delay, retries_left, err_str,
-                            )
-                            final_metrics = {}
-                            pending_approval_ids = []
-                            auto_approved_ids = []
-                            paused_run_id = None
-                            await asyncio.sleep(delay)
-                            retry_needed = True
-                            break  # break inner while → re-enter outer while
-                        # Non-transient or content already started or retries exhausted
                         log.error("SSE run_error: %s", err_str)
-                        yield _fmt_sse("content_delta", {"delta": _LLM_UNAVAILABLE_MSG})
+                        yield _fmt_sse(
+                            "content_delta",
+                            {"delta": _LLM_UNAVAILABLE_MSG},
+                        )
                         yield _fmt_sse(
                             "message_end",
-                            {"id": msg_id, "metadata": {}, "status": "error"},
+                            {
+                                "id": msg_id,
+                                "metadata": {},
+                                "status": "error",
+                            },
                         )
                         return
 
@@ -1717,53 +1900,53 @@ async def _sse_stream(
                                 "output": getattr(m, "output_tokens", None),
                             }
 
-                # Inner while loop exited.
-                if retry_needed:
-                    continue  # re-enter outer while loop
-                break  # stream finished normally → exit outer while
+                # Inner while exited (END received or chunk loop finished).
+                break  # exit outer while → stream completed
 
             except asyncio.CancelledError:
+                # ── Client disconnected ──────────────────────────────
+                # Signal the agent Task to stop pushing chunks (lossy
+                # mode — the agent keeps running and will finish on its
+                # own, owning lock + MCP cleanup).
                 log.warning("SSE stream cancelled (client disconnected?)")
+                _publishing = False
+                if _dropped_events:
+                    log.debug(
+                        "SSE: %d events dropped (queue full / consumer gone)",
+                        _dropped_events,
+                    )
                 if not content_started:
-                    yield _fmt_sse("error", {"detail": _LLM_UNAVAILABLE_MSG})
-                # Drain the agent stream in a fresh Task so the run
-                # completes with the correct status.  The anyio cancel
-                # scope will tear down after we return, so the drain
-                # Task must be already scheduled on the event loop.
-                asyncio.create_task(_drain_and_cleanup())
+                    yield _fmt_sse(
+                        "error", {"detail": _LLM_UNAVAILABLE_MSG}
+                    )
                 return
 
             except Exception as exc:
-                if not content_started and retries_left > 0 and _is_transient_llm_error(str(exc)):
-                    retries_left -= 1
-                    delay = _LLM_RETRY_BASE_DELAY_SECONDS * (2 ** (_LLM_RETRY_ATTEMPTS - retries_left - 1))
-                    log.warning(
-                        "Transient LLM SSE error, retrying in %.1fs (%d left): %s",
-                        delay, retries_left, exc,
-                    )
-                    final_metrics = {}
-                    pending_approval_ids = []
-                    auto_approved_ids = []
-                    paused_run_id = None
-                    await asyncio.sleep(delay)
-                    continue
-
-                log.error("SSE agent stream error: %s", exc, exc_info=True)
-                yield _fmt_sse("content_delta", {"delta": _LLM_UNAVAILABLE_MSG})
+                log.error(
+                    "SSE agent stream error: %s", exc, exc_info=True
+                )
+                yield _fmt_sse(
+                    "content_delta", {"delta": _LLM_UNAVAILABLE_MSG}
+                )
                 yield _fmt_sse(
                     "message_end",
                     {"id": msg_id, "metadata": {}, "status": "error"},
                 )
                 return
 
-        # Safety net: stream finished but no content was ever delivered.
-        # This can happen when run_error is NOT emitted but the LLM returned nothing.
-        # Auto-approved runs are also content-less here — the continuation
-        # Celery task will deliver the assistant's next message — so do not
-        # treat them as an error.
-        if not content_started and not pending_approval_ids and not auto_approved_ids:
-            log.warning("SSE stream completed with no content — emitting error")
-            yield _fmt_sse("content_delta", {"delta": _LLM_UNAVAILABLE_MSG})
+        # ── Stream completed normally ────────────────────────────────
+        # Safety net: no content ever delivered.
+        if (
+            not content_started
+            and not pending_approval_ids
+            and not auto_approved_ids
+        ):
+            log.warning(
+                "SSE stream completed with no content — emitting error"
+            )
+            yield _fmt_sse(
+                "content_delta", {"delta": _LLM_UNAVAILABLE_MSG}
+            )
             yield _fmt_sse(
                 "message_end",
                 {"id": msg_id, "metadata": {}, "status": "error"},
@@ -1775,57 +1958,63 @@ async def _sse_stream(
             end_metadata["pending_approvals"] = pending_approval_ids
             end_metadata["run_id"] = paused_run_id
         if auto_approved_ids:
-            # Signal to the frontend that one or more approvals were
-            # auto-resolved; a follow-up assistant message is being produced
-            # by the continuation Celery task and will arrive via the
-            # conversation's messages_updated SSE channel.
             end_metadata["auto_approved"] = auto_approved_ids
             end_metadata["has_active_bg_tasks"] = True
+        if _dropped_events:
+            end_metadata["dropped_events"] = _dropped_events
 
-        # Flush any text held back by the response filter (e.g. trailing
-        # text that could have been an opening fence).
+        # Flush any text held back by the response filter.
         tail = await stream_filter.flush()
         if tail:
             yield _fmt_sse("content_delta", {"delta": tail})
 
-        # Detect active (QUEUED/RUNNING) background tasks so the frontend
-        # can start polling for new messages.
+        # Detect active background tasks for frontend polling.
         if gsage_session_id is not None:
-            from src.backend_api.app.services.background_tasks import has_active_bg_tasks
+            from src.backend_api.app.services.background_tasks import (  # noqa: PLC0415
+                has_active_bg_tasks,
+            )
+
             try:
                 if await has_active_bg_tasks(gsage_session_id, db):
                     end_metadata["has_active_bg_tasks"] = True
             except Exception:
-                pass  # best-effort; polling not critical
+                pass
 
         yield _fmt_sse(
             "message_end",
             {"id": msg_id, "metadata": end_metadata},
         )
 
-        # Mark injected bg tasks as notified after stream completes
+        # Mark injected bg tasks as notified.
         if pending_bg_tasks:
-            await _mark_bg_tasks_notified([t.id for t in pending_bg_tasks], db)
+            await _mark_bg_tasks_notified(
+                [t.id for t in pending_bg_tasks], db
+            )
 
-        # Notify other clients viewing this conversation (other tabs/devices)
-        # so they refetch immediately instead of waiting for the 5s polling
-        # cycle.  Best-effort; failures are swallowed inside the helper.
+        # Notify other clients viewing this conversation.
         if gsage_session_id is not None:
             await publish_conversation_updated(
                 gsage_session_id, reason="assistant_message"
             )
 
     finally:
-        # Release the session lock ONLY when the SSE stream completed
-        # normally.  If the agent was handed off to a drain task, that
-        # task owns the lock + MCP lifecycle and will release both.
-        if _lock_held and not _drained and _lock_cm is not None:
-            try:
-                await _lock_cm.__aexit__(None, None, None)
-            except BaseException:
-                pass
-        if not _drained:
-            await _cleanup_agent_mcp(agent)
+        # ── Post-stream cleanup ─────────────────────────────────────
+        # The agent Task owns the lock and MCP cleanup — the SSE
+        # generator NEVER releases the lock or cleans up MCP.  If the
+        # agent is still running (normal disconnect case), log and
+        # let it finish independently.
+        if not agent_task.done():
+            log.debug(
+                "SSE stream ended but agent Task still running "
+                "(session=%s task=%s)",
+                agno_session_id,
+                id(agent_task),
+            )
+        if _dropped_events:
+            log.info(
+                "SSE: %d total events dropped (queue full / consumer gone)",
+                _dropped_events,
+            )
 
 
 @stream_router.post(
