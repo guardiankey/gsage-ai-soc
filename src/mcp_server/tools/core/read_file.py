@@ -617,12 +617,15 @@ class ReadFileTool(BaseTool):
 
         content_out = "\n".join(selected)
 
+        # ── Resolve offset/limit early (needed by truncation guidance) ────
+        _orig_offset: int | None = params.get("_offset") or None
+        _orig_limit: int | None = params.get("_limit") or None
+
         # ── Character-level truncation ────────────────────────────────────
-        # Even with line-based pagination, 200 dense lines can exceed the
+        # Even with line-based pagination, dense lines can exceed the
         # context budget.  Truncate at _MAX_CONTENT_CHARS and append a
         # [TRUNCATED] marker with actionable guidance so the agent can
-        # switch to a more appropriate strategy (chunked reads, summarize,
-        # or insert_file for merge operations).
+        # reduce the limit and retry immediately.
         content_truncated = False
         if len(content_out) > _MAX_CONTENT_CHARS:
             content_truncated = True
@@ -632,13 +635,26 @@ class ReadFileTool(BaseTool):
             if last_nl > _MAX_CONTENT_CHARS // 2:
                 truncated_at = last_nl
             content_out = content_out[:truncated_at]
+
+            # Count how many lines survived truncation so we can suggest
+            # a safe limit for the retry.
+            surviving_lines = content_out.count("\n") + 1
+            suggested_limit = max(1, surviving_lines)
+
             content_out += (
-                f"\n\n[TRUNCATED] Content truncated at {truncated_at:_} characters. "
+                f"\n\n[TRUNCATED] Content truncated at {truncated_at:_} characters "
+                f"({surviving_lines} of {len(selected)} lines returned). "
                 f"File has {total_lines:_} lines ({total_chars:_} chars, "
                 f"{total_words:_} words, {size_bytes:_} bytes). "
-                "To continue reading, use offset/limit pagination "
-                "(e.g. offset=N, limit=100). "
-                "For large documents, consider summarize_file to extract "
+                f"Reduce limit — suggested: limit={suggested_limit}. "
+            )
+            if _orig_offset is not None:
+                content_out += (
+                    f"To continue from here, use offset={_orig_offset + surviving_lines}, "
+                    f"limit={suggested_limit}."
+                )
+            content_out += (
+                " For large documents, consider summarize_file to extract "
                 "key information without consuming your context window. "
                 "To merge this file into another, use write_file with "
                 "action=insert_file instead of reading inline."
@@ -646,10 +662,7 @@ class ReadFileTool(BaseTool):
 
         # ── Pagination metadata ───────────────────────────────────────────
         has_more = end_line < total_lines
-        # Compute next_offset from original offset/limit if available,
-        # otherwise derive from start_line
-        _orig_offset = params.get("_offset")
-        _orig_limit = params.get("_limit")
+        # Compute next_offset from original offset/limit (resolved above)
         if _orig_offset is not None and _orig_limit is not None:
             next_offset = _orig_offset + _orig_limit if has_more else None
         else:
@@ -673,6 +686,11 @@ class ReadFileTool(BaseTool):
             "end_line": end_line,
             "has_more": has_more,
             "next_offset": next_offset,
+            "pagination_hint": (
+                f"If you are paginating this file, "
+                f"use offset={next_offset}, limit={_orig_limit} "
+                f"for the next window."
+            ) if (_orig_offset is not None and _orig_limit is not None and has_more) else None,
             "revision": revision,
             "tail_applied": tail_applied,
             "section_applied": section_applied,
@@ -691,11 +709,11 @@ class ReadFileTool(BaseTool):
                 data=out_data,
                 code="TRUNCATED",
                 message=(
-                    f"Content truncated at {_MAX_CONTENT_CHARS:_} chars. "
+                    f"Content truncated at {_MAX_CONTENT_CHARS:_} chars — "
+                    f"reduce 'limit' and retry with a smaller window. "
                     f"File: {total_lines:_} lines, {total_chars:_} chars, "
                     f"{size_bytes:_} bytes. "
-                    "Use offset/limit to paginate, summarize_file for large "
-                    "documents, or insert_file to merge files."
+                    "For large documents, use summarize_file or insert_file."
                 ),
                 execution_time_ms=elapsed_ms,
             )
