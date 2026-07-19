@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Conversations
@@ -99,15 +99,29 @@ class FolderOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+_MESSAGE_MAX_LENGTH = 50_000
+
+
 class SendMessageRequest(BaseModel):
     """Request body for POST .../conversations/{id}/messages."""
 
-    message: str = Field(..., min_length=1, max_length=32_000)
+    message: str = Field(..., min_length=1, max_length=_MESSAGE_MAX_LENGTH)
     attachment_ids: list[uuid.UUID] = Field(
         default_factory=list,
         max_length=10,
         description="UUIDs of files previously uploaded via the attachment endpoint.",
     )
+
+    @field_validator("message")
+    @classmethod
+    def _check_message_length(cls, v: str) -> str:
+        if len(v) > _MESSAGE_MAX_LENGTH:
+            raise ValueError(
+                f"Prompt exceeds the maximum length of {_MESSAGE_MAX_LENGTH:,} "
+                f"characters (received: {len(v):,}). "
+                f"Please reduce the message size and try again."
+            )
+        return v
 
 
 class MessageTokenMetadata(BaseModel):
@@ -177,7 +191,7 @@ class ContinueRunRequest(BaseModel):
 class AgentRunRequest(BaseModel):
     """Request body for POST /orgs/{org_id}/agents/{agent_id}/run."""
 
-    message: str = Field(..., min_length=1, max_length=32_000)
+    message: str = Field(..., min_length=1, max_length=_MESSAGE_MAX_LENGTH)
     session_id: Optional[str] = Field(
         default=None,
         description=(
@@ -186,6 +200,17 @@ class AgentRunRequest(BaseModel):
         ),
     )
     stream: bool = Field(default=False, description="Return SSE stream instead of JSON.")
+
+    @field_validator("message")
+    @classmethod
+    def _check_message_length(cls, v: str) -> str:
+        if len(v) > _MESSAGE_MAX_LENGTH:
+            raise ValueError(
+                f"Prompt exceeds the maximum length of {_MESSAGE_MAX_LENGTH:,} "
+                f"characters (received: {len(v):,}). "
+                f"Please reduce the message size and try again."
+            )
+        return v
 
 
 class AgentRunResponse(BaseModel):
@@ -219,11 +244,22 @@ class AgentInfo(BaseModel):
 
 
 class ChatMessageRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=32_000)
+    message: str = Field(..., min_length=1, max_length=_MESSAGE_MAX_LENGTH)
     session_id: Optional[str] = Field(
         default=None,
         description="Existing session ID to continue a conversation; omit to start a new one.",
     )
+
+    @field_validator("message")
+    @classmethod
+    def _check_message_length(cls, v: str) -> str:
+        if len(v) > _MESSAGE_MAX_LENGTH:
+            raise ValueError(
+                f"Prompt exceeds the maximum length of {_MESSAGE_MAX_LENGTH:,} "
+                f"characters (received: {len(v):,}). "
+                f"Please reduce the message size and try again."
+            )
+        return v
 
 
 class ChatMessageResponse(BaseModel):

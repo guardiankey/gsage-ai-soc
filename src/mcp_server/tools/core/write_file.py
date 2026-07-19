@@ -438,9 +438,9 @@ class WriteFileTool(BaseTool):
     ) -> ToolResult:
         file_id: str | None = (params.get("file_id") or "").strip() or None
         new_content: str | None = params.get("new_content")
-        line_start: int | None = params.get("line_start")
-        line_end: int | None = params.get("line_end")
-        line_count: int | None = params.get("line_count")
+        line_start: int | None = _coerce_int(params.get("line_start"))
+        line_end: int | None = _coerce_int(params.get("line_end"))
+        line_count: int | None = _coerce_int(params.get("line_count"))
         expected_revision: str | None = (params.get("expected_revision") or "").strip() or None
 
         if not file_id:
@@ -532,10 +532,10 @@ class WriteFileTool(BaseTool):
             # Logical lines (see SPEC Section 0.1)
             lines = current_text.splitlines()
             total_lines = len(lines)
-            ls = max(1, line_start)  # type: ignore[arg-type]
+            assert line_start is not None  # guarded by is_splice_mode
+            ls = max(1, line_start)
 
             if has_line_count:
-                line_count = int(line_count)  # type: ignore[arg-type]
                 if line_count < 0:
                     return self._failure(
                         "INVALID_PARAMS",
@@ -553,7 +553,8 @@ class WriteFileTool(BaseTool):
                 le = ls - 1 + line_count  # 0 → le = ls-1 (insert mode)
             else:
                 # Legacy line_end mode
-                le = min(total_lines, line_end)  # type: ignore[arg-type]
+                assert line_end is not None  # guarded by has_line_end
+                le = min(total_lines, line_end)
                 if ls > le:
                     return self._failure(
                         "PARAM_INVALID",
@@ -1118,8 +1119,8 @@ class WriteFileTool(BaseTool):
         """
         source_file_id: str | None = (params.get("source_file_id") or "").strip() or None
         target_file_id: str | None = (params.get("file_id") or "").strip() or None
-        line_start: int | None = params.get("line_start")
-        line_count: int | None = params.get("line_count")
+        line_start: int | None = _coerce_int(params.get("line_start"))
+        line_count: int | None = _coerce_int(params.get("line_count"))
 
         # ── Validate required params ─────────────────────────────────
         if not source_file_id:
@@ -1237,6 +1238,7 @@ class WriteFileTool(BaseTool):
         line_sep = _detect_line_separator(target_text)
         lines = target_text.splitlines()
         total_lines = len(lines)
+        assert line_start is not None  # validated above
         ls = max(1, line_start)
         lc = line_count if line_count is not None else 0
 
@@ -1311,6 +1313,30 @@ class WriteFileTool(BaseTool):
             },
             execution_time_ms=int((time.monotonic() - t0) * 1000),
         )
+
+
+def _coerce_int(value: object) -> int | None:
+    """Coerce *value* to ``int``, accepting ``int``, ``str``, or ``float``.
+
+    Returns ``None`` when *value* is ``None`` or cannot be converted.
+    LLM tool-calling interfaces may serialize integers as strings, so we
+    accept both forms transparently.
+    """
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        # Only accept whole-number floats (e.g. 68.0, not 68.5)
+        if value == int(value):
+            return int(value)
+        return None
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return None
+    return None
 
 
 def _safe_basename(filename: str) -> str:
