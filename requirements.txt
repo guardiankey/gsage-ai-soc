@@ -47,6 +47,7 @@ rank_bm25>=0.2.2,<1  # BM25 ranking for search_tools meta-tool
 openai>=1.0,<3
 ollama>=0.4,<1
 minio>=7.2,<8
+pyzipper>=0.3,<1        # AES-256 encrypted ZIP support (zip_tool password feature)
 ldap3>=2.9,<3
 pyotp>=2.9,<3
 qrcode[pil]>=7.4,<8

@@ -6,6 +6,8 @@ Three actions in one tool:
 - **list**  — inspect the contents of a ZIP file without extracting.
 - **unzip** — extract entries from a ZIP and store each in MinIO.
 
+Optional password protection (AES-256) via pyzipper for zip and unzip actions.
+
 Permissions: ``files:read``, ``files:write``
 """
 
@@ -18,6 +20,11 @@ import os
 import time
 import zipfile
 from typing import ClassVar, Optional
+
+try:
+    import pyzipper
+except ImportError:  # pragma: no cover — optional dependency; graceful fallback
+    pyzipper = None
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.shared.config.settings import get_settings as _get_settings
@@ -68,12 +75,19 @@ class ZipTool(BaseTool):
       that contain more than 200 entries.
     - Zip-slip: rejects any entry whose path contains ``..`` or is absolute.
 
+    Password-protected ZIPs:
+    - **action=zip**: when ``password`` is set, the archive is encrypted with
+      AES-256 (WinZip / 7-Zip compatible). Requires ``pyzipper``.
+    - **action=unzip**: when ``password`` is set, it is used to decrypt
+      encrypted entries. Encrypted entries without a password are skipped.
+    - **action=list**: each entry includes an ``encrypted`` boolean field.
+
     Permission: ``files:read``, ``files:write``
     Timeout: 120 s · Background fallback after 60 s
     """
 
     name: ClassVar[str] = "zip_tool"
-    version: ClassVar[str] = "2.0.0"
+    version: ClassVar[str] = "2.1.0"
     summary: ClassVar[str] = "Compress, inspect, or extract ZIP archives attached to the current conversation"
     category: ClassVar[str] = "file"
     permissions: ClassVar[list[str]] = ["files:read", "files:write"]
@@ -135,6 +149,18 @@ class ZipTool(BaseTool):
                     "(e.g. 'invoice_' → 'invoice_report.pdf')."
                 ),
             },
+            "password": {
+                "type": "string",
+                "description": (
+                    "⚠️ SENSITIVE — Optional password for the ZIP archive. "
+                    "For action=zip: creates an AES-256 encrypted archive. "
+                    "For action=unzip: decrypts encrypted entries. "
+                    "For action=list: no effect (metadata is always readable), "
+                    "but the 'encrypted' flag is shown per entry. "
+                    "Empty / whitespace-only passwords are treated as 'no password'. "
+                    "This value is NOT written to logs."
+                ),
+            },
         },
         "required": [],
         "additionalProperties": False,
@@ -148,14 +174,19 @@ class ZipTool(BaseTool):
         state: dict,
     ) -> ToolResult:
         action = (params.get("action") or "zip").lower()
+        # Normalise password: empty / whitespace-only → None (no password)
+        password_raw = params.get("password")
+        password: str | None = str(password_raw).strip() if password_raw else None
+        if not password:
+            password = None
         t0 = time.monotonic()
 
         if action == "zip":
-            return await self._action_zip(agent_context, params, t0)
+            return await self._action_zip(agent_context, params, password, t0)
         if action == "list":
             return await self._action_list(agent_context, params, t0)
         if action == "unzip":
-            return await self._action_unzip(agent_context, params, t0)
+            return await self._action_unzip(agent_context, params, password, t0)
 
         return self._failure(
             "INVALID_ACTION",
@@ -171,9 +202,10 @@ class ZipTool(BaseTool):
         self,
         agent_context: AgentContext,
         params: dict,
+        password: str | None,
         t0: float,
     ) -> ToolResult:
-        """Compress multiple files into a ZIP archive."""
+        """Compress multiple files into a ZIP archive (optionally encrypted)."""
         from src.shared.database import _get_session_maker  # noqa: PLC0415
 
         raw_ids = params.get("file_ids")
@@ -199,7 +231,7 @@ class ZipTool(BaseTool):
         skipped: list[dict] = []
 
         zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with _create_zip_writer(zip_buf, password) as zf:
             used_names: dict[str, int] = {}
 
             for file_id in file_ids:
@@ -327,11 +359,13 @@ class ZipTool(BaseTool):
 
         with zipfile.ZipFile(io.BytesIO(result["data"]), "r") as zf:
             for info in zf.infolist():
+                is_encrypted: bool = bool(info.flag_bits & 0x1)
                 entries.append({
                     "name": info.filename,
                     "size": info.file_size,
                     "compressed_size": info.compress_size,
                     "is_dir": info.is_dir(),
+                    "encrypted": is_encrypted,
                     "date_time": "{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(
                         *info.date_time
                     ),
@@ -358,9 +392,10 @@ class ZipTool(BaseTool):
         self,
         agent_context: AgentContext,
         params: dict,
+        password: str | None,
         t0: float,
     ) -> ToolResult:
-        """Extract entries from a ZIP and store each in MinIO."""
+        """Extract entries from a ZIP and store each in MinIO (optionally decrypting)."""
         from src.shared.database import _get_session_maker  # noqa: PLC0415
 
         file_id: str | None = (params.get("file_id") or "").strip() or None
@@ -409,7 +444,7 @@ class ZipTool(BaseTool):
         extracted: list[dict] = []
         skipped: list[dict] = []
 
-        with zipfile.ZipFile(io.BytesIO(result["data"]), "r") as zf:
+        with _open_zip_reader(result["data"], password) as zf:
             all_info = zf.infolist()
 
             # ── Zip-bomb guard — check totals before extracting ───────────
@@ -453,6 +488,7 @@ class ZipTool(BaseTool):
             async with _get_session_maker()() as db_session:
                 for info in target_entries:
                     entry_name = info.filename
+                    is_encrypted: bool = bool(info.flag_bits & 0x1)
 
                     # Zip-slip guard
                     if _is_unsafe_path(entry_name):
@@ -465,7 +501,33 @@ class ZipTool(BaseTool):
                         })
                         continue
 
-                    entry_data = zf.read(entry_name)
+                    # Encrypted entry without password → skip
+                    if is_encrypted and not password:
+                        log.info(
+                            "zip_tool[unzip]: skipping encrypted entry '%s' — no password provided",
+                            entry_name,
+                        )
+                        skipped.append({
+                            "entry": entry_name,
+                            "reason": "encrypted — password required",
+                        })
+                        continue
+
+                    # Read entry data (may raise RuntimeError on bad password)
+                    try:
+                        entry_data = zf.read(entry_name)
+                    except RuntimeError as exc:
+                        msg = str(exc).lower()
+                        if "bad password" in msg or "password" in msg:
+                            log.warning(
+                                "zip_tool[unzip]: bad password for entry '%s'", entry_name
+                            )
+                            skipped.append({
+                                "entry": entry_name,
+                                "reason": "bad password or decryption failed",
+                            })
+                            continue
+                        raise
 
                     # Build output filename (basename only + optional prefix)
                     base_filename = os.path.basename(entry_name) or entry_name
@@ -524,6 +586,48 @@ class ZipTool(BaseTool):
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _create_zip_writer(
+    buf: io.BytesIO,
+    password: str | None,
+):
+    """Return a ZipFile-like writer for *buf*, optionally encrypted.
+
+    When *password* is provided, returns a ``pyzipper.AESZipFile`` with
+    AES-256 encryption (WZ_AES), producing archives compatible with
+    WinZip, 7-Zip, and macOS Archive Utility.
+
+    When ``pyzipper`` is not installed or *password* is ``None``, returns
+    a standard ``zipfile.ZipFile`` (no encryption).
+    """
+    if password and pyzipper is not None:
+        zf = pyzipper.AESZipFile(
+            buf,
+            mode="w",
+            compression=zipfile.ZIP_DEFLATED,
+            encryption=pyzipper.WZ_AES,
+        )
+        zf.setpassword(password.encode("utf-8"))
+        return zf
+    return zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED)
+
+
+def _open_zip_reader(
+    data: bytes,
+    password: str | None,
+):
+    """Return a ZipFile reader for *data*, capable of decrypting AES-256.
+
+    When *password* is set and ``pyzipper`` is available, returns a
+    ``pyzipper.AESZipFile`` which can read both AES-256 encrypted and
+    regular entries. Otherwise falls back to ``zipfile.ZipFile``.
+    """
+    if password and pyzipper is not None:
+        zf = pyzipper.AESZipFile(io.BytesIO(data), "r")
+        zf.setpassword(password.encode("utf-8"))
+        return zf
+    return zipfile.ZipFile(io.BytesIO(data), "r")
 
 
 def _unique_name(filename: str, used: dict[str, int]) -> str:
