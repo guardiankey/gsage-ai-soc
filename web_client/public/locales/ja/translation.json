@@ -327,7 +327,9 @@
     "noToolsAvailable": "対応するすべてのツールが既にリンクされています。",
     "linkAdded": "ツールをリンクしました",
     "linkRemoved": "リンクを解除しました",
-    "linkActivated": "このツールでアクティブな認証情報に設定しました"
+    "linkActivated": "このツールでアクティブな認証情報に設定しました",
+    "linkDeactivated": "このツールの認証情報を非アクティブにしました",
+    "deactivate": "非アクティブ化"
   },
   "kbDownload": {
     "preparing": "ダウンロードを準備しています..."

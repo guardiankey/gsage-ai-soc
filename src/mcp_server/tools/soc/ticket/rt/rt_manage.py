@@ -457,11 +457,15 @@ class RTManageTool(BaseTool):
     async def _do_queue_create(
         self, client: RTClient, ctx: AgentContext, params: dict
     ) -> dict:
-        payload = params.get("queue_payload") or {}
-        if not payload.get("Name") and not payload.get("name"):
+        payload = dict(params.get("queue_payload") or {})
+        # The rt library's create_queue(name, **kwargs) expects ``name`` as a
+        # positional argument and maps it to the RT API ``Name`` field.
+        # Extract it from the payload so it is not passed twice.
+        queue_name = payload.pop("Name", None) or payload.pop("name", None)
+        if not queue_name:
             raise _ParamError("queue_create requires queue_payload.Name.")
         rt_obj = client._rt_or_error()  # noqa: SLF001
-        result = await rt_obj.create_queue(**payload)  # type: ignore[attr-defined]
+        result = await rt_obj.create_queue(queue_name, **payload)  # type: ignore[attr-defined]
         return {"queue": result}
 
     async def _do_queue_update(
@@ -491,11 +495,19 @@ class RTManageTool(BaseTool):
     async def _do_user_create(
         self, client: RTClient, ctx: AgentContext, params: dict
     ) -> dict:
-        payload = params.get("user_payload") or {}
-        if not payload.get("Name") and not payload.get("name"):
+        payload = dict(params.get("user_payload") or {})
+        # The rt library's create_user(user_name, email_address, **kwargs)
+        # expects ``user_name`` and ``email_address`` as positional args and
+        # maps them to the RT API ``Name`` and ``EmailAddress`` fields.
+        # Extract both from the payload so they are not passed twice.
+        user_name = payload.pop("Name", None) or payload.pop("name", None)
+        email = payload.pop("EmailAddress", None) or payload.pop("email_address", None)
+        if not user_name:
             raise _ParamError("user_create requires user_payload.Name.")
+        if not email:
+            raise _ParamError("user_create requires user_payload.EmailAddress.")
         rt_obj = client._rt_or_error()  # noqa: SLF001
-        result = await rt_obj.create_user(**payload)  # type: ignore[attr-defined]
+        result = await rt_obj.create_user(user_name, email, **payload)  # type: ignore[attr-defined]
         return {"user": result}
 
     async def _do_user_update(

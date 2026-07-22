@@ -327,7 +327,9 @@
     "noToolsAvailable": "All compatible tools are already linked.",
     "linkAdded": "Tool linked",
     "linkRemoved": "Tool unlinked",
-    "linkActivated": "Credential set as active for this tool"
+    "linkActivated": "Credential set as active for this tool",
+    "linkDeactivated": "Credential deactivated for this tool",
+    "deactivate": "Deactivate"
   },
   "kbDownload": {
     "preparing": "Preparing your download..."

@@ -327,7 +327,9 @@
     "noToolsAvailable": "Tous les outils compatibles sont déjà liés.",
     "linkAdded": "Outil lié",
     "linkRemoved": "Lien retiré",
-    "linkActivated": "Identifiant actif pour cet outil"
+    "linkActivated": "Identifiant actif pour cet outil",
+    "linkDeactivated": "Identifiant désactivé pour cet outil",
+    "deactivate": "Désactiver"
   },
   "kbDownload": {
     "preparing": "Préparation de votre téléchargement..."

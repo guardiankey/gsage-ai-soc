@@ -36,6 +36,17 @@ _DEFAULT_TIMEOUT = 30.0
 _GRAPHQL_PATH = "/graphql"
 
 
+def _sanitise_variables(variables: dict) -> dict:
+    """Return a copy of *variables* safe for logging (no secrets)."""
+    safe = {}
+    for k, v in variables.items():
+        if k in ("api_token", "token", "password"):
+            safe[k] = "***"
+        else:
+            safe[k] = v
+    return safe
+
+
 class WikijsError(Exception):
     """Raised when the Wiki.js API returns an error response.
 
@@ -146,6 +157,10 @@ class WikijsClient:
         if variables:
             payload["variables"] = variables
 
+        log.debug("Wiki.js GraphQL request:\n  query   = %s\n  variables = %s",
+                   query.strip().replace("\n", "\n    ")[:500],
+                   {k: v for k, v in (variables or {}).items() if k != "api_token"})
+
         http = self._get_http()
         try:
             resp = await http.post(_GRAPHQL_PATH, json=payload)
@@ -166,6 +181,7 @@ class WikijsClient:
 
         if "errors" in body:
             msgs = "; ".join(e.get("message", "unknown") for e in body["errors"])
+            log.warning("Wiki.js GraphQL errors: %s", body["errors"])
             raise WikijsError(
                 f"Wiki.js GraphQL error: {msgs}",
                 status_code=resp.status_code,
@@ -175,12 +191,23 @@ class WikijsClient:
         return body.get("data", {})
 
     @staticmethod
-    def _check_response_result(result: dict, operation: str) -> None:
-        """Raise WikijsError if responseResult.succeeded is False."""
+    def _check_response_result(result: dict, operation: str, variables: Optional[dict] = None) -> None:
+        """Raise WikijsError if responseResult.succeeded is False.
+
+        Includes the GraphQL error details and (sanitised) variables
+        in the exception message to aid debugging.
+        """
         rr = result.get("responseResult") or {}
         if not rr.get("succeeded", True):
+            vars_safe = _sanitise_variables(variables or {})
+            detail = (
+                f"Wiki.js {operation} failed: {rr.get('message', 'unknown error')} "
+                f"(errorCode={rr.get('errorCode', 'N/A')}, slug={rr.get('slug', 'N/A')})"
+            )
+            if vars_safe:
+                detail += f"\n  variables: {vars_safe}"
             raise WikijsError(
-                f"Wiki.js {operation} failed: {rr.get('message', 'unknown error')}",
+                detail,
                 error_code=rr.get("errorCode", 0),
                 slug=rr.get("slug", ""),
             )
@@ -362,7 +389,8 @@ class WikijsClient:
         description :
             New description (optional).
         tags :
-            New tags list (optional).
+            New tags list (optional — pass ``[]`` to clear all tags,
+            or the existing tag names to preserve them).
         is_published :
             Publication status (optional).
         """
@@ -390,19 +418,24 @@ class WikijsClient:
           }
         }
         """
-        variables: dict[str, Any] = {"id": page_id, "content": content}
+        # Always include tags in the variables to prevent the Wiki.js resolver
+        # from receiving ``undefined`` and crashing with
+        # "Cannot read properties of undefined (reading 'map')".
+        variables: dict[str, Any] = {
+            "id": page_id,
+            "content": content,
+            "tags": tags or [],
+        }
         if title is not None:
             variables["title"] = title
         if description is not None:
             variables["description"] = description
-        if tags is not None:
-            variables["tags"] = tags
         if is_published is not None:
             variables["isPublished"] = is_published
 
         data = await self._query(gql, variables)
         result = data.get("pages", {}).get("update", {})
-        self._check_response_result(result, "update")
+        self._check_response_result(result, "update", variables)
         return result.get("page", {})
 
     async def create_page(

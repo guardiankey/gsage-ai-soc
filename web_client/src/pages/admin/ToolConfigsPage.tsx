@@ -21,6 +21,7 @@ import {
   createToolConfig,
   updateToolConfig,
   deleteToolConfig,
+  getToolConfig,
   getToolCatalog,
   getToolMetadata,
   updateToolSettings,
@@ -105,6 +106,23 @@ export default function ToolConfigsPage() {
     },
     onError: () => toast.error(t('common.error')),
   })
+
+  const [editLoading, setEditLoading] = useState(false)
+
+  // Fetch full ToolConfigOut before opening edit dialog.
+  // The catalog only returns ToolConfigSummary (no config field),
+  // so we must call getToolConfig to retrieve the actual encrypted/decrypted config.
+  const handleEditConfig = async (tc: ToolConfigOut) => {
+    setEditLoading(true)
+    try {
+      const full = await getToolConfig(orgId!, tc.id)
+      setEditTarget(full)
+    } catch {
+      toast.error(t('common.error'))
+    } finally {
+      setEditLoading(false)
+    }
+  }
 
   const toggleNs = (name: string) => {
     setExpandedNs((prev) => {
@@ -197,7 +215,7 @@ export default function ToolConfigsPage() {
                     <td className="px-4 py-3">
                       <ConfigCountBadge
                         entry={ns}
-                        onEdit={(tc) => setEditTarget(tc)}
+                        onEdit={handleEditConfig}
                         onDelete={(tc) => setDeleteTarget(tc)}
                       />
                     </td>
@@ -233,7 +251,7 @@ export default function ToolConfigsPage() {
                       <td className="px-4 py-3">
                         <ConfigCountBadge
                           entry={child}
-                          onEdit={(tc) => setEditTarget(tc)}
+                          onEdit={handleEditConfig}
                           onDelete={(tc) => setDeleteTarget(tc)}
                         />
                       </td>
@@ -282,7 +300,7 @@ export default function ToolConfigsPage() {
                   <td className="px-4 py-3">
                     <ConfigCountBadge
                       entry={tool}
-                      onEdit={(tc) => setEditTarget(tc)}
+                      onEdit={handleEditConfig}
                       onDelete={(tc) => setDeleteTarget(tc)}
                     />
                   </td>

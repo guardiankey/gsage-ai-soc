@@ -242,7 +242,7 @@ def _parse_link(href: str) -> tuple[str, int] | None:
 
     Example::
 
-        'https://atende.assefaz.org.br/apirest.php/User/246' → ('User', 246)
+        'https://domain.com/apirest.php/User/246' → ('User', 246)
         '/Ticket/6085/TicketTask/' → None  (collection, no trailing id)
 
     Returns ``None`` for malformed or collection URLs.

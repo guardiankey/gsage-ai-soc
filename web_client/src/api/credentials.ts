@@ -123,6 +123,15 @@ export async function activateCredentialLink(
   return r.data
 }
 
+export async function deactivateCredentialLink(
+  orgId: string,
+  credId: string,
+  linkId: string,
+): Promise<ToolLink> {
+  const r = await apiClient.post(`${base(orgId)}/${credId}/links/${linkId}/deactivate`)
+  return r.data
+}
+
 export async function listAvailableCredentialTools(orgId: string): Promise<AvailableTool[]> {
   const r = await apiClient.get(`${base(orgId)}/available-tools`)
   return r.data

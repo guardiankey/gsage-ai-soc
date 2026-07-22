@@ -16,8 +16,10 @@ import httpx
 
 from src.mcp_server.tools.base import BaseTool, ToolResult
 from src.shared.http_utils import (
+    extension_for_content_type,
     fetch_url,
     html_to_markdown,
+    is_text_content_type,
     url_hash,
     url_slug,
 )
@@ -35,6 +37,12 @@ AGENT_HINT_TEXT = (
     "e evite encurtadores."
 )
 
+AGENT_HINT_BINARY = (
+    "ℹ️ Binary file — content saved as artifact. "
+    "Use read_file if the file is text-based (JSON, CSV, log), "
+    "or inform the user that the download link is available via the artifact."
+)
+
 
 class HttpFetchTool(BaseTool):
     """Fetch a web page over HTTP(S) and return its content as Markdown.
@@ -47,10 +55,13 @@ class HttpFetchTool(BaseTool):
     """
 
     name: ClassVar[str] = "http_fetch"
-    version: ClassVar[str] = "1.0.0"
+    version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = (
-        "Fetch a web page (HTTP/HTTPS), convert HTML to Markdown, "
-        "save as artifact, return preview."
+        "Fetch a web page or file (HTTP/HTTPS). "
+        "Text content (HTML, JSON, XML, etc.) is converted to Markdown "
+        "and returned as an inline preview. "
+        "Binary content (PDF, ZIP, images, Office docs, etc.) is saved "
+        "as an artifact without an inline preview."
     )
     category: ClassVar[str] = "utility"
     permissions: ClassVar[list[str]] = ["core:http:fetch"]
@@ -107,7 +118,7 @@ class HttpFetchTool(BaseTool):
                 "type": "boolean",
                 "description": (
                     "Convert HTML to Markdown via trafilatura (default true). "
-                    "If false, returns raw HTML."
+                    "If false, returns raw HTML.  Ignored for binary content."
                 ),
             },
             "preview_chars": {
@@ -116,7 +127,8 @@ class HttpFetchTool(BaseTool):
                 "maximum": 50000,
                 "description": (
                     "Characters to return in the inline preview "
-                    f"(default {_DEFAULT_PREVIEW_CHARS})."
+                    f"(default {_DEFAULT_PREVIEW_CHARS}). "
+                    "Ignored for binary content."
                 ),
             },
             "save_artifact": {
@@ -124,6 +136,16 @@ class HttpFetchTool(BaseTool):
                 "description": (
                     "Save the full content as a downloadable artifact "
                     "(default true)."
+                ),
+            },
+            "content_nature": {
+                "type": "string",
+                "enum": ["auto", "text", "binary"],
+                "description": (
+                    "Force interpretation mode. 'auto' (default) detects "
+                    "from the Content-Type response header. "
+                    "Use 'binary' when the server sends a misleading "
+                    "Content-Type (e.g. a ZIP served as text/plain)."
                 ),
             },
             "force_refresh": {
@@ -161,6 +183,7 @@ class HttpFetchTool(BaseTool):
         extract_md = params.get("extract_markdown", True)
         save_artifact = params.get("save_artifact", True)
         preview_chars = int(params.get("preview_chars") or _DEFAULT_PREVIEW_CHARS)
+        content_nature_override = params.get("content_nature", "auto")
 
         try:
             result = await fetch_url(
@@ -197,58 +220,135 @@ class HttpFetchTool(BaseTool):
         raw_body = result["body"]
         content_type = result["content_type"]
 
-        # Convert to Markdown if requested and content is HTML
-        if extract_md and content_type.startswith("text/html"):
-            try:
-                text = raw_body.decode("utf-8", errors="replace")
-                content = html_to_markdown(text)
-            except Exception:
-                content = raw_body.decode("utf-8", errors="replace")
+        # Determine content nature: explicit override > auto-detection
+        if content_nature_override == "binary":
+            is_binary = True
+        elif content_nature_override == "text":
+            is_binary = False
         else:
-            content = raw_body.decode("utf-8", errors="replace")
+            is_binary = not is_text_content_type(content_type)
 
-        preview = content[:preview_chars]
-        content_truncated = len(content) > preview_chars
+        content_nature = "binary" if is_binary else "text"
 
-        # Save artifact
-        artifact: Optional[dict] = None
-        if save_artifact:
-            try:
-                from sqlalchemy.ext.asyncio import AsyncSession
+        # ── Text path (existing behaviour, unchanged) ──────────────────
+        if not is_binary:
+            # Convert to Markdown if requested and content is HTML
+            if extract_md and content_type.startswith("text/html"):
+                try:
+                    text = raw_body.decode("utf-8", errors="replace")
+                    content = html_to_markdown(text)
+                except Exception:
+                    content = raw_body.decode("utf-8", errors="replace")
+            else:
+                content = raw_body.decode("utf-8", errors="replace")
 
-                from src.mcp_server.tools.base import _tool_session_ctx
+            preview = content[:preview_chars]
+            content_truncated = len(content) > preview_chars
+            artifact = await self._save_artifact(
+                data=content.encode("utf-8"),
+                filename=f"http_fetch_{time.strftime('%Y%m%d_%H%M%S')}_{url_slug(url)}.md",
+                content_type="text/markdown",
+                agent_context=agent_context,
+                url=url,
+                save_artifact=save_artifact,
+            )
 
-                session = _tool_session_ctx.get()
-                if session is not None:
-                    ts = time.strftime("%Y%m%d_%H%M%S")
-                    slug = url_slug(url)
-                    filename = f"http_fetch_{ts}_{slug}.md"
-                    artifact = await self._store_file(
-                        data=content.encode("utf-8"),
-                        filename=filename,
-                        content_type="text/markdown",
-                        agent_context=agent_context,
-                        session=session,
-                        description=f"HTTP fetch of {url}",
-                    )
-            except Exception:
-                log.warning("http_fetch: failed to save artifact for %s", url, exc_info=True)
+            elapsed = int((time.monotonic() - t0) * 1000)
+            return self._success(
+                data={
+                    "url": url,
+                    "final_url": result["final_url"],
+                    "status_code": result["status_code"],
+                    "content_type": content_type,
+                    "content_nature": content_nature,
+                    "content_length": result["content_length"],
+                    "title": result["title"],
+                    "preview": preview,
+                    "content_truncated": content_truncated,
+                    "preview_chars": preview_chars,
+                    "artifact": artifact,
+                    "agent_hint": AGENT_HINT_TEXT,
+                },
+                execution_time_ms=elapsed,
+            )
+
+        # ── Binary path (NEW) ──────────────────────────────────────────
+        ext = extension_for_content_type(content_type)
+        filename = f"http_fetch_{time.strftime('%Y%m%d_%H%M%S')}_{url_slug(url)}{ext}"
+
+        artifact = await self._save_artifact(
+            data=raw_body,
+            filename=filename,
+            content_type=content_type,
+            agent_context=agent_context,
+            url=url,
+            save_artifact=save_artifact,
+        )
+
+        # Warn if content was truncated
+        hint_parts = [AGENT_HINT_BINARY]
+        max_len = int(params.get("max_content_length") or 5_000_000)
+        if result["content_length"] >= max_len:
+            hint_parts.append(
+                f"⚠️ Download was truncated at {max_len:,} bytes. "
+                "The artifact is incomplete."
+            )
+        if not save_artifact:
+            hint_parts.append(
+                "⚠️ save_artifact=false — no download is available."
+            )
 
         elapsed = int((time.monotonic() - t0) * 1000)
-
         return self._success(
             data={
                 "url": url,
                 "final_url": result["final_url"],
                 "status_code": result["status_code"],
                 "content_type": content_type,
+                "content_nature": content_nature,
                 "content_length": result["content_length"],
                 "title": result["title"],
-                "preview": preview,
-                "content_truncated": content_truncated,
-                "preview_chars": preview_chars,
+                "preview": None,
+                "content_truncated": False,
+                "preview_chars": 0,
                 "artifact": artifact,
-                "agent_hint": AGENT_HINT_TEXT,
+                "agent_hint": "\n".join(hint_parts),
             },
             execution_time_ms=elapsed,
         )
+
+    # ── Helpers ────────────────────────────────────────────────────────────
+
+    async def _save_artifact(
+        self,
+        data: bytes,
+        filename: str,
+        content_type: str,
+        agent_context: AgentContext,
+        url: str,
+        save_artifact: bool,
+    ) -> Optional[dict]:
+        """Store *data* as an artifact, returning the file dict or ``None``."""
+        if not save_artifact:
+            return None
+        try:
+            from sqlalchemy.ext.asyncio import AsyncSession
+
+            from src.mcp_server.tools.base import _tool_session_ctx
+
+            session = _tool_session_ctx.get()
+            if session is None:
+                return None
+            return await self._store_file(
+                data=data,
+                filename=filename,
+                content_type=content_type,
+                agent_context=agent_context,
+                session=session,
+                description=f"HTTP fetch of {url}",
+            )
+        except Exception:
+            log.warning(
+                "http_fetch: failed to save artifact for %s", url, exc_info=True
+            )
+            return None

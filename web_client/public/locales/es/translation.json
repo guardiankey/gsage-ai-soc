@@ -327,7 +327,9 @@
     "noToolsAvailable": "Todas las herramientas compatibles ya están vinculadas.",
     "linkAdded": "Herramienta vinculada",
     "linkRemoved": "Vínculo eliminado",
-    "linkActivated": "Credencial activa para esta herramienta"
+    "linkActivated": "Credencial activa para esta herramienta",
+    "linkDeactivated": "Credencial desactivada para esta herramienta",
+    "deactivate": "Desactivar"
   },
   "kbDownload": {
     "preparing": "Preparando tu descarga..."

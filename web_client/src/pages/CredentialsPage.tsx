@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Pencil, Link as LinkIcon, KeyRound, Loader2, Check, X } from 'lucide-react'
@@ -45,11 +45,13 @@ import {
   linkCredentialToTool,
   unlinkCredentialFromTool,
   activateCredentialLink,
+  deactivateCredentialLink,
   listAvailableCredentialTools,
   type Credential,
   type CredentialKind,
   type CredentialIn,
   type CredentialUpdate,
+  type ToolLink,
 } from '@/api/credentials'
 
 const KIND_OPTIONS: CredentialKind[] = ['basic', 'token', 'api_key', 'oauth2', 'custom']
@@ -624,9 +626,17 @@ function ToolLinksDialog({
   const { orgId } = useAuth()
   const [toolName, setToolName] = useState<string>('')
 
+  // Local state so the UI reacts immediately to link/unlink/activate/deactivate.
+  const [links, setLinks] = useState<ToolLink[]>(cred.tool_links)
+
+  // Keep local state in sync when the parent refetches and passes a new cred.
+  useEffect(() => {
+    setLinks(cred.tool_links)
+  }, [cred.tool_links])
+
   const linkedNames = useMemo(
-    () => new Set(cred.tool_links.map((l) => l.tool_name)),
-    [cred.tool_links],
+    () => new Set(links.map((l) => l.tool_name)),
+    [links],
   )
   const linkable = useMemo(
     () => availableTools.filter((tool) => !linkedNames.has(tool.name)),
@@ -634,8 +644,14 @@ function ToolLinksDialog({
   )
 
   const linkMut = useMutation({
-    mutationFn: () => linkCredentialToTool(orgId!, cred.id, { tool_name: toolName }),
-    onSuccess: () => {
+    mutationFn: () =>
+      linkCredentialToTool(orgId!, cred.id, {
+        tool_name: toolName,
+        is_active: true, // new links are active by default
+      }),
+    onSuccess: (newLink) => {
+      // Add the new link to local state immediately for instant UI feedback.
+      setLinks((prev) => [...prev, newLink])
       onChanged()
       setToolName('')
       toast.success(t('credentials.linkAdded'))
@@ -645,7 +661,9 @@ function ToolLinksDialog({
 
   const unlinkMut = useMutation({
     mutationFn: (linkId: string) => unlinkCredentialFromTool(orgId!, cred.id, linkId),
-    onSuccess: () => {
+    onSuccess: (_data, linkId) => {
+      // Remove from local state immediately.
+      setLinks((prev) => prev.filter((l) => l.id !== linkId))
       onChanged()
       toast.success(t('credentials.linkRemoved'))
     },
@@ -654,9 +672,26 @@ function ToolLinksDialog({
 
   const activateMut = useMutation({
     mutationFn: (linkId: string) => activateCredentialLink(orgId!, cred.id, linkId),
-    onSuccess: () => {
+    onSuccess: (updatedLink) => {
+      // Update local state immediately.
+      setLinks((prev) =>
+        prev.map((l) => (l.id === updatedLink.id ? updatedLink : l)),
+      )
       onChanged()
       toast.success(t('credentials.linkActivated'))
+    },
+    onError: (err) => toast.error(extractApiError(err)),
+  })
+
+  const deactivateMut = useMutation({
+    mutationFn: (linkId: string) => deactivateCredentialLink(orgId!, cred.id, linkId),
+    onSuccess: (updatedLink) => {
+      // Update local state immediately.
+      setLinks((prev) =>
+        prev.map((l) => (l.id === updatedLink.id ? updatedLink : l)),
+      )
+      onChanged()
+      toast.success(t('credentials.linkDeactivated'))
     },
     onError: (err) => toast.error(extractApiError(err)),
   })
@@ -670,11 +705,11 @@ function ToolLinksDialog({
         </DialogHeader>
 
         <div className="space-y-3">
-          {cred.tool_links.length === 0 ? (
+          {links.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t('credentials.noLinks')}</p>
           ) : (
             <div className="space-y-2">
-              {cred.tool_links.map((link) => (
+              {links.map((link) => (
                 <div
                   key={link.id}
                   className="flex items-center justify-between gap-2 p-2 border rounded-md"
@@ -689,7 +724,15 @@ function ToolLinksDialog({
                     )}
                   </div>
                   <div className="flex gap-1 shrink-0">
-                    {!link.is_active && (
+                    {link.is_active ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => deactivateMut.mutate(link.id)}
+                      >
+                        {t('credentials.deactivate')}
+                      </Button>
+                    ) : (
                       <Button
                         size="sm"
                         variant="outline"

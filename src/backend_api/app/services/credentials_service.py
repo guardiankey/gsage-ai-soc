@@ -321,6 +321,28 @@ async def _deactivate_other_links_for_tool(
     )
 
 
+async def set_inactive_link(
+    db: AsyncSession,
+    cred_id: uuid.UUID,
+    link_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> GSageUserCredentialToolLink:
+    """Deactivate a specific tool link by setting ``is_active=false``."""
+    stmt = select(GSageUserCredentialToolLink).where(
+        GSageUserCredentialToolLink.id == link_id,
+        GSageUserCredentialToolLink.credential_id == cred_id,
+        GSageUserCredentialToolLink.user_id == user_id,
+    )
+    result = await db.execute(stmt)
+    link = result.scalar_one_or_none()
+    if link is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link not found")
+
+    link.is_active = False
+    await db.commit()
+    return link
+
+
 # ── Runtime resolution (consumed by agent proxy) ────────────────────────────
 
 

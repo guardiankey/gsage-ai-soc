@@ -161,7 +161,7 @@ class DocumentTemplatesTool(BaseTool):
                 "description": (
                     "Optional case-insensitive substring filter on template "
                     "filename and description. "
-                    "Example: 'ata' matches 'exemplo_ata_assefaz.md' or a "
+                    "Example: 'ata' matches 'exemplo_ata.md' or a "
                     "template with 'Modelo de ata' in its description. "
                     "Ignored when 'download_template_id' is set."
                 ),

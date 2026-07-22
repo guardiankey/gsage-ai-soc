@@ -551,7 +551,20 @@ class WikijsEditorTool(BaseTool):
         new_lines = lines[: ls - 1] + replacement_lines + lines[le:]
         updated_content = "\n".join(new_lines)
 
-        updated_page = await client.update_page(page["id"], content=updated_content)
+        # Preserve existing metadata so the Wiki.js resolver does not receive
+        # ``undefined`` for fields it expects (e.g. ``tags`` → leads to
+        # "Cannot read properties of undefined (reading 'map')").
+        existing_tags: list[str] = [
+            t["tag"] for t in (page.get("tags") or []) if isinstance(t, dict)
+        ]
+
+        updated_page = await client.update_page(
+            page["id"],
+            content=updated_content,
+            title=page.get("title"),
+            description=page.get("description") or "",
+            tags=existing_tags,
+        )
 
         return {
             "page_id": page["id"],

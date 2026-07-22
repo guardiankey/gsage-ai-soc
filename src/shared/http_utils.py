@@ -287,3 +287,114 @@ def url_slug(url: str) -> str:
 def url_hash(url: str) -> str:
     """SHA-256 hex digest of the canonical URL (for cache keys)."""
     return hashlib.sha256(url.encode()).hexdigest()[:32]
+
+
+# ── Content-type classification ──────────────────────────────────────────────
+
+# MIME primary types / full types that are safe to decode as text and preview
+# inline.  Everything else is treated as binary (no preview, saved as-is).
+_TEXT_CONTENT_TYPES: frozenset[str] = frozenset({
+    # Markup
+    "text/html",
+    "text/xml",
+    "application/xhtml+xml",
+    # Plain text
+    "text/plain",
+    "text/csv",
+    "text/markdown",
+    # Structured text
+    "application/json",
+    "application/xml",
+    "application/yaml",
+    "application/x-yaml",
+    # Code / style
+    "text/javascript",
+    "text/css",
+    "application/javascript",
+    "application/typescript",
+    # Calendar / subtitles
+    "text/calendar",
+    "text/vtt",
+})
+
+
+def is_text_content_type(content_type: str) -> bool:
+    """Return ``True`` if *content_type* is safe to decode and preview inline.
+
+    Strips charset and other parameters before matching.  Unknown or missing
+    content types default to ``False`` (treated as binary).
+    """
+    ct = content_type.split(";")[0].strip().lower()
+    return ct in _TEXT_CONTENT_TYPES
+
+
+# MIME type → file extension (including leading dot).  Used to build correct
+# filenames when saving binary artifacts.
+_MIME_TO_EXTENSION: dict[str, str] = {
+    # Documents
+    "application/pdf": ".pdf",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/rtf": ".rtf",
+    "text/rtf": ".rtf",
+    # Archives
+    "application/zip": ".zip",
+    "application/gzip": ".gz",
+    "application/x-gzip": ".gz",
+    "application/x-tar": ".tar",
+    "application/x-7z-compressed": ".7z",
+    "application/x-rar-compressed": ".rar",
+    "application/x-bzip2": ".bz2",
+    "application/x-xz": ".xz",
+    "application/zstd": ".zst",
+    # Images
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/svg+xml": ".svg",
+    "image/bmp": ".bmp",
+    "image/tiff": ".tiff",
+    "image/x-icon": ".ico",
+    "image/avif": ".avif",
+    # Audio
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/flac": ".flac",
+    "audio/aac": ".aac",
+    "audio/mp4": ".m4a",
+    "audio/webm": ".weba",
+    # Video
+    "video/mp4": ".mp4",
+    "video/mpeg": ".mpeg",
+    "video/ogg": ".ogv",
+    "video/webm": ".webm",
+    "video/x-msvideo": ".avi",
+    "video/quicktime": ".mov",
+    # Fonts
+    "font/ttf": ".ttf",
+    "font/otf": ".otf",
+    "font/woff": ".woff",
+    "font/woff2": ".woff2",
+    # Other
+    "application/octet-stream": ".bin",
+    "application/x-msdownload": ".exe",
+    "application/x-sh": ".sh",
+    "application/sql": ".sql",
+    "application/x-sqlite3": ".sqlite",
+    "application/epub+zip": ".epub",
+}
+
+
+def extension_for_content_type(content_type: str) -> str:
+    """Return a file extension (including leading dot) for *content_type*.
+
+    Falls back to ``.bin`` for unknown or missing types.
+    """
+    ct = content_type.split(";")[0].strip().lower()
+    return _MIME_TO_EXTENSION.get(ct, ".bin")

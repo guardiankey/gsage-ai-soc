@@ -309,3 +309,22 @@ async def activate_credential_link(
         db, cred_id=cred_id, link_id=link_id, user_id=membership.user_id
     )
     return ToolLinkOut.model_validate(link)
+
+
+@router.post(
+    "/{cred_id}/links/{link_id}/deactivate",
+    response_model=ToolLinkOut,
+    summary="Deactivate this credential link for the tool",
+)
+async def deactivate_credential_link(
+    org_id: uuid.UUID,
+    cred_id: uuid.UUID,
+    link_id: uuid.UUID,
+    membership: Annotated[GSageUserOrganization, Depends(get_org_membership)],
+    _perm: Annotated[None, _PERM],
+    db: AsyncSession = Depends(get_db),
+) -> ToolLinkOut:
+    link = await credentials_service.set_inactive_link(
+        db, cred_id=cred_id, link_id=link_id, user_id=membership.user_id
+    )
+    return ToolLinkOut.model_validate(link)

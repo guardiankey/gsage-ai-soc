@@ -694,6 +694,13 @@ async def update_prompt(
     for key, value in update_data.items():
         setattr(prompt, key, value)
 
+    # When scope is changed to "department", auto-derive dept_id from the
+    # user's tenant context (same behaviour as create).  Without this the
+    # prompt becomes invisible because the visibility filter requires
+    # dept_id == ctx.dept_id for department-scoped prompts.
+    if prompt.scope == "department" and prompt.dept_id is None:
+        prompt.dept_id = ctx.dept_id
+
     await db.commit()
 
     # Re-query with eager-loaded relationships to avoid MissingGreenlet
