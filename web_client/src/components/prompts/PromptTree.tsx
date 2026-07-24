@@ -48,7 +48,7 @@ function CategoryNode({
       <div className="group flex items-center">
         <button
           className={cn(
-            'flex flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors',
+            'flex flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors min-w-0',
             'hover:bg-accent',
             isSelected && 'bg-accent font-medium',
           )}

@@ -58,25 +58,21 @@ The variables below are derived automatically from each tool's `config_schema`. 
   | `codigo_uasg` | `integer` | — | [buscar_contrato_ug_origem] UASG origin code. Example: 110001. |
   | `numero_contrato` | `string` | — | [buscar_contrato_ug_origem] Contract number/year format. Example: '00022/2025'. |
 
-- **`buscar_contratos_fornecedor`** — Search contracts by supplier CPF/CNPJ via Portal da Transparência. Paginates through all available pages (15 items/page). Results are cached for 6 hours (PostgreSQL). Supports client-side filters for date range, agency name, and contract object. Sanctions (CEIS/CNEP/CEPIM/CEAF) are queried in parallel. CSV auto-generated when results exceed 30 rows.
+- **`buscar_contratos_fornecedor`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `cpf_cnpj` | `string` | ✅ | CPF (11 digits) or CNPJ (14 digits) do fornecedor. Aceita formatado ou só dígitos. |
-  | `max_results` | `integer` | — | Max contracts to return (default 50, max 500). |
-  | `export_csv` | `boolean` | — | Force CSV export. Auto-generated when >30 rows. |
-  | `vigencia_min` | `string` | — | Filter: start date >= value (YYYY-MM-DD, YYYYMMDD, or DD/MM/YYYY). Client-side. |
-  | `vigencia_max` | `string` | — | Filter: end date <= value (YYYY-MM-DD, YYYYMMDD, or DD/MM/YYYY). Client-side. |
-  | `filtro_orgao` | `string` | — | Filter by agency name (case-insensitive substring). Client-side. |
-  | `filtro_objeto` | `string` | — | Filter by term in contract object/description. Client-side. |
-  | `force_refresh` | `boolean` | — | Bypass cache and fetch fresh data. |
+  | `cpf_cnpj` | `string` | — | [buscar_contratos_fornecedor] CPF (11 digits) or CNPJ (14 digits) do fornecedor. Aceita formatado ou só dígitos. Exemplos: '00394411000109', '21545863000114'. |
+  | `vigencia_min` | `string` | — | [buscar_contratos_fornecedor] Filter contracts with start date >= this value (YYYY-MM-DD, YYYYMMDD, or DD/MM/YYYY). Client-side filter applied after fetching all pages. |
+  | `vigencia_max` | `string` | — | [buscar_contratos_fornecedor] Filter contracts with end date <= this value (YYYY-MM-DD, YYYYMMDD, or DD/MM/YYYY). Client-side filter applied after fetching all pages. |
+  | `filtro_orgao` | `string` | — | [buscar_contratos_fornecedor] Filter by contracting agency name (case-insensitive substring match). Client-side filter. |
+  | `filtro_objeto` | `string` | — | [buscar_contratos_fornecedor] Filter by term in the contract object/description (case-insensitive substring match). Client-side filter. |
 
 - **`buscar_materiais`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `palavra` | `string` | — | Search term for buscar_materiais. CATMAT searches product GROUP names (PDM), not individual items. Try generic terms: 'microcomputador' (PDM 6661), 'veiculo', 'mesa', 'cadeira', 'notebook', 'ar condicionado', 'servidor'. If results seem unrelated to your search term, the PDM name matched loosely; try a different word. Use the 'codigo' from results as 'codigo_material' in pesquisar_precos. |
-  | `codigo_material` | `integer` | — | PDM (Product Group) code for pesquisar_precos. Obtained via buscar_materiais — use the 'codigo' field from results, NOT 'codigo_item'. Example: 6661 for microcomputadores. ⚠️ PDM codes are GROUP-level — verify the purchase descriptions (descricaoItem) in results to confirm they match what you're looking for. |
+  | `palavra` | `string` | — | [buscar_materiais, buscar_servicos, listar_servicos_por_grupo] Search term. For buscar_materiais: CATMAT searches product GROUP names (PDM), not individual items. Try generic terms: 'microcomputador' (PDM 6661), 'veiculo', 'mesa', 'cadeira', 'notebook', 'ar condicionado', 'servidor'. If results seem unrelated to your search term, the PDM name matched loosely; try a different word. ⚠️ buscar_materiais returns a SAMPLE of up to 5 items per PDM. To see ALL CATMAT items in a group, use listar_materiais_por_pdm(codigo_pdm=X). After finding item codes, use pesquisar_precos(codigo_item=...). For buscar_servicos: search CATSER services by name. Try terms like 'manutenção predial', 'limpeza', 'vigilância', 'suporte técnico', 'consultoria'. For listar_servicos_por_grupo: optional client-side name filter within a hierarchy level (e.g. listar_servicos_por_grupo(codigo_secao=1, palavra='cloud')). |
   | `codigo_pdm` | `integer` | — | PDM code from buscar_materiais to list all CATMAT items in that group. Use listar_materiais_por_pdm to browse the full catalog before picking a material for pesquisar_precos. Example: 6661 for microcomputadores. |
 
 - **`buscar_orgao`** — _(no description)_
@@ -90,6 +86,8 @@ The variables below are derived automatically from each tool's `config_schema`. 
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
+  | `palavra` | `string` | — | [buscar_materiais, buscar_servicos, listar_servicos_por_grupo] Search term. For buscar_materiais: CATMAT searches product GROUP names (PDM), not individual items. Try generic terms: 'microcomputador' (PDM 6661), 'veiculo', 'mesa', 'cadeira', 'notebook', 'ar condicionado', 'servidor'. If results seem unrelated to your search term, the PDM name matched loosely; try a different word. ⚠️ buscar_materiais returns a SAMPLE of up to 5 items per PDM. To see ALL CATMAT items in a group, use listar_materiais_por_pdm(codigo_pdm=X). After finding item codes, use pesquisar_precos(codigo_item=...). For buscar_servicos: search CATSER services by name. Try terms like 'manutenção predial', 'limpeza', 'vigilância', 'suporte técnico', 'consultoria'. For listar_servicos_por_grupo: optional client-side name filter within a hierarchy level (e.g. listar_servicos_por_grupo(codigo_secao=1, palavra='cloud')). |
+  | `codigo_item` | `integer` | — | CATMAT or CATSER item code for pesquisar_precos. Obtain via listar_materiais_por_pdm (CATMAT) or buscar_servicos (CATSER) — use the 'codigo_item' or 'codigo' field from results. ⚠️ NOT the PDM group code (that returns 0 results). Example: 469150 for a specific microcomputer model within PDM 6661. For services, use the CATSER 'codigo' field directly. |
   | `codigo_servico` | `integer` | — | [buscar_servicos] CATSER service code. Example: 1. |
 
 - **`dashboard`** — _(no description)_
@@ -227,6 +225,8 @@ The variables below are derived automatically from each tool's `config_schema`. 
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
+  | `palavra` | `string` | — | [buscar_materiais, buscar_servicos, listar_servicos_por_grupo] Search term. For buscar_materiais: CATMAT searches product GROUP names (PDM), not individual items. Try generic terms: 'microcomputador' (PDM 6661), 'veiculo', 'mesa', 'cadeira', 'notebook', 'ar condicionado', 'servidor'. If results seem unrelated to your search term, the PDM name matched loosely; try a different word. ⚠️ buscar_materiais returns a SAMPLE of up to 5 items per PDM. To see ALL CATMAT items in a group, use listar_materiais_por_pdm(codigo_pdm=X). After finding item codes, use pesquisar_precos(codigo_item=...). For buscar_servicos: search CATSER services by name. Try terms like 'manutenção predial', 'limpeza', 'vigilância', 'suporte técnico', 'consultoria'. For listar_servicos_por_grupo: optional client-side name filter within a hierarchy level (e.g. listar_servicos_por_grupo(codigo_secao=1, palavra='cloud')). |
+  | `codigo_item` | `integer` | — | CATMAT or CATSER item code for pesquisar_precos. Obtain via listar_materiais_por_pdm (CATMAT) or buscar_servicos (CATSER) — use the 'codigo_item' or 'codigo' field from results. ⚠️ NOT the PDM group code (that returns 0 results). Example: 469150 for a specific microcomputer model within PDM 6661. For services, use the CATSER 'codigo' field directly. |
   | `codigo_pdm` | `integer` | — | PDM code from buscar_materiais to list all CATMAT items in that group. Use listar_materiais_por_pdm to browse the full catalog before picking a material for pesquisar_precos. Example: 6661 for microcomputadores. |
 
 - **`listar_ocorrencias_contrato`** — _(no description)_
@@ -266,6 +266,16 @@ The variables below are derived automatically from each tool's `config_schema`. 
   | --- | --- | :---: | --- |
   | `contrato_id` | `integer` | — | [detalhar_contrato_id, listar_empenhos, listar_itens_contrato, listar_faturas, listar_historico_contrato, listar_terceirizados, listar_garantias_contrato, listar_cronograma_contrato, listar_ocorrencias_contrato, listar_publicacoes_contrato, listar_responsaveis_contrato, listar_prepostos_contrato, listar_despesas_acessorias, listar_arquivos_contrato, listar_domicilio_bancario, detalhar_contrato_completo] Numeric contract ID from Contratos.gov.br. Example: 2957. |
 
+- **`listar_servicos_por_grupo`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `palavra` | `string` | — | [buscar_materiais, buscar_servicos, listar_servicos_por_grupo] Search term. For buscar_materiais: CATMAT searches product GROUP names (PDM), not individual items. Try generic terms: 'microcomputador' (PDM 6661), 'veiculo', 'mesa', 'cadeira', 'notebook', 'ar condicionado', 'servidor'. If results seem unrelated to your search term, the PDM name matched loosely; try a different word. ⚠️ buscar_materiais returns a SAMPLE of up to 5 items per PDM. To see ALL CATMAT items in a group, use listar_materiais_por_pdm(codigo_pdm=X). After finding item codes, use pesquisar_precos(codigo_item=...). For buscar_servicos: search CATSER services by name. Try terms like 'manutenção predial', 'limpeza', 'vigilância', 'suporte técnico', 'consultoria'. For listar_servicos_por_grupo: optional client-side name filter within a hierarchy level (e.g. listar_servicos_por_grupo(codigo_secao=1, palavra='cloud')). |
+  | `codigo_secao` | `integer` | — | [listar_servicos_por_grupo] CATSER section code (level 1 of hierarchy: Seção). Example: 1. |
+  | `codigo_divisao` | `integer` | — | [listar_servicos_por_grupo] CATSER division code (level 2: Divisão). Use with codigo_secao to narrow. |
+  | `codigo_grupo` | `integer` | — | [listar_servicos_por_grupo] CATSER group code (level 3: Grupo). Use with codigo_secao and/or codigo_divisao to narrow. |
+  | `codigo_classe` | `integer` | — | [listar_servicos_por_grupo] CATSER class code (level 4: Classe). Most specific level before individual services. |
+
 - **`listar_terceirizados`** — _(no description)_
 
   | Parameter | Type | Required | Description |
@@ -276,8 +286,8 @@ The variables below are derived automatically from each tool's `config_schema`. 
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `palavra` | `string` | — | Search term for buscar_materiais. CATMAT searches product GROUP names (PDM), not individual items. Try generic terms: 'microcomputador' (PDM 6661), 'veiculo', 'mesa', 'cadeira', 'notebook', 'ar condicionado', 'servidor'. If results seem unrelated to your search term, the PDM name matched loosely; try a different word. Use the 'codigo' from results as 'codigo_material' in pesquisar_precos. |
-  | `codigo_material` | `integer` | — | PDM (Product Group) code for pesquisar_precos. Obtained via buscar_materiais — use the 'codigo' field from results, NOT 'codigo_item'. Example: 6661 for microcomputadores. ⚠️ PDM codes are GROUP-level — verify the purchase descriptions (descricaoItem) in results to confirm they match what you're looking for. |
+  | `palavra` | `string` | — | [buscar_materiais, buscar_servicos, listar_servicos_por_grupo] Search term. For buscar_materiais: CATMAT searches product GROUP names (PDM), not individual items. Try generic terms: 'microcomputador' (PDM 6661), 'veiculo', 'mesa', 'cadeira', 'notebook', 'ar condicionado', 'servidor'. If results seem unrelated to your search term, the PDM name matched loosely; try a different word. ⚠️ buscar_materiais returns a SAMPLE of up to 5 items per PDM. To see ALL CATMAT items in a group, use listar_materiais_por_pdm(codigo_pdm=X). After finding item codes, use pesquisar_precos(codigo_item=...). For buscar_servicos: search CATSER services by name. Try terms like 'manutenção predial', 'limpeza', 'vigilância', 'suporte técnico', 'consultoria'. For listar_servicos_por_grupo: optional client-side name filter within a hierarchy level (e.g. listar_servicos_por_grupo(codigo_secao=1, palavra='cloud')). |
+  | `codigo_item` | `integer` | — | CATMAT or CATSER item code for pesquisar_precos. Obtain via listar_materiais_por_pdm (CATMAT) or buscar_servicos (CATSER) — use the 'codigo_item' or 'codigo' field from results. ⚠️ NOT the PDM group code (that returns 0 results). Example: 469150 for a specific microcomputer model within PDM 6661. For services, use the CATSER 'codigo' field directly. |
   | `codigo_pdm` | `integer` | — | PDM code from buscar_materiais to list all CATMAT items in that group. Use listar_materiais_por_pdm to browse the full catalog before picking a material for pesquisar_precos. Example: 6661 for microcomputadores. |
   | `uf` | `string` | — | State abbreviation for pesquisar_precos. Example: 'RJ'. |
 

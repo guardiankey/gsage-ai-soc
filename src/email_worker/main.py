@@ -141,19 +141,20 @@ class EmailWorker:
             # Re-load account from DB to pick up any config changes.
             try:
                 async with Session() as _s:
-                    account = await _s.get(GSageEmailAccount, account_id)
-                if account is None:
+                    fresh = await _s.get(GSageEmailAccount, account_id)
+                if fresh is None:
                     logger.warning(
                         "EmailWorker._account_loop: account %s no longer exists — stopping loop",
                         account_id,
                     )
                     return
-                if not account.is_active:
+                if not fresh.is_active:
                     logger.info(
                         "EmailWorker._account_loop: account %s deactivated — stopping loop",
-                        account.email,
+                        fresh.email,
                     )
                     return
+                account = fresh
             except Exception as reload_exc:
                 logger.warning(
                     "EmailWorker._account_loop: failed to reload account %s — using cached config: %s",

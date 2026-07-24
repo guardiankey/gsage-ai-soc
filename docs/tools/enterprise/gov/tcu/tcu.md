@@ -42,6 +42,7 @@ _No configuration-derived environment variables._
   | `relator` | `string` | — | [consultar_acordaos] Filtrar por nome do relator (case-insensitive, busca parcial). |
   | `ano` | `integer` | — | [consultar_acordaos, consultar_termos_contratuais] Filtrar por ano (ex: 2025). |
   | `busca` | `string` | — | [consultar_acordaos] Busca textual no sumário e título (case-insensitive). |
+  | `baixar_conteudo` | `boolean` | — | [consultar_acordaos] Se true, faz download do PDF e DOC de cada acórdão retornado e os salva como artifacts da conversa. Default: false (apenas retorna metadados + URLs). ⚠️ Quando ativado, cada acórdão gera até 2 artifacts (PDF + DOC). Use com quantidade baixa (≤ 5). |
 
 - **`consultar_cadirreg`** — _(no description)_
 
@@ -92,6 +93,7 @@ _No configuration-derived environment variables._
   | `valor_original` | `number` | — | [calcular_debito] Valor original do débito em reais. |
   | `aplica_juros` | `boolean` | — | [calcular_debito] Aplicar juros de mora (default true). |
   | `fornecedor` | `string` | — | [consultar_termos_contratuais] Nome do fornecedor para filtrar (case-insensitive). |
+  | `baixar_conteudo` | `boolean` | — | [consultar_acordaos] Se true, faz download do PDF e DOC de cada acórdão retornado e os salva como artifacts da conversa. Default: false (apenas retorna metadados + URLs). ⚠️ Quando ativado, cada acórdão gera até 2 artifacts (PDF + DOC). Use com quantidade baixa (≤ 5). |
 
 - **`consultar_pedidos_congresso`** — _(no description)_
 

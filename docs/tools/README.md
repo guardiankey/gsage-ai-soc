@@ -74,8 +74,8 @@ framework (audience: developers).
 
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
-| `generate_document` | 1 | `files:read`, `files:write` | — | — | — | [core/generate_document.md](core/generate_document.md) |
 | `document_templates` | 1 | `files:read`, `files:write` | — | — | — | [core/document_templates.md](core/document_templates.md) |
+| `generate_document` | 1 | `files:read`, `files:write` | — | — | — | [core/generate_document.md](core/generate_document.md) |
 | `process_catalog_document` | 1 | — | — | — | — | [enterprise/process_catalog/process_catalog_document.md](enterprise/process_catalog/process_catalog_document.md) |
 | `sei_pen` | 3 | `sei:read`, `sei:write` | ✓ | ✓ | — | [enterprise/gov/sei_pen.md](enterprise/gov/sei_pen.md) |
 
@@ -85,7 +85,7 @@ framework (audience: developers).
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `gravityzone` | 3 | `gravityzone:read`, `gravityzone:write` | ✓ | ✓ | — | [soc/edr/gravityzone.md](soc/edr/gravityzone.md) |
 | `sentinelone` | 3 | `sentinelone:read`, `sentinelone:write` | ✓ | ✓ | ✓ | [soc/edr/sentinelone.md](soc/edr/sentinelone.md) |
-| `trellix_edr` | 8 | `edr:quarantine`, `edr:read`, `edr:write` | ✓ | ✓ | ✓ | [soc/edr/trellix/trellix_edr.md](soc/edr/trellix/trellix_edr.md) |
+| `trellix_edr` | 10 | `edr:quarantine`, `edr:read`, `edr:write` | ✓ | ✓ | ✓ | [soc/edr/trellix/trellix_edr.md](soc/edr/trellix/trellix_edr.md) |
 | `trellix_edr_collectors` | 1 | `edr:read` | — | — | — | [soc/edr/trellix/trellix_edr_collectors.md](soc/edr/trellix/trellix_edr_collectors.md) |
 
 ## email
@@ -104,6 +104,8 @@ framework (audience: developers).
 | `list_recent_artifacts` | 1 | `agents:run` | — | — | — | [core/list_recent_artifacts.md](core/list_recent_artifacts.md) |
 | `pdf_analyzer` | 1 | `agents:run` | — | — | — | [core/pdf_analyzer.md](core/pdf_analyzer.md) |
 | `read_file` | 1 | `agents:run` | — | — | — | [core/read_file.md](core/read_file.md) |
+| `summarize_file` | 1 | `files:read`, `files:write` | — | ✓ | — | [core/summarize_file.md](core/summarize_file.md) |
+| `write_file` | 1 | `agents:run` | — | — | — | [core/write_file.md](core/write_file.md) |
 | `zip_tool` | 1 | `files:read`, `files:write` | — | — | — | [core/zip_tool.md](core/zip_tool.md) |
 
 ## firewall
@@ -122,6 +124,12 @@ framework (audience: developers).
 | `pncp_contratos` | 1 | `gov:compras:pncp_contratos:read` | — | — | — | [enterprise/gov/compras/pncp_contratos.md](enterprise/gov/compras/pncp_contratos.md) |
 | `siorg` | 1 | `gov:siorg:read` | — | — | — | [enterprise/gov/siorg/siorg.md](enterprise/gov/siorg/siorg.md) |
 | `tcu` | 1 | `gov:tcu:read` | — | — | — | [enterprise/gov/tcu/tcu.md](enterprise/gov/tcu/tcu.md) |
+
+## government
+
+| Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
+| --- | ---: | --- | :---: | :---: | :---: | --- |
+| `legislacao_federal` | 1 | `gov:senado:legislacao:read` | — | — | — | [enterprise/gov/senado/legislacao.md](enterprise/gov/senado/legislacao.md) |
 
 ## itsm
 
@@ -169,6 +177,7 @@ framework (audience: developers).
 | `cisa_kev` | 1 | `security:read` | — | — | — | [soc/threat_intel/cisa_kev.md](soc/threat_intel/cisa_kev.md) |
 | `curator` | 2 | `curator:read`, `curator:write` | ✓ | ✓ | — | [soc/threat_intel/curator.md](soc/threat_intel/curator.md) |
 | `gdn_guardiankey` | 1 | `gdn:read` | — | ✓ | ✓ | [soc/threat_intel/gdn_guardiankey/gdn_guardiankey.md](soc/threat_intel/gdn_guardiankey/gdn_guardiankey.md) |
+| `misp` | 4 | `misp:read`, `misp:write` | ✓ | ✓ | ✓ | [soc/threat_intel/misp.md](soc/threat_intel/misp.md) |
 | `msrc_bulletin` | 1 | `security:read` | — | — | — | [soc/threat_intel/msrc_bulletin.md](soc/threat_intel/msrc_bulletin.md) |
 | `nvd_lookup` | 1 | `threat:intel` | — | ✓ | — | [soc/threat_intel/nvd_lookup.md](soc/threat_intel/nvd_lookup.md) |
 | `public_alerts` | 1 | `threat_intel:public_alerts:read` | — | — | — | [soc/threat_intel/public_alerts/__init__.md](soc/threat_intel/public_alerts/__init__.md) |
@@ -179,8 +188,10 @@ framework (audience: developers).
 | Group / Tool | Tools | Permissions | Approval | Config | Multi-cfg | Page |
 | --- | ---: | --- | :---: | :---: | :---: | --- |
 | `base64_decoder` | 1 | `decode:base64` | — | — | — | [core/base64_decoder.md](core/base64_decoder.md) |
+| `collect_user_input` | 1 | `interaction:collect` | — | — | — | [core/collect_user_input.md](core/collect_user_input.md) |
 | `datastore` | 1 | `datastores:read` | — | — | — | [datastore.md](datastore.md) |
 | `http_fetch` | 1 | `core:http:fetch` | — | — | — | [core/http_fetch.md](core/http_fetch.md) |
+| `instruction_catalog` | 1 | — | — | — | — | [enterprise/instruction_catalog/instruction_catalog.md](enterprise/instruction_catalog/instruction_catalog.md) |
 | `mermaid_reference` | 1 | — | — | — | — | [core/mermaid_reference.md](core/mermaid_reference.md) |
 | `mermaid_validate` | 1 | — | — | — | — | [core/mermaid_validate.md](core/mermaid_validate.md) |
 | `process_catalog` | 1 | — | — | — | — | [enterprise/process_catalog/process_catalog.md](enterprise/process_catalog/process_catalog.md) |

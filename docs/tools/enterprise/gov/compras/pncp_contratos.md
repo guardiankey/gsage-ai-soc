@@ -36,7 +36,7 @@ _No configuration-derived environment variables._
   | --- | --- | :---: | --- |
   | `data_inicial` | `string` | — | Start date. Format: YYYYMMDD (e.g. 20250101). Also accepts YYYY-MM-DD or DD/MM/YYYY. Default: 30 days ago. |
   | `data_final` | `string` | — | End date. Format: YYYYMMDD (e.g. 20250331). Also accepts YYYY-MM-DD or DD/MM/YYYY. Max 365 days from data_inicial. Default: today. |
-  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
+  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas, listar_contratacoes_atualizadas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
   | `texto` | `string` | — | Client-side text filter. Searches objeto, órgão, and fornecedor fields. IMPORTANT: PNCP API has no text search — filtering happens locally after fetching. |
   | `uf` | `string` | — | State abbreviation filter (e.g. SP, RJ, DF). |
   | `cnpj_orgao` | `string` | — | CNPJ of the contracting org (14 digits). |
@@ -46,7 +46,7 @@ _No configuration-derived environment variables._
   | `ano` | `integer` | — | [listar_pca, detalhar_contratacao] Year. Example: 2025. |
   | `sequencial_compra` | `integer` | — | [detalhar_contratacao] Sequencial number of the contratação. Obtained from listar_contratacoes results (campo sequencialCompra). Example: 89. |
   | `pagina` | `integer` | — | Page number for paginated results (default 1). |
-  | `max_results` | `integer` | — | Max results per page (default 50). |
+  | `max_results` | `integer` | — | Max results per page (default 100). |
   | `force_refresh` | `boolean` | — | Bypass cache. |
 
 - **`listar_atas_atualizadas`** — _(no description)_
@@ -55,7 +55,7 @@ _No configuration-derived environment variables._
   | --- | --- | :---: | --- |
   | `data_inicial` | `string` | — | Start date. Format: YYYYMMDD (e.g. 20250101). Also accepts YYYY-MM-DD or DD/MM/YYYY. Default: 30 days ago. |
   | `data_final` | `string` | — | End date. Format: YYYYMMDD (e.g. 20250331). Also accepts YYYY-MM-DD or DD/MM/YYYY. Max 365 days from data_inicial. Default: today. |
-  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
+  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas, listar_contratacoes_atualizadas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
   | `texto` | `string` | — | Client-side text filter. Searches objeto, órgão, and fornecedor fields. IMPORTANT: PNCP API has no text search — filtering happens locally after fetching. |
   | `uf` | `string` | — | State abbreviation filter (e.g. SP, RJ, DF). |
   | `cnpj_orgao` | `string` | — | CNPJ of the contracting org (14 digits). |
@@ -65,14 +65,14 @@ _No configuration-derived environment variables._
   | `ano` | `integer` | — | [listar_pca, detalhar_contratacao] Year. Example: 2025. |
   | `sequencial_compra` | `integer` | — | [detalhar_contratacao] Sequencial number of the contratação. Obtained from listar_contratacoes results (campo sequencialCompra). Example: 89. |
   | `pagina` | `integer` | — | Page number for paginated results (default 1). |
-  | `max_results` | `integer` | — | Max results per page (default 50). |
+  | `max_results` | `integer` | — | Max results per page (default 100). |
   | `force_refresh` | `boolean` | — | Bypass cache. |
 
 - **`listar_contratacoes`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
+  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas, listar_contratacoes_atualizadas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
   | `modo_disputa` | `integer` | — | [listar_contratacoes] Modo de disputa: 1=Aberto, 2=Fechado, 3=Aberto-Fechado, 4=Dispensa Com Disputa, 5=Não se aplica. |
   | `sequencial_compra` | `integer` | — | [detalhar_contratacao] Sequencial number of the contratação. Obtained from listar_contratacoes results (campo sequencialCompra). Example: 89. |
 
@@ -80,26 +80,13 @@ _No configuration-derived environment variables._
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
+  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas, listar_contratacoes_atualizadas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
 
 - **`listar_contratacoes_atualizadas`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
-  | `data_inicial` | `string` | — | Start date. Format: YYYYMMDD (e.g. 20250101). Also accepts YYYY-MM-DD or DD/MM/YYYY. Default: 30 days ago. |
-  | `data_final` | `string` | — | End date. Format: YYYYMMDD (e.g. 20250331). Also accepts YYYY-MM-DD or DD/MM/YYYY. Max 365 days from data_inicial. Default: today. |
-  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
-  | `texto` | `string` | — | Client-side text filter. Searches objeto, órgão, and fornecedor fields. IMPORTANT: PNCP API has no text search — filtering happens locally after fetching. |
-  | `uf` | `string` | — | State abbreviation filter (e.g. SP, RJ, DF). |
-  | `cnpj_orgao` | `string` | — | CNPJ of the contracting org (14 digits). |
-  | `cnpj` | `string` | — | [consultar_fornecedor, consultar_orgao] CNPJ (14 digits). |
-  | `cpf` | `string` | — | [consultar_fornecedor] CPF (11 digits). |
-  | `modo_disputa` | `integer` | — | [listar_contratacoes] Modo de disputa: 1=Aberto, 2=Fechado, 3=Aberto-Fechado, 4=Dispensa Com Disputa, 5=Não se aplica. |
-  | `ano` | `integer` | — | [listar_pca, detalhar_contratacao] Year. Example: 2025. |
-  | `sequencial_compra` | `integer` | — | [detalhar_contratacao] Sequencial number of the contratação. Obtained from listar_contratacoes results (campo sequencialCompra). Example: 89. |
-  | `pagina` | `integer` | — | Page number for paginated results (default 1). |
-  | `max_results` | `integer` | — | Max results per page (default 50). |
-  | `force_refresh` | `boolean` | — | Bypass cache. |
+  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas, listar_contratacoes_atualizadas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
 
 - **`listar_contratos`** — _(no description)_
 
@@ -107,7 +94,7 @@ _No configuration-derived environment variables._
   | --- | --- | :---: | --- |
   | `data_inicial` | `string` | — | Start date. Format: YYYYMMDD (e.g. 20250101). Also accepts YYYY-MM-DD or DD/MM/YYYY. Default: 30 days ago. |
   | `data_final` | `string` | — | End date. Format: YYYYMMDD (e.g. 20250331). Also accepts YYYY-MM-DD or DD/MM/YYYY. Max 365 days from data_inicial. Default: today. |
-  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
+  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas, listar_contratacoes_atualizadas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
   | `texto` | `string` | — | Client-side text filter. Searches objeto, órgão, and fornecedor fields. IMPORTANT: PNCP API has no text search — filtering happens locally after fetching. |
   | `uf` | `string` | — | State abbreviation filter (e.g. SP, RJ, DF). |
   | `cnpj_orgao` | `string` | — | CNPJ of the contracting org (14 digits). |
@@ -117,7 +104,7 @@ _No configuration-derived environment variables._
   | `ano` | `integer` | — | [listar_pca, detalhar_contratacao] Year. Example: 2025. |
   | `sequencial_compra` | `integer` | — | [detalhar_contratacao] Sequencial number of the contratação. Obtained from listar_contratacoes results (campo sequencialCompra). Example: 89. |
   | `pagina` | `integer` | — | Page number for paginated results (default 1). |
-  | `max_results` | `integer` | — | Max results per page (default 50). |
+  | `max_results` | `integer` | — | Max results per page (default 100). |
   | `force_refresh` | `boolean` | — | Bypass cache. |
 
 - **`listar_contratos_atualizados`** — _(no description)_
@@ -126,7 +113,7 @@ _No configuration-derived environment variables._
   | --- | --- | :---: | --- |
   | `data_inicial` | `string` | — | Start date. Format: YYYYMMDD (e.g. 20250101). Also accepts YYYY-MM-DD or DD/MM/YYYY. Default: 30 days ago. |
   | `data_final` | `string` | — | End date. Format: YYYYMMDD (e.g. 20250331). Also accepts YYYY-MM-DD or DD/MM/YYYY. Max 365 days from data_inicial. Default: today. |
-  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
+  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas, listar_contratacoes_atualizadas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
   | `texto` | `string` | — | Client-side text filter. Searches objeto, órgão, and fornecedor fields. IMPORTANT: PNCP API has no text search — filtering happens locally after fetching. |
   | `uf` | `string` | — | State abbreviation filter (e.g. SP, RJ, DF). |
   | `cnpj_orgao` | `string` | — | CNPJ of the contracting org (14 digits). |
@@ -136,7 +123,7 @@ _No configuration-derived environment variables._
   | `ano` | `integer` | — | [listar_pca, detalhar_contratacao] Year. Example: 2025. |
   | `sequencial_compra` | `integer` | — | [detalhar_contratacao] Sequencial number of the contratação. Obtained from listar_contratacoes results (campo sequencialCompra). Example: 89. |
   | `pagina` | `integer` | — | Page number for paginated results (default 1). |
-  | `max_results` | `integer` | — | Max results per page (default 50). |
+  | `max_results` | `integer` | — | Max results per page (default 100). |
   | `force_refresh` | `boolean` | — | Bypass cache. |
 
 - **`listar_instrumentos_cobranca`** — _(no description)_
@@ -145,7 +132,7 @@ _No configuration-derived environment variables._
   | --- | --- | :---: | --- |
   | `data_inicial` | `string` | — | Start date. Format: YYYYMMDD (e.g. 20250101). Also accepts YYYY-MM-DD or DD/MM/YYYY. Default: 30 days ago. |
   | `data_final` | `string` | — | End date. Format: YYYYMMDD (e.g. 20250331). Also accepts YYYY-MM-DD or DD/MM/YYYY. Max 365 days from data_inicial. Default: today. |
-  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
+  | `modalidade` | `integer` | — | [listar_contratacoes, listar_contratacoes_abertas, listar_contratacoes_atualizadas] Modalidade code. 6=Pregão Eletrônico (most common). See MODALIDADES_PNCP in constants for full list. |
   | `texto` | `string` | — | Client-side text filter. Searches objeto, órgão, and fornecedor fields. IMPORTANT: PNCP API has no text search — filtering happens locally after fetching. |
   | `uf` | `string` | — | State abbreviation filter (e.g. SP, RJ, DF). |
   | `cnpj_orgao` | `string` | — | CNPJ of the contracting org (14 digits). |
@@ -155,7 +142,7 @@ _No configuration-derived environment variables._
   | `ano` | `integer` | — | [listar_pca, detalhar_contratacao] Year. Example: 2025. |
   | `sequencial_compra` | `integer` | — | [detalhar_contratacao] Sequencial number of the contratação. Obtained from listar_contratacoes results (campo sequencialCompra). Example: 89. |
   | `pagina` | `integer` | — | Page number for paginated results (default 1). |
-  | `max_results` | `integer` | — | Max results per page (default 50). |
+  | `max_results` | `integer` | — | Max results per page (default 100). |
   | `force_refresh` | `boolean` | — | Bypass cache. |
 
 - **`listar_pca`** — _(no description)_

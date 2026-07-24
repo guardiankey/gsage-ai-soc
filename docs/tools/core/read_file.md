@@ -11,7 +11,7 @@ gSage AI — ReadFile tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `read_file` | Read a text file attachment from the conversation or list all currently attached files | `agents:run` | — | — |
+| `read_file` | Read a text file attachment, list attachments, navigate Markdown sections, or search with regex — from the current conversation. | `agents:run` | — | — |
 
 ## Environment variables
 
@@ -29,7 +29,7 @@ _No configuration-derived environment variables._
 
 | Tool | Version | Rate limit/min | Timeout (s) | Circuit breaker | Background | Multi-config |
 | --- | --- | ---: | ---: | :---: | :---: | :---: |
-| `read_file` | `2.0.0` | 60 | 30 | — | — | — |
+| `read_file` | `3.0.0` | 60 | 30 | — | — | — |
 
 ## Source files
 

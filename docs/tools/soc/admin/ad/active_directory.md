@@ -11,7 +11,7 @@ gSage AI — ad_read tool (Active Directory read-only).
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `ad_read` | Read-only Active Directory queries: list/search users, groups, and OUs; fetch single user or group by DN or name. | `ad:read` | — | — |
+| `ad_read` | Read-only Active Directory queries: list/search users, groups, and OUs; fetch single user or group by DN or name; run security audit (stale accounts, locked out, never logged in). | `ad:read` | — | — |
 | `ad_write` | Active Directory write operations: disable/enable/unlock users, reset passwords, create users, manage group membership. | `ad:write` | ✓ | — |
 
 ## Configuration
@@ -124,6 +124,10 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `ou` | `string` | — | Base OU DN to search under (list_users / list_groups / list_ous). Defaults to config.base_dn when omitted. |
   | `enabled` | `boolean` | — | list_users only: filter by account enabled/disabled state. |
+  | `password_changed_within_days` | `integer` | — | list_users only: filter to users whose pwdLastSet is within the last N days (recent password changes). |
+  | `password_changed_older_than_days` | `integer` | — | list_users only: filter to users whose pwdLastSet is older than N days (stale passwords). |
+  | `last_logon_within_days` | `integer` | — | list_users only: filter to users whose lastLogonTimestamp is within the last N days (recently active). Min 14 due to AD replication lag. |
+  | `last_logon_older_than_days` | `integer` | — | list_users only: filter to users whose lastLogonTimestamp is older than N days (stale/inactive accounts). Min 14 due to AD replication lag. |
 
 - **`list_groups`** — _(no description)_
 
@@ -151,6 +155,15 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
   | --- | --- | :---: | --- |
   | `group_dn` | `string` | — | Full DN of the group (get_group). |
   | `group_name` | `string` | — | CN of the group (get_group). |
+
+- **`audit_accounts`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `audit_categories` | `array` | — | audit_accounts only: which audit categories to include. Use ['all'] for every category. |
+  | `stale_days` | `integer` | — | audit_accounts only: days threshold for stale_accounts category. Default 90. |
+  | `password_change_days` | `integer` | — | audit_accounts only: days threshold for recent_password_changes category. Default 30. |
+  | `include_items` | `boolean` | — | audit_accounts only: include full user lists per category. When false, only counts are returned. |
 
 
 ### `ad_write`
@@ -221,7 +234,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 
 | Tool | Version | Rate limit/min | Timeout (s) | Circuit breaker | Background | Multi-config |
 | --- | --- | ---: | ---: | :---: | :---: | :---: |
-| `ad_read` | `1.0.0` | 60 | 30 | ✓ | — | — |
+| `ad_read` | `1.1.0` | 60 | 30 | ✓ | — | — |
 | `ad_write` | `1.0.0` | 20 | 120 | ✓ | — | — |
 
 ## Source files

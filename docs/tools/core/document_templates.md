@@ -11,7 +11,7 @@ gSage AI — document_templates MCP tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `document_templates` | List and download document templates (DOCX, Markdown) available to the organization for use with generate_document | `files:read`, `files:write` | — | — |
+| `document_templates` | List (with optional search filter) and download document templates (DOCX, Markdown) available to the organization for use with generate_document | `files:read`, `files:write` | — | — |
 
 ## Environment variables
 
@@ -29,7 +29,7 @@ _No configuration-derived environment variables._
 
 | Tool | Version | Rate limit/min | Timeout (s) | Circuit breaker | Background | Multi-config |
 | --- | --- | ---: | ---: | :---: | :---: | :---: |
-| `document_templates` | `1.1.0` | 60 | 15 | — | — | — |
+| `document_templates` | `1.3.0` | 60 | 15 | — | — | — |
 
 ## Source files
 

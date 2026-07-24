@@ -11,7 +11,7 @@ gSage AI — Convert to Markdown tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `convert_to_md` | Convert an attached document (PDF, DOCX, PPTX, XLSX, HTML, TXT) to Markdown. Saves the result as a downloadable artifact. | `core:convert_md` | — | — |
+| `convert_to_md` | Convert an attached document (PDF, DOCX, PPTX, XLSX, HTML, RTF, TXT) to Markdown. PDFs are auto-detected as text or image; image PDFs use OCR (Docling). Saves the result as a downloadable artifact and returns a short preview. | `core:convert_md` | — | — |
 
 ## Environment variables
 
@@ -29,7 +29,7 @@ _No configuration-derived environment variables._
 
 | Tool | Version | Rate limit/min | Timeout (s) | Circuit breaker | Background | Multi-config |
 | --- | --- | ---: | ---: | :---: | :---: | :---: |
-| `convert_to_md` | `1.0.0` | 15 | 90 | — | — | — |
+| `convert_to_md` | `1.2.0` | 15 | 90 | — | >60s | — |
 
 ## Source files
 

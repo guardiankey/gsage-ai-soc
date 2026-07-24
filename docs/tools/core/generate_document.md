@@ -29,7 +29,7 @@ _No configuration-derived environment variables._
 
 | Tool | Version | Rate limit/min | Timeout (s) | Circuit breaker | Background | Multi-config |
 | --- | --- | ---: | ---: | :---: | :---: | :---: |
-| `generate_document` | `1.0.0` | 10 | 120 | — | always | — |
+| `generate_document` | `1.1.0` | 10 | 120 | — | always | — |
 
 ## Source files
 

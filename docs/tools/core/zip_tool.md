@@ -32,6 +32,7 @@ _No configuration-derived environment variables._
   | `output_filename` | `string` | — | [action=zip] Base name for the resulting ZIP (without extension). Defaults to 'files'. |
   | `entries` | `array` | — | [action=unzip] Names of specific entries inside the ZIP to extract. If omitted, all non-directory entries are extracted. |
   | `output_prefix` | `string` | — | [action=unzip] Optional prefix prepended to every extracted filename (e.g. 'invoice_' → 'invoice_report.pdf'). |
+  | `password` | `string` | — | ⚠️ SENSITIVE — Optional password for the ZIP archive. For action=zip: creates an AES-256 encrypted archive. For action=unzip: decrypts encrypted entries. For action=list: no effect (metadata is always readable), but the 'encrypted' flag is shown per entry. Empty / whitespace-only passwords are treated as 'no password'. This value is NOT written to logs. |
 
 - **`list`** — _(no description)_
 
@@ -39,6 +40,7 @@ _No configuration-derived environment variables._
   | --- | --- | :---: | --- |
   | `file_ids` | `array` | — | [action=zip] List of file UUIDs to compress. Obtain IDs from 'read_file' (list mode) or from previous tool results. |
   | `file_id` | `string` | — | [action=list, action=unzip] UUID of the ZIP file to inspect or extract. |
+  | `password` | `string` | — | ⚠️ SENSITIVE — Optional password for the ZIP archive. For action=zip: creates an AES-256 encrypted archive. For action=unzip: decrypts encrypted entries. For action=list: no effect (metadata is always readable), but the 'encrypted' flag is shown per entry. Empty / whitespace-only passwords are treated as 'no password'. This value is NOT written to logs. |
 
 - **`unzip`** — _(no description)_
 
@@ -47,6 +49,7 @@ _No configuration-derived environment variables._
   | `file_id` | `string` | — | [action=list, action=unzip] UUID of the ZIP file to inspect or extract. |
   | `entries` | `array` | — | [action=unzip] Names of specific entries inside the ZIP to extract. If omitted, all non-directory entries are extracted. |
   | `output_prefix` | `string` | — | [action=unzip] Optional prefix prepended to every extracted filename (e.g. 'invoice_' → 'invoice_report.pdf'). |
+  | `password` | `string` | — | ⚠️ SENSITIVE — Optional password for the ZIP archive. For action=zip: creates an AES-256 encrypted archive. For action=unzip: decrypts encrypted entries. For action=list: no effect (metadata is always readable), but the 'encrypted' flag is shown per entry. Empty / whitespace-only passwords are treated as 'no password'. This value is NOT written to logs. |
 
 
 ## Permissions required
@@ -59,7 +62,7 @@ _No configuration-derived environment variables._
 
 | Tool | Version | Rate limit/min | Timeout (s) | Circuit breaker | Background | Multi-config |
 | --- | --- | ---: | ---: | :---: | :---: | :---: |
-| `zip_tool` | `2.0.0` | 20 | 120 | — | >60s | — |
+| `zip_tool` | `2.1.0` | 20 | 120 | — | >60s | — |
 
 ## Source files
 

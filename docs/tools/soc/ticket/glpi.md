@@ -14,7 +14,7 @@ gSage AI — GLPI Create Ticket tool.
 | `glpi_create_ticket` | Create a new GLPI Ticket (Incident or Service Request) with title, description, and priority | `glpi:write` | ✓ | — |
 | `glpi_dashboard` | Managerial GLPI dashboards: per group/status, technician workload, stalled, SLA breaches, top requesters, mean TTR and trend | `glpi:read` | — | — |
 | `glpi_get_group_members` | List members of a GLPI group (with optional recursive sub-group expansion) | `glpi:read` | — | — |
-| `glpi_get_item` | Retrieve a single GLPI item (ticket, asset, user) by its numeric ID | `glpi:read` | — | — |
+| `glpi_get_item` | Retrieve a single GLPI item (ticket, asset, user) by its numeric ID. Related Entity, User, RequestType and ITILCategory are automatically resolved and included in a 'relations' section. Document metadata is always shown; use download_documents=true to fetch file contents. | `glpi:read` | — | — |
 | `glpi_search` | Search any GLPI itemtype (tickets, assets, users) using the GLPI search engine | `glpi:read` | — | — |
 | `glpi_update_ticket` | Update an existing GLPI ticket: add notes, change status, or assign users | `glpi:write` | ✓ | — |
 
@@ -168,7 +168,7 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 | `glpi_create_ticket` | `1.0.0` | 10 | 30 | ✓ | — | — |
 | `glpi_dashboard` | `1.0.0` | 30 | 90 | ✓ | — | — |
 | `glpi_get_group_members` | `1.1.0` | 30 | 30 | ✓ | — | — |
-| `glpi_get_item` | `1.1.0` | 60 | 30 | ✓ | — | — |
+| `glpi_get_item` | `1.2.0` | 60 | 30 | ✓ | — | — |
 | `glpi_search` | `1.3.0` | 30 | 30 | ✓ | — | — |
 | `glpi_update_ticket` | `1.0.0` | 10 | 30 | ✓ | — | — |
 

@@ -5,12 +5,13 @@
 
 ## Overview
 
-gSage AI — Trellix EDR host quarantine status tool.
+gSage AI — Trellix EDR alerts tool (v3).
 
 ## Tools in this group
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
+| `trellix_edr_alerts` | Fetch Trellix EDR alerts (v3) with severity, host, process, and MITRE tag filtering. Supports CSV/JSON export. | `edr:read` | — | — |
 | `trellix_edr_get_host_quarantine_status` | Look up Trellix EDR hosts by hostname/IP and return their quarantine and metadata status | `edr:read` | — | — |
 | `trellix_edr_quarantine_host` | Quarantine or release a host on Trellix EDR by hostname/IP (requires approval) | `edr:write`, `edr:quarantine` | ✓ | — |
 | `trellix_edr_search` | Hunt across endpoints with Trellix EDR realtime searches (SQL-like v2 or structured v1) | `edr:read` | — | — |
@@ -19,6 +20,7 @@ gSage AI — Trellix EDR host quarantine status tool.
 | `trellix_edr_search_files` | Search files across Trellix EDR endpoints by name and/or hash (MD5/SHA1/SHA256 auto-detected by length) | `edr:read` | — | — |
 | `trellix_edr_search_network` | Search network flows on Trellix EDR endpoints by remote IP/port, process name or hostname | `edr:read` | — | — |
 | `trellix_edr_search_processes` | Hunt processes across Trellix EDR endpoints (Processes / ProcessHistory) — fleet-wide aggregation by default. | `edr:read` | — | — |
+| `trellix_edr_threats` | Fetch Trellix EDR threats (list, detail, affected hosts, detections) with severity, hash, and host filtering. Supports CSV/JSON export. | `edr:read` | — | — |
 
 ## Configuration
 
@@ -84,10 +86,50 @@ The variables below are derived automatically from each tool's `config_schema`. 
 
 _Note: any field above can also be overridden per-tool by using the prefix `TOOL_<TOOL_NAME>__` instead of the shared `TOOL_<NAMESPACE>__` — useful when a single tool in the family needs a distinct value._
 
+## Operations
+
+### `trellix_edr_threats`
+
+- **`list`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `lookback_hours` | `integer` | — | How many hours back to fetch threats from (only for action='list'). Use 0 to omit the time filter. |
+
+- **`detail`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `threat_id` | `string` | — | Threat ID (numeric string, e.g. '9257473'). Required for action=detail\|affected_hosts\|detections. |
+
+- **`affected_hosts`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `threat_id` | `string` | — | Threat ID (numeric string, e.g. '9257473'). Required for action=detail\|affected_hosts\|detections. |
+
+- **`detections`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `threat_id` | `string` | — | Threat ID (numeric string, e.g. '9257473'). Required for action=detail\|affected_hosts\|detections. |
+  | `include_trace` | `boolean` | — | For action='detections': enrich each detection (up to 20) with the full process activity timeline. Adds 'trace_items' and 'trace_items_count' fields. Uses traceId + host.aGuid + firstDetected from each detection. |
+
+- **`trace`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `trace_id` | `string` | — | Trace UUID (e.g. from a detection's traceId or alert's Root_Trace_Id). Required for action=trace. |
+  | `ma_guid` | `string` | — | Trellix agent GUID (MAGUID) of the host. Required for action=trace. |
+  | `detection_date_epoch_ms` | `integer \| string` | — | Detection date for the trace. Accepts epoch milliseconds (e.g. 1783686275000) or ISO 8601 string (e.g. '2026-07-10T12:24:35Z'). Get this from a detection's 'firstDetected' field. Required for action=trace. |
+  | `include_trace` | `boolean` | — | For action='detections': enrich each detection (up to 20) with the full process activity timeline. Adds 'trace_items' and 'trace_items_count' fields. Uses traceId + host.aGuid + firstDetected from each detection. |
+
+
 ## Permissions required
 
 | Tool | Permissions |
 | --- | --- |
+| `trellix_edr_alerts` | `edr:read` |
 | `trellix_edr_get_host_quarantine_status` | `edr:read` |
 | `trellix_edr_quarantine_host` | `edr:write`, `edr:quarantine` |
 | `trellix_edr_search` | `edr:read` |
@@ -96,11 +138,13 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 | `trellix_edr_search_files` | `edr:read` |
 | `trellix_edr_search_network` | `edr:read` |
 | `trellix_edr_search_processes` | `edr:read` |
+| `trellix_edr_threats` | `edr:read` |
 
 ## Operational metadata
 
 | Tool | Version | Rate limit/min | Timeout (s) | Circuit breaker | Background | Multi-config |
 | --- | --- | ---: | ---: | :---: | :---: | :---: |
+| `trellix_edr_alerts` | `1.0.0` | 20 | 120 | ✓ | — | ✓ |
 | `trellix_edr_get_host_quarantine_status` | `1.0.0` | 30 | 600 | ✓ | always | ✓ |
 | `trellix_edr_quarantine_host` | `1.0.0` | 5 | 900 | ✓ | always | ✓ |
 | `trellix_edr_search` | `1.0.0` | 20 | 900 | ✓ | always | ✓ |
@@ -109,9 +153,11 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 | `trellix_edr_search_files` | `1.0.0` | 20 | 900 | ✓ | always | ✓ |
 | `trellix_edr_search_network` | `1.0.0` | 20 | 900 | ✓ | always | ✓ |
 | `trellix_edr_search_processes` | `1.0.0` | 20 | 900 | ✓ | always | ✓ |
+| `trellix_edr_threats` | `1.0.0` | 20 | 300 | ✓ | — | ✓ |
 
 ## Source files
 
+- [src/mcp_server/tools/soc/edr/trellix/trellix_edr_alerts.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_alerts.py)
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_get_host_quarantine_status.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_get_host_quarantine_status.py)
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_quarantine_host.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_quarantine_host.py)
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_search.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_search.py)
@@ -120,3 +166,4 @@ _Note: any field above can also be overridden per-tool by using the prefix `TOOL
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_files.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_files.py)
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_network.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_network.py)
 - [src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_processes.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_search_processes.py)
+- [src/mcp_server/tools/soc/edr/trellix/trellix_edr_threats.py](src/mcp_server/tools/soc/edr/trellix/trellix_edr_threats.py)

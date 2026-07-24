@@ -31,6 +31,10 @@ class PromptCategoryUpdate(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     parent_id: Optional[uuid.UUID] = None
+    dept_id: Optional[uuid.UUID] = Field(
+        None,
+        description="NULL = org-level category, UUID = department-level",
+    )
     description: Optional[str] = Field(None, max_length=2000)
     is_active: Optional[bool] = None
 

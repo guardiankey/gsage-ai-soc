@@ -11,7 +11,7 @@ gSage AI — Process Catalog MCP tool.
 
 | Tool | Summary | Permissions | Requires approval | Core |
 | --- | --- | --- | :---: | :---: |
-| `process_catalog` | Navigate operational process definitions: discover processes, retrieve step guidance, decision rules, and document-model metadata. | — | — | — |
+| `process_catalog` | Navigate operational process definitions: discover processes, retrieve step guidance, decision rules, and document-model metadata. IMPORTANT: get_step returns a `_collect_input` block with ready-to-use fields — pass them directly to `collect_user_input` to gather data via structured forms instead of asking in chat. | — | — | — |
 
 ## Environment variables
 
@@ -29,13 +29,14 @@ _No configuration-derived environment variables._
   | --- | --- | :---: | --- |
   | `category` | `string` | — | Filter by category. Used with action='list'. |
   | `query` | `string` | — | Free-text search across process names, descriptions, tags. Used with action='list'. |
+  | `active_capabilities` | `array` | — | List of active capabilities from the 'resolve' action output. Required for action='compose'. |
 
 - **`get`** — _(no description)_
 
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
   | `process_id` | `string` | — | Process identifier. Required for 'get', 'get_step', 'get_document'. |
-  | `step_id` | `string` | — | Step identifier. Required for 'get_step'. |
+  | `step_id` | `string` | — | Step identifier. Required for 'get_step', 'get_step_fields'. |
   | `document_id` | `string` | — | Document identifier. Required for 'get_document'. |
 
 - **`get_step`** — _(no description)_
@@ -43,7 +44,13 @@ _No configuration-derived environment variables._
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
   | `process_id` | `string` | — | Process identifier. Required for 'get', 'get_step', 'get_document'. |
-  | `step_id` | `string` | — | Step identifier. Required for 'get_step'. |
+  | `step_id` | `string` | — | Step identifier. Required for 'get_step', 'get_step_fields'. |
+
+- **`get_step_fields`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `step_id` | `string` | — | Step identifier. Required for 'get_step', 'get_step_fields'. |
 
 - **`get_document`** — _(no description)_
 
@@ -57,10 +64,42 @@ _No configuration-derived environment variables._
   | Parameter | Type | Required | Description |
   | --- | --- | :---: | --- |
   | `process_id` | `string` | — | Process identifier. Required for 'get', 'get_step', 'get_document'. |
-  | `step_id` | `string` | — | Step identifier. Required for 'get_step'. |
+  | `step_id` | `string` | — | Step identifier. Required for 'get_step', 'get_step_fields'. |
   | `document_id` | `string` | — | Document identifier. Required for 'get_document'. |
   | `category` | `string` | — | Filter by category. Used with action='list'. |
   | `query` | `string` | — | Free-text search across process names, descriptions, tags. Used with action='list'. |
+  | `level` | `integer` | — | Classification questionnaire level (1-6). Used with action='classify'. 1 starts the questionnaire. |
+  | `contract_facts` | `object` | — | Partial or complete contract_facts object. Used with action='classify' (to carry forward previous answers), action='infer' (to compute inferences), and action='resolve' (to evaluate obligations). |
+  | `inferences` | `object` | — | Pre-computed inferences object. Optional for action='resolve'. If omitted, inferences are computed automatically. |
+  | `active_capabilities` | `array` | — | List of active capabilities from the 'resolve' action output. Required for action='compose'. |
+
+- **`classify`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `level` | `integer` | — | Classification questionnaire level (1-6). Used with action='classify'. 1 starts the questionnaire. |
+  | `contract_facts` | `object` | — | Partial or complete contract_facts object. Used with action='classify' (to carry forward previous answers), action='infer' (to compute inferences), and action='resolve' (to evaluate obligations). |
+
+- **`infer`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `contract_facts` | `object` | — | Partial or complete contract_facts object. Used with action='classify' (to carry forward previous answers), action='infer' (to compute inferences), and action='resolve' (to evaluate obligations). |
+  | `inferences` | `object` | — | Pre-computed inferences object. Optional for action='resolve'. If omitted, inferences are computed automatically. |
+
+- **`resolve`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `contract_facts` | `object` | — | Partial or complete contract_facts object. Used with action='classify' (to carry forward previous answers), action='infer' (to compute inferences), and action='resolve' (to evaluate obligations). |
+  | `inferences` | `object` | — | Pre-computed inferences object. Optional for action='resolve'. If omitted, inferences are computed automatically. |
+  | `active_capabilities` | `array` | — | List of active capabilities from the 'resolve' action output. Required for action='compose'. |
+
+- **`compose`** — _(no description)_
+
+  | Parameter | Type | Required | Description |
+  | --- | --- | :---: | --- |
+  | `active_capabilities` | `array` | — | List of active capabilities from the 'resolve' action output. Required for action='compose'. |
 
 
 ## Permissions required
