@@ -526,8 +526,9 @@ class MispManageTool(BaseTool):
         # Check existing attributes for idempotency
         try:
             existing_result = await client.search("attributes", eventid=event_id, limit=200)
+            # PyMISP's _check_response already unwraps "response" key.
             existing_raw = existing_result if isinstance(existing_result, list) else (
-                existing_result.get("response", {}).get("Attribute", [])
+                existing_result.get("Attribute", [])
                 if isinstance(existing_result, dict) else []
             )
             existing_values = {

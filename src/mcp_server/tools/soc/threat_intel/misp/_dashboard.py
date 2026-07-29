@@ -163,8 +163,7 @@ async def view_top_tags(
     window_days: int = 30,
 ) -> dict:
     """Top tags by event count."""
-    date_from = (datetime.now(timezone.utc) - timedelta(days=window_days)).strftime("%Y-%m-%d")
-    result = await client.search("tags", limit=top_n)
+    result = await client.get_tags_list()
     raw = result if isinstance(result, list) else result.get("response", result.get("Tag", []))
 
     tags: list[dict] = []
@@ -194,8 +193,7 @@ async def view_top_galaxies(
     window_days: int = 30,
 ) -> dict:
     """Top galaxies/clusters by reference count."""
-    date_from = (datetime.now(timezone.utc) - timedelta(days=window_days)).strftime("%Y-%m-%d")
-    result = await client.search("galaxy_clusters", limit=top_n)
+    result = await client.get_galaxies_list()
     raw = result if isinstance(result, list) else result.get("response", [])
 
     items: list[dict] = []
@@ -225,8 +223,7 @@ async def view_top_organisations(
     window_days: int = 30,
 ) -> dict:
     """Top organisations by event count."""
-    date_from = (datetime.now(timezone.utc) - timedelta(days=window_days)).strftime("%Y-%m-%d")
-    result = await client.search("organisations", limit=top_n)
+    result = await client.get_organisations_list()
     raw = result if isinstance(result, list) else result.get("response", [])
 
     orgs: list[dict] = []
@@ -388,17 +385,37 @@ async def view_attribute_type_distribution(
     top_n: int = 10,
 ) -> dict:
     """Distribution of attribute types."""
+    # date_from is not a valid parameter for the attributes controller in
+    # PyMISP. Instead search events within the window first, then collect
+    # event IDs and search attributes scoped to those events.
     date_from = (datetime.now(timezone.utc) - timedelta(days=window_days)).strftime("%Y-%m-%d")
-    result = await client.search("attributes", date_from=date_from, limit=500)
-    raw = result if isinstance(result, list) else result.get("response", {}).get("Attribute", [])
-    if not isinstance(raw, list):
-        raw = []
+    events_result = await client.search("events", date_from=date_from, metadata=True, limit=500)
+    events_raw = events_result if isinstance(events_result, list) else (
+        events_result.get("response", events_result.get("Event", []))
+        if isinstance(events_result, dict) else []
+    )
+
+    event_ids = []
+    for ev in events_raw:
+        if isinstance(ev, dict):
+            e = ev.get("Event", ev)
+            eid = e.get("id")
+            if eid:
+                event_ids.append(str(eid))
 
     counter: dict[str, int] = Counter()
-    for attr in raw:
-        if isinstance(attr, dict):
-            atype = attr.get("Attribute", attr).get("type", "unknown")
-            counter[atype] += 1
+    if event_ids:
+        # Search attributes for the events in the date window
+        result = await client.search("attributes", eventid=event_ids, limit=500)
+        # PyMISP's _check_response already unwraps "response" key.
+        raw = result if isinstance(result, list) else result.get("Attribute", [])
+        if not isinstance(raw, list):
+            raw = []
+
+        for attr in raw:
+            if isinstance(attr, dict):
+                atype = attr.get("Attribute", attr).get("type", "unknown")
+                counter[atype] += 1
 
     total = sum(counter.values()) or 1
 

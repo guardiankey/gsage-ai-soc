@@ -21,8 +21,10 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MAX_ROWS = 50
 HARD_MAX_ROWS = 500
-DEFAULT_MAX_EVENTS = 50
-HARD_MAX_EVENTS = 200
+# Inline preview is capped at 50 rows; beyond that a CSV is auto-generated.
+# The hard cap below is the ceiling for the full export (CSV/JSON).
+DEFAULT_MAX_EVENTS = 500
+HARD_MAX_EVENTS = 10000
 DEFAULT_MAX_ATTRIBUTES_PER_EVENT = 30
 HARD_MAX_ATTRIBUTES_PER_EVENT = 100
 DEFAULT_MAX_RELATED_IOCS = 10
@@ -164,6 +166,11 @@ def build_ioc_summary(
 
 def normalize_event(event: dict, max_attributes: int = 30) -> dict:
     """Normalize a raw MISP event dict into a compact agent-friendly shape."""
+    # Unwrap PyMISP "Event" envelope (get_event and search both return
+    # {"Event": {...}}, but hybrid search may pass a bare dict).
+    if "Event" in event and isinstance(event["Event"], dict):
+        event = event["Event"]
+
     org = event.get("Orgc", event.get("Org", {}))
     org_name = org.get("name", "") if isinstance(org, dict) else ""
 
@@ -227,6 +234,11 @@ def normalize_event(event: dict, max_attributes: int = 30) -> dict:
 
 def normalize_attribute(attr: dict) -> dict:
     """Normalize a raw MISP attribute dict into an agent-friendly shape."""
+    # Unwrap PyMISP "Attribute" envelope (search returns each attribute
+    # as {"Attribute": {...}}).
+    if "Attribute" in attr and isinstance(attr["Attribute"], dict):
+        attr = attr["Attribute"]
+
     return {
         "id": attr.get("id"),
         "event_id": attr.get("event_id"),

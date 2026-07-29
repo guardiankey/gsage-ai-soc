@@ -76,3 +76,4 @@ limbo/*
 
 # MCP Vector Search index directory
 .mcp-vector-search/
+.venv.old/

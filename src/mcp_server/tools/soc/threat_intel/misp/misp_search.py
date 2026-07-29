@@ -18,7 +18,7 @@ from typing import Any, ClassVar, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.mcp_server.tools.base import BaseTool, ToolResult, _tool_session_ctx
-from src.mcp_server.tools.result_export import AGENT_PREVIEW_ROWS, build_agent_payload
+from src.mcp_server.tools.result_export import build_agent_payload, summarize
 from src.mcp_server.tools.soc.threat_intel.misp import _query as Q
 from src.mcp_server.tools.soc.threat_intel.misp._client import MISPClient, MISPError
 from src.shared.cache.decorator import cached
@@ -36,6 +36,73 @@ _SCOPES = [
     "feed", "taxonomy", "warninglist",
     "sighting", "event_report", "organisation",
 ]
+
+# Mapping from scope → flat row list key in the result dict.
+# Used by the export post-processing to extract rows for CSV/JSON.
+_FLAT_ROW_KEY: dict[str | None, str] = {
+    "attribute": "attributes",
+    "tag": "tags",
+    "object": "objects",
+    "galaxy": "items",
+    "galaxy_cluster": "items",
+    "feed": "feeds",
+    "taxonomy": "taxonomies",
+    "warninglist": "warninglists",
+    "sighting": "sightings",
+    "event_report": "event_reports",
+    "organisation": "organisations",
+    # Nested scopes: flattened in post-processing
+    None: "",       # hybrid — handled by _flatten_event_attributes
+    "event": "",
+    "ioc": "",
+}
+
+
+def _flatten_event_attributes(events: list[dict]) -> list[dict]:
+    """Flatten a list of normalized events into event-attribute rows for CSV export.
+
+    Each row contains event-level metadata plus one attribute per row.
+    Events with no attributes produce a single row with empty attribute fields.
+    """
+    rows: list[dict] = []
+    for event in events:
+        attrs = event.get("attributes", [])
+        if not attrs:
+            rows.append({
+                "event_id": event.get("id"),
+                "event_uuid": event.get("uuid"),
+                "event_title": event.get("title", ""),
+                "event_date": event.get("date", ""),
+                "event_published": event.get("published", False),
+                "event_threat_level": event.get("threat_level_id"),
+                "event_org": event.get("org", {}).get("name", ""),
+                "event_tags": ", ".join(event.get("tags", [])),
+                "attr_id": "",
+                "attr_type": "",
+                "attr_category": "",
+                "attr_value": "",
+                "attr_comment": "",
+                "attr_to_ids": "",
+            })
+        else:
+            for attr in attrs:
+                rows.append({
+                    "event_id": event.get("id"),
+                    "event_uuid": event.get("uuid"),
+                    "event_title": event.get("title", ""),
+                    "event_date": event.get("date", ""),
+                    "event_published": event.get("published", False),
+                    "event_threat_level": event.get("threat_level_id"),
+                    "event_org": event.get("org", {}).get("name", ""),
+                    "event_tags": ", ".join(event.get("tags", [])),
+                    "attr_id": attr.get("id", ""),
+                    "attr_type": attr.get("type", ""),
+                    "attr_category": attr.get("category", ""),
+                    "attr_value": attr.get("value", ""),
+                    "attr_comment": attr.get("comment", ""),
+                    "attr_to_ids": attr.get("to_ids", False),
+                })
+    return rows
 
 
 class MispSearchTool(BaseTool):
@@ -181,6 +248,22 @@ class MispSearchTool(BaseTool):
             },
             "export_csv": {"type": "boolean", "default": False},
             "export_json": {"type": "boolean", "default": False},
+            "group_by": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional list of column names to use for top-N analytics. "
+                    "Use names from the flat result (e.g. 'type', 'category', "
+                    "'value')."
+                ),
+            },
+            "top_n": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50,
+                "default": 10,
+                "description": "Top-N size for each grouped column (default: 10).",
+            },
         },
         "additionalProperties": False,
     }
@@ -196,12 +279,8 @@ class MispSearchTool(BaseTool):
         query = str(params.get("query", "")).strip()
         scope = params.get("scope")
 
-        if not query and scope not in ("feed", "taxonomy", "warninglist"):
-            return self._failure(
-                "VALIDATION_ERROR",
-                "Parameter 'query' is required unless listing feeds, taxonomies, or warninglists.",
-                retryable=False,
-            )
+        # Empty query = return all (no value/name filter) for any scope.
+        # Previously this was forbidden; now it's a valid "list everything" mode.
 
         try:
             client = MISPClient(
@@ -263,6 +342,47 @@ class MispSearchTool(BaseTool):
                     retryable=False,
                 )
 
+            # ── Post-processing: summarise + CSV/JSON export ──────────
+            export_csv = bool(params.get("export_csv", False))
+            export_json = bool(params.get("export_json", False))
+            group_by = params.get("group_by") or None
+            top_n = int(params.get("top_n", 10) or 10)
+
+            # Determine the flat row list key for this scope.
+            flat_key = _FLAT_ROW_KEY.get(scope, _FLAT_ROW_KEY.get("__fallback__"))
+            rows: list[dict] = result_data.get(flat_key, []) if flat_key else []
+
+            # For nested scopes (event, ioc, hybrid), flatten events
+            # into event-attribute rows for CSV export.
+            if not rows and scope in (None, "event", "ioc"):
+                rows = _flatten_event_attributes(result_data.get("events", []))
+
+            summary_data = summarize(rows, group_by=group_by, top_n=top_n) if rows else {}
+
+            agent_payload = await build_agent_payload(
+                self,
+                rows=rows,
+                export_csv=export_csv,
+                export_json=export_json,
+                filename_prefix=f"misp_search_{scope or 'hybrid'}",
+                agent_context=agent_context,
+                preview_rows=50,
+            )
+
+            # Merge export fields into the result data.
+            result_data["rows_total"] = agent_payload["rows_total"]
+            result_data["rows_overflow"] = agent_payload["rows_overflow"]
+            result_data["rows_preview_limit"] = 50
+            result_data["artifacts"] = agent_payload["artifacts"]
+            result_data["agent_hint"] = agent_payload["agent_hint"]
+            if scope in (None, "event", "ioc"):
+                result_data["summary"] = summary_data
+            else:
+                result_data["summary"] = summary_data
+                # For flat scopes, replace the inline list with the capped preview
+                if flat_key:
+                    result_data[flat_key] = agent_payload["rows_preview"]
+
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             return self._success(result_data, execution_time_ms=elapsed_ms)
 
@@ -299,19 +419,22 @@ class MispSearchTool(BaseTool):
         max_related = int(params.get("max_related_iocs", Q.DEFAULT_MAX_RELATED_IOCS))
 
         # Run searches in parallel
+        # MISP eventinfo does LIKE but doesn't auto-wrap in % — do it here
+        # so "Evento" matches "Evento de testes".
+        event_query = f"%{query}%" if query and "%" not in query else query
         event_search = asyncio.create_task(
-            client.search("events", eventinfo=query, limit=max_events, metadata=True)
+            client.search("events", eventinfo=event_query, limit=max_events, metadata=True)
         )
         attr_search = asyncio.create_task(
             client.search("attributes", value=query, limit=max_events)
         )
         # Also try as tag
         tag_search = asyncio.create_task(
-            client.search("tags", searchFor=query, limit=20)
+            client.get_tags_list()
         )
         # Try as galaxy cluster name
         galaxy_search = asyncio.create_task(
-            client.search("galaxy_clusters", searchFor=query, limit=10)
+            client.get_galaxies_list()
         )
 
         results = await asyncio.gather(
@@ -324,7 +447,7 @@ class MispSearchTool(BaseTool):
         tags_raw = results[2] if not isinstance(results[2], BaseException) else []
         galaxies_raw = results[3] if not isinstance(results[3], BaseException) else []
 
-        # Normalize
+        # Normalize events from event search
         events_list = events_raw if isinstance(events_raw, list) else events_raw.get("response", events_raw.get("Event", []))
 
         normalized_events: list[dict] = []
@@ -336,11 +459,44 @@ class MispSearchTool(BaseTool):
             eid = event.get("id") or event.get("Event", {}).get("id")
             if not eid or eid in seen_ids:
                 continue
-            seen_ids.add(eid)
+            seen_ids.add(int(eid))
             normalized = Q.normalize_event(event, max_attributes=max_attrs)
             normalized_events.append(normalized)
-            if len(normalized_events) >= max_events:
-                break
+
+        # Merge events found via attribute search (Bug #6: hybrid search
+        # wasn't finding IOCs because attribute results were only counted,
+        # not used to fetch parent events).
+        # PyMISP's _check_response already unwraps "response", so
+        # attributes_raw is {"Attribute": [{"Attribute": {...}}, ...]}.
+        attr_list: list = []
+        if isinstance(attributes_raw, dict):
+            attr_list = attributes_raw.get("Attribute", [])
+        elif isinstance(attributes_raw, list):
+            attr_list = attributes_raw
+
+        if attr_list:
+            attr_event_ids: set[int] = set()
+            for attr in attr_list:
+                if isinstance(attr, dict):
+                    a = attr.get("Attribute", attr)
+                    aeid = a.get("event_id")
+                    if aeid:
+                        attr_event_ids.add(int(aeid))
+
+            # Fetch events for attribute hits not already in results
+            new_ids = attr_event_ids - seen_ids
+            for eid in sorted(new_ids):
+                if len(normalized_events) >= max_events:
+                    break
+                try:
+                    full_event = await client.get_event(eid)
+                    normalized = Q.normalize_event(full_event, max_attributes=max_attrs)
+                    normalized_events.append(normalized)
+                    seen_ids.add(eid)
+                except MISPError:
+                    continue
+
+        attr_count = len(attr_list)
 
         # Build hybrid summary
         enriched = params.get("enrich", True)
@@ -360,7 +516,7 @@ class MispSearchTool(BaseTool):
             "truncated": total_results > max_events,
             "result_breakdown": {
                 "events_found": len(normalized_events),
-                "attributes_found": len(attributes_raw) if isinstance(attributes_raw, list) else 0,
+                "attributes_found": attr_count,
                 "tags_found": len(tags_raw) if isinstance(tags_raw, list) else 0,
                 "galaxies_found": len(galaxies_raw) if isinstance(galaxies_raw, list) else 0,
             },
@@ -392,8 +548,10 @@ class MispSearchTool(BaseTool):
         )
 
         # Normalize
+        # PyMISP's _check_response already unwraps the top-level "response"
+        # key, so the result is {"Attribute": [...]}.
         raw_attrs = attr_result if isinstance(attr_result, list) else (
-            attr_result.get("response", {}).get("Attribute", [])
+            attr_result.get("Attribute", [])
             if isinstance(attr_result, dict) else []
         )
         attrs: list[dict] = [Q.normalize_attribute(a) for a in raw_attrs if isinstance(a, dict)]
@@ -504,8 +662,19 @@ class MispSearchTool(BaseTool):
                 raise
 
         # Build search kwargs
-        search_kwargs: dict[str, Any] = {"limit": max_events, "metadata": True}
+        # When enrich=True (default), fetch full events with attributes
+        # instead of metadata-only, otherwise attribute_count will be 0.
+        search_kwargs: dict[str, Any] = {"limit": max_events}
+        if enrich:
+            search_kwargs["metadata"] = False
+        else:
+            search_kwargs["metadata"] = True
         if query:
+            # MISP eventinfo does LIKE matching but does NOT auto-wrap in
+            # wildcards.  Wrap in % so "Evento" matches "Evento de testes".
+            # If the user already supplied % (power-user), honour as-is.
+            if "%" not in query:
+                query = f"%{query}%"
             search_kwargs["eventinfo"] = query
         if params.get("tag"):
             search_kwargs["tags"] = [params["tag"]]
@@ -556,15 +725,19 @@ class MispSearchTool(BaseTool):
         """Search attributes by value, type, tag, or event."""
         max_events = int(params.get("max_events", Q.DEFAULT_MAX_EVENTS))
         search_kwargs: dict[str, Any] = {"limit": max_events}
-        if query:
+        # Only apply value filter if query is a real search term.
+        # Empty or wildcard ("%") means "return all".
+        if query and query.strip() not in ("", "%", "*"):
             search_kwargs["value"] = query
         if params.get("tag"):
             search_kwargs["tags"] = [params["tag"]]
 
         result = await client.search("attributes", **search_kwargs)
+        # PyMISP's _check_response already unwraps the top-level "response"
+        # key, so the result is {"Attribute": [...]}, not
+        # {"response": {"Attribute": [...]}}.
         raw_attrs = result if isinstance(result, list) else (
-            result.get("response", {}).get("Attribute", [])
-            if isinstance(result, dict) else []
+            result.get("Attribute", []) if isinstance(result, dict) else []
         )
         attrs = [Q.normalize_attribute(a) for a in raw_attrs if isinstance(a, dict)]
 
@@ -593,7 +766,11 @@ class MispSearchTool(BaseTool):
     ) -> dict:
         """Search MISP objects by name, template, event, or UUID."""
         max_events = int(params.get("max_events", Q.DEFAULT_MAX_EVENTS))
-        result = await client.search("objects", object_name=query, limit=max_events)
+        search_kwargs: dict[str, Any] = {"limit": max_events}
+        # Only apply object_name filter if query is a real search term.
+        if query and query.strip() not in ("", "%", "*"):
+            search_kwargs["object_name"] = query
+        result = await client.search("objects", **search_kwargs)
         raw_objects = result if isinstance(result, list) else (
             result.get("response", []) if isinstance(result, dict) else []
         )
@@ -636,7 +813,7 @@ class MispSearchTool(BaseTool):
     ) -> dict:
         """Search tags by name (substring match)."""
         max_events = int(params.get("max_events", Q.DEFAULT_MAX_EVENTS))
-        result = await client.search("tags", searchFor=query, limit=max_events)
+        result = await client.get_tags_list()
         raw_tags = result if isinstance(result, list) else (
             result.get("response", result.get("Tag", []))
             if isinstance(result, dict) else []
@@ -645,12 +822,17 @@ class MispSearchTool(BaseTool):
         tags_list: list[dict] = []
         for t in raw_tags:
             if isinstance(t, dict):
+                tg = t.get("Tag", t)
+                name = str(tg.get("name", ""))
+                # Filter by query substring if provided
+                if query and query.lower() not in name.lower():
+                    continue
                 tags_list.append({
-                    "id": t.get("id"),
-                    "name": t.get("name"),
-                    "colour": t.get("colour"),
-                    "exportable": t.get("exportable"),
-                    "count": t.get("count", 0),
+                    "id": tg.get("id"),
+                    "name": name,
+                    "colour": tg.get("colour"),
+                    "exportable": tg.get("exportable"),
+                    "count": tg.get("count", 0),
                 })
 
         total_results = len(tags_list)
@@ -679,20 +861,13 @@ class MispSearchTool(BaseTool):
     ) -> dict:
         """Search galaxies or galaxy clusters."""
         max_events = int(params.get("max_events", Q.DEFAULT_MAX_EVENTS))
-        galaxy_id = params.get("galaxy_id")
-        cluster_id = params.get("cluster_id")
 
-        result: dict | list = {}
+        result: list = []
         if scope == "galaxy":
-            result = await client.search("galaxies", searchFor=query, limit=max_events)
+            result = await client.get_galaxies_list()
         else:
-            # galaxy_cluster
-            if galaxy_id:
-                result = await client.search(
-                    "galaxy_clusters", galaxy_id=galaxy_id, searchFor=query, limit=max_events
-                )
-            else:
-                result = await client.search("galaxy_clusters", searchFor=query, limit=max_events)
+            # galaxy_cluster — use galaxies list and extract clusters
+            result = await client.get_galaxies_list()
 
         raw_items = result if isinstance(result, list) else (
             result.get("response", []) if isinstance(result, dict) else []
@@ -700,15 +875,40 @@ class MispSearchTool(BaseTool):
 
         items: list[dict] = []
         for item in raw_items:
-            if isinstance(item, dict):
+            if not isinstance(item, dict):
+                continue
+            galaxy = item.get("Galaxy", item)
+            g_name = str(galaxy.get("name", galaxy.get("value", "")))
+
+            if scope == "galaxy":
+                # Filter by query substring
+                if query and query.lower() not in g_name.lower():
+                    continue
                 items.append({
-                    "id": item.get("id"),
-                    "uuid": item.get("uuid"),
-                    "name": item.get("name", item.get("value", "")),
-                    "type": item.get("type", ""),
-                    "description": str(item.get("description", ""))[:300],
-                    "version": item.get("version"),
+                    "id": galaxy.get("id"),
+                    "uuid": galaxy.get("uuid"),
+                    "name": g_name,
+                    "type": galaxy.get("type", ""),
+                    "description": str(galaxy.get("description", ""))[:300],
+                    "version": galaxy.get("version"),
                 })
+            else:
+                # galaxy_cluster — extract clusters from each galaxy
+                for cluster in galaxy.get("GalaxyCluster", []):
+                    if not isinstance(cluster, dict):
+                        continue
+                    c_name = str(cluster.get("value", cluster.get("name", "")))
+                    if query and query.lower() not in c_name.lower():
+                        continue
+                    items.append({
+                        "id": cluster.get("id"),
+                        "uuid": cluster.get("uuid"),
+                        "name": c_name,
+                        "type": cluster.get("type", ""),
+                        "description": str(cluster.get("description", ""))[:300],
+                        "version": cluster.get("version"),
+                        "galaxy": g_name,
+                    })
 
         total_results = len(items)
         page = int(params.get("page", 1))
@@ -971,7 +1171,7 @@ class MispSearchTool(BaseTool):
         query: str,
     ) -> dict:
         """Search organisations (local and remote)."""
-        result = await client.search("organisations", searchFor=query or "", limit=50)
+        result = await client.get_organisations_list()
         raw = result if isinstance(result, list) else (
             result.get("response", []) if isinstance(result, dict) else []
         )
@@ -980,10 +1180,14 @@ class MispSearchTool(BaseTool):
         for org in raw:
             if isinstance(org, dict):
                 o = org.get("Organisation", org)
+                name = str(o.get("name", ""))
+                # Filter by query substring if provided
+                if query and query.lower() not in name.lower():
+                    continue
                 orgs.append({
                     "id": o.get("id"),
                     "uuid": o.get("uuid"),
-                    "name": o.get("name"),
+                    "name": name,
                     "local": o.get("local"),
                     "description": str(o.get("description", ""))[:200],
                     "nationality": o.get("nationality"),

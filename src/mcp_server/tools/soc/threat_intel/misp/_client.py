@@ -345,12 +345,12 @@ class MISPClient:
             code, status = _classify_pymisp_error(exc)
             raise MISPError(str(exc), status_code=status, code=code) from exc
 
-    async def get_taxonomies_list(self) -> dict:
-        """List all taxonomies via direct call."""
+    # ── Tags ────────────────────────────────────────────────────────
+
+    async def get_tags_list(self) -> list:
+        """List all MISP tags."""
         try:
-            result = await asyncio.to_thread(
-                self._sync.get_taxonomies_list  # type: ignore[union-attr]
-            )
+            result = await asyncio.to_thread(self._sync.tags)
             return result  # type: ignore[return-value]
         except PyMISPError as exc:  # type: ignore[misc]
             code, status = _classify_pymisp_error(exc)
@@ -359,12 +359,12 @@ class MISPClient:
             code, status = _classify_pymisp_error(exc)
             raise MISPError(str(exc), status_code=status, code=code) from exc
 
-    async def get_warninglists(self) -> dict:
-        """Get warninglists via direct call."""
+    # ── Galaxies ────────────────────────────────────────────────────
+
+    async def get_galaxies_list(self) -> list:
+        """List all MISP galaxies."""
         try:
-            result = await asyncio.to_thread(
-                self._sync.get_warninglists  # type: ignore[union-attr]
-            )
+            result = await asyncio.to_thread(self._sync.galaxies)
             return result  # type: ignore[return-value]
         except PyMISPError as exc:  # type: ignore[misc]
             code, status = _classify_pymisp_error(exc)
@@ -373,12 +373,54 @@ class MISPClient:
             code, status = _classify_pymisp_error(exc)
             raise MISPError(str(exc), status_code=status, code=code) from exc
 
-    async def get_feeds_list(self) -> dict:
-        """List all feeds via direct call."""
+    # ── Organisations ───────────────────────────────────────────────
+
+    async def get_organisations_list(self) -> list:
+        """List all MISP organisations."""
         try:
-            result = await asyncio.to_thread(
-                self._sync.get_feeds_list  # type: ignore[union-attr]
-            )
+            result = await asyncio.to_thread(self._sync.organisations)
+            return result  # type: ignore[return-value]
+        except PyMISPError as exc:  # type: ignore[misc]
+            code, status = _classify_pymisp_error(exc)
+            raise MISPError(str(exc), status_code=status, code=code) from exc
+        except Exception as exc:
+            code, status = _classify_pymisp_error(exc)
+            raise MISPError(str(exc), status_code=status, code=code) from exc
+
+    # ── Taxonomies ──────────────────────────────────────────────────
+
+    async def get_taxonomies_list(self) -> list:
+        """List all MISP taxonomies."""
+        try:
+            result = await asyncio.to_thread(self._sync.taxonomies)
+            return result  # type: ignore[return-value]
+        except PyMISPError as exc:  # type: ignore[misc]
+            code, status = _classify_pymisp_error(exc)
+            raise MISPError(str(exc), status_code=status, code=code) from exc
+        except Exception as exc:
+            code, status = _classify_pymisp_error(exc)
+            raise MISPError(str(exc), status_code=status, code=code) from exc
+
+    # ── Warninglists ────────────────────────────────────────────────
+
+    async def get_warninglists(self) -> list:
+        """List all MISP warninglists."""
+        try:
+            result = await asyncio.to_thread(self._sync.warninglists)
+            return result  # type: ignore[return-value]
+        except PyMISPError as exc:  # type: ignore[misc]
+            code, status = _classify_pymisp_error(exc)
+            raise MISPError(str(exc), status_code=status, code=code) from exc
+        except Exception as exc:
+            code, status = _classify_pymisp_error(exc)
+            raise MISPError(str(exc), status_code=status, code=code) from exc
+
+    # ── Feeds ───────────────────────────────────────────────────────
+
+    async def get_feeds_list(self) -> list:
+        """List all MISP feeds."""
+        try:
+            result = await asyncio.to_thread(self._sync.feeds)
             return result  # type: ignore[return-value]
         except PyMISPError as exc:  # type: ignore[misc]
             code, status = _classify_pymisp_error(exc)
