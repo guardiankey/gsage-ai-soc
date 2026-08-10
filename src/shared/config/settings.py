@@ -102,7 +102,7 @@ class Settings(BaseSettings):
 
     # ── LLM Provider ─────────────────────────────────────────
     # Controls which backend is used when no org-level override is set.
-    # Valid values: "ollama" | "openai" | "deepseek" | "anthropic" | "gemini"
+    # Valid values: "ollama" | "openai" | "deepseek" | "anthropic" | "gemini" | "vllm"
     llm_provider: str = "ollama"
 
     # ── Ollama (managed via gsage-ollama container) ────────────────────

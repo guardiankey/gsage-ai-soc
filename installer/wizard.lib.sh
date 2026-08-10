@@ -77,7 +77,7 @@ wizard::run() {
     echo ""
     echo "── LLM provider (maker) ──"
     wizard::_ask_choice llm_provider "Primary maker provider" 1 \
-        ollama openai gemini anthropic deepseek
+        ollama openai gemini anthropic deepseek vllm
     local prov="${WIZARD_ANS[llm_provider]}"
     case "$prov" in
         ollama)
@@ -98,6 +98,12 @@ wizard::run() {
         deepseek)
             wizard::_ask deepseek_maker_model "DeepSeek model" "deepseek-v4-flash"
             wizard::_ask deepseek_api_key     "DeepSeek API key"
+            ;;
+        vllm)
+            wizard::_ask        vllm_base_url          "vLLM base URL (must include /v1)"  "http://192.168.15.78:8000/v1"
+            wizard::_ask        vllm_maker_model       "vLLM maker model"                  "google/gemma-4-E4B-it"
+            wizard::_ask        vllm_api_key           "vLLM API key (any non-empty value)" "EMPTY"
+            wizard::_ask_choice vllm_tool_call_parser  "Tool-call parser for streaming recovery" 1 gemma qwen none
             ;;
     esac
 
