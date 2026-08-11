@@ -103,6 +103,8 @@ VLLM_TOP_P=
 VLLM_PRESENCE_PENALTY=0.0
 # Diagnostic: set to a writable dir to dump every vLLM request as JSON (dev only).
 VLLM_DEBUG_REQUEST_DUMP_PATH=
+# Validate the vLLM server's TLS certificate (default: false for self-hosted).
+VLLM_VERIFY_SSL=false
 
 # ── Agents ───────────────────────────────────────────────────
 AGENT_NUM_HISTORY_RUNS=5

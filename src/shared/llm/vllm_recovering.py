@@ -67,6 +67,7 @@ __all__ = [
     "ToolCallStreamParser",
     "RecoveringToolCallVLLM",
     "build_dialect",
+    "sanitize_tool_call_arguments",
 ]
 
 
@@ -856,6 +857,83 @@ def _dump_request_payload(
         log_warning(f"RecoveringToolCallVLLM: request dump failed: {exc}")
 
 
+# ---------------------------------------------------------------------------
+# Tool-call argument sanitization
+# ---------------------------------------------------------------------------
+
+
+def sanitize_tool_call_arguments(args_str: str) -> str:
+    """Sanitize a tool-call ``function.arguments`` string that may contain
+    concatenated JSON objects.
+
+    Some reasoning models (notably Qwen) leak thinking output into the
+    ``arguments`` field, producing fragments like ``{}{"tool_name": "x"}``
+    — two JSON objects concatenated.  vLLM's chat template internally
+    ``json.loads()`` this field for multi-turn tool-call history, and
+    concatenated JSON causes the **"Extra data: line 1 column …"** 400
+    error.
+
+    Strategy
+    --------
+    1. Fast path: ``json.loads`` succeeds → return original unchanged.
+    2. Scan for balanced ``{…}`` objects; return the **last** valid one
+       re-serialised (the thinking leak is always an empty ``{}`` that
+       appears *before* the real arguments).
+    3. No valid objects found → return original string (pass-through).
+
+    Parameters
+    ----------
+    args_str : str
+        Raw tool-call arguments string (may be concatenated JSON).
+
+    Returns
+    -------
+    str
+        Sanitized JSON string, or the original if no fix was possible.
+    """
+    if not args_str or not isinstance(args_str, str):
+        return args_str
+
+    # Fast path: already valid JSON.
+    try:
+        json.loads(args_str)
+        return args_str
+    except json.JSONDecodeError:
+        pass
+
+    # Scan for balanced top-level ``{…}`` objects.
+    objects: List[Any] = []
+    i = 0
+    n = len(args_str)
+    while i < n:
+        if args_str[i] == "{":
+            inner, end = _extract_braced(args_str, i)
+            candidate = "{" + (inner or "") + "}"
+            try:
+                objects.append(json.loads(candidate))
+            except (json.JSONDecodeError, TypeError):
+                pass
+            i = end
+        else:
+            i += 1
+
+    if objects:
+        # Return the LAST valid object — thinking output (``{}``) comes first.
+        last = objects[-1]
+        try:
+            sanitized = json.dumps(last, ensure_ascii=False)
+            log_debug(
+                "sanitize_tool_call_arguments: extracted last valid JSON "
+                f"object from concatenated arguments "
+                f"(original_len={len(args_str)} sanitized_len={len(sanitized)})"
+            )
+            return sanitized
+        except (TypeError, ValueError):
+            pass
+
+    return args_str
+
+
 class ToolCallStreamParser:
     """Incremental parser that recovers tool calls from streamed text.
 
@@ -1198,6 +1276,48 @@ class RecoveringToolCallVLLM(VLLM):
 
     def _new_parser(self) -> ToolCallStreamParser:
         return ToolCallStreamParser(build_dialect(self.tool_call_dialect))
+
+    def _format_message(
+        self, message: Any, compress_tool_results: bool = False
+    ) -> Dict[str, Any]:
+        """Format a message, sanitizing malformed tool-call arguments.
+
+        Calls the parent implementation, then scans ``tool_calls`` for
+        ``function.arguments`` that may contain concatenated JSON (a known
+        Qwen quirk) and sanitizes them via :func:`sanitize_tool_call_arguments`.
+        """
+        message_dict = super()._format_message(message, compress_tool_results)
+
+        # Sanitize tool-call arguments that may be concatenated JSON
+        # (e.g. {} followed by the real arguments — a Qwen thinking leak).
+        tool_calls = message_dict.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tc in tool_calls:
+                if not isinstance(tc, dict):
+                    continue
+                fn = tc.get("function")
+                if not isinstance(fn, dict):
+                    continue
+                raw_args = fn.get("arguments")
+                if isinstance(raw_args, str):
+                    sanitized = sanitize_tool_call_arguments(raw_args)
+                    if sanitized != raw_args:
+                        fn["arguments"] = sanitized
+                        # Emit a one-time warning per sanitized tool call
+                        # so operators can take preventive action
+                        # (VLLM_ENABLE_THINKING=false).
+                        tool_name = fn.get("name", "?")
+                        log_warning(
+                            "RecoveringToolCallVLLM: sanitized concatenated "
+                            f"JSON in tool-call arguments for '{tool_name}'. "
+                            "The model leaked thinking output into the "
+                            "arguments field — consider setting "
+                            "VLLM_ENABLE_THINKING=false to prevent this. "
+                            f"(original_len={len(raw_args)} "
+                            f"sanitized_len={len(sanitized)})"
+                        )
+
+        return message_dict
 
     def _parse_provider_response_delta(self, response_delta: Any) -> ModelResponse:
         """Same as the upstream parser, plus surface ``finish_reason``.

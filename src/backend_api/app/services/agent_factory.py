@@ -74,6 +74,18 @@ def _patch_agno_unknown_tool_message() -> None:
                 _tool_call_id = tool_call.get("id")
                 _fn = tool_call.get("function", {}) or {}
                 _tool_call_name = _fn.get("name") or ""
+
+                # Sanitize tool-call arguments that may contain concatenated
+                # JSON (e.g. {} followed by real args — a Qwen thinking leak).
+                # Fix in-place so both the function lookup and the stored
+                # message history use clean arguments.
+                _raw_args = _fn.get("arguments")
+                if isinstance(_raw_args, str):
+                    from src.shared.llm.vllm_recovering import sanitize_tool_call_arguments
+                    _sanitized = sanitize_tool_call_arguments(_raw_args)
+                    if _sanitized != _raw_args:
+                        _fn["arguments"] = _sanitized
+
                 _function_call = get_function_call_for_tool_call(tool_call, functions)
                 if _function_call is None:
                     is_proxy = _tool_call_name in (
@@ -988,6 +1000,12 @@ def _build_model(org: Optional["GSageOrganization"] = None):
             sampling_kwargs["top_p"] = settings.vllm_top_p
         if settings.vllm_presence_penalty is not None:
             sampling_kwargs["presence_penalty"] = settings.vllm_presence_penalty
+        # Create an httpx async client that honours the vLLM TLS verification
+        # setting (default False — self-hosted vLLM often uses self-signed
+        # certificates).  The model passes it through to the OpenAI SDK so
+        # every request to the vLLM endpoint uses this verify policy.
+        import httpx
+        _vllm_http_client = httpx.AsyncClient(verify=settings.vllm_verify_ssl)
         model = RecoveringToolCallVLLM(
             id=model_id,
             api_key=api_key,
@@ -996,6 +1014,7 @@ def _build_model(org: Optional["GSageOrganization"] = None):
             tool_call_dialect=None if parser_mode in ("", "none") else parser_mode,
             force_non_streaming=force_non_streaming,
             enable_thinking=enable_thinking,
+            http_client=_vllm_http_client,
             **sampling_kwargs,
         )
         # max_tokens is inherited from OpenAIChat but the

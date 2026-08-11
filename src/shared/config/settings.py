@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import types
 from functools import lru_cache
+from typing import Any, Union, get_args, get_origin
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
@@ -176,6 +178,11 @@ class Settings(BaseSettings):
     # WARNING: dump files contain full prompts and history (PII).  Use only
     # in development; leave empty in production.
     vllm_debug_request_dump_path: str = ""
+    # Validate the vLLM server's TLS certificate.  Default ``False`` because
+    # self-hosted vLLM instances typically use self-signed or internal-CA
+    # certificates.  Set to ``True`` only when the server presents a
+    # certificate trusted by the container's CA bundle.
+    vllm_verify_ssl: bool = False
 
     # ── Embeddings (Ollama — used by Weaviate text2vec-ollama module) ─────
     # The gsage-ollama entrypoint creates a custom model (nomic-embed-ctx8k) from
@@ -411,6 +418,33 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "extra": "ignore",  # Ignore extra fields from .env (e.g., database_url which is a @property)
     }
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, data: Any) -> Any:
+        """Convert empty-string env values to None for Optional[...] fields.
+
+        pydantic-settings reads ``KEY=`` as the empty string, but fields typed
+        as ``bool | None`` or ``float | None`` cannot parse ``""``.  This
+        validator converts ``""`` to ``None`` for any field whose annotation
+        accepts ``None``, so optional numeric/bool fields work correctly when
+        left blank in ``.env``.
+        """
+        if not isinstance(data, dict):
+            return data
+        for field_name, field_info in cls.model_fields.items():
+            if data.get(field_name) != "":
+                continue
+            ann = field_info.annotation
+            if ann is None:
+                continue
+            origin = get_origin(ann)
+            args = get_args(ann)
+            # UnionType (X | Y, Python ≥3.10) or typing.Union[X, Y]
+            if origin in (types.UnionType, Union):
+                if type(None) in args:
+                    data[field_name] = None
+        return data
 
     @model_validator(mode="after")
     def _reset_empty_model_ids(self) -> "Settings":
