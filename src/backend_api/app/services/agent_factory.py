@@ -940,7 +940,24 @@ def _build_model(org: Optional["GSageOrganization"] = None):
         api_key = (org.llm_api_key if org else None) or settings.openai_api_key
         base_url = settings.openai_base_url
 
-        kwargs: dict = {"id": model_id, "max_tokens": max_output_tokens}
+        # Agno 2.8.x OpenAIChat maps "system" → "developer" by default.
+        # OpenAI's official API accepts the "developer" role, but Azure
+        # endpoints (Azure OpenAI service and Azure AI Foundry, incl.
+        # DeepSeek-V3.2 serverless) only accept "system"/"user"/"assistant"/
+        # "tool" and reject "developer" with HTTP 422.  Force the full
+        # OpenAI-compatible role map so the system prompt is always sent as
+        # "system", regardless of the endpoint pointed by openai_base_url.
+        kwargs: dict = {
+            "id": model_id,
+            "max_tokens": max_output_tokens,
+            "role_map": {
+                "system": "system",
+                "user": "user",
+                "assistant": "assistant",
+                "tool": "tool",
+                "model": "assistant",
+            },
+        }
         if api_key:
             kwargs["api_key"] = api_key
         if base_url:

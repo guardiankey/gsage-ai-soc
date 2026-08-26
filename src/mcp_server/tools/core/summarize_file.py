@@ -228,7 +228,19 @@ def _build_model_for_summarize(
         from agno.models.openai import OpenAIChat  # noqa: PLC0415
 
         model_id = model_override or settings.openai_maker_model
-        kwargs: dict = {"id": model_id}
+        # Same role_map fix as agent_factory._build_model(): keep the system
+        # prompt as "system" — Agno's default maps it to "developer", which
+        # Azure OpenAI / Azure AI Foundry endpoints reject with HTTP 422.
+        kwargs: dict = {
+            "id": model_id,
+            "role_map": {
+                "system": "system",
+                "user": "user",
+                "assistant": "assistant",
+                "tool": "tool",
+                "model": "assistant",
+            },
+        }
         if settings.openai_api_key:
             kwargs["api_key"] = settings.openai_api_key
         if settings.openai_base_url:

@@ -12,6 +12,7 @@ Permission: none required — visible to any authenticated user.
 
 from __future__ import annotations
 
+import json
 import time
 from typing import ClassVar, Optional
 
@@ -24,6 +25,36 @@ _KNOWN_CATEGORIES = (
     "itsm", "edr", "kb", "crud", "firewall", "security", "utility",
 )
 
+# Compact index entry: truncate summaries to keep ``show_all`` cheap.
+_SUMMARY_MAX_CHARS = 100
+# Detailed (filtered) results may carry full params_schema.  If the
+# serialised payload exceeds this budget, degrade to compact entries.
+# ~24K chars ≈ 6K tokens — leaves room for history, system prompt and
+# core tool schemas inside a 131072-token context window.
+_MAX_DETAIL_PAYLOAD_CHARS = 24000
+
+
+def _compact_tool_entry(tool: BaseTool) -> dict:
+    """Build a one-line index entry for a tool — no parameter schema."""
+    summary = (
+        getattr(tool, "summary", None)
+        or (tool.__class__.__doc__ or "").strip().splitlines()[0]
+        or ""
+    )
+    if len(summary) > _SUMMARY_MAX_CHARS:
+        summary = summary[:_SUMMARY_MAX_CHARS].rstrip() + "…"
+    return {
+        "name": tool.name,
+        "summary": summary,
+        "category": getattr(tool, "category", "general"),
+        "requires_config": tool.requires_config,
+        "requires_approval": tool.requires_approval,
+        "requires_user_credentials": getattr(
+            tool, "requires_user_credentials", False
+        ),
+        "credential_namespace": getattr(tool, "credential_namespace", None),
+    }
+
 
 class SearchToolsTool(BaseTool):
     """
@@ -32,6 +63,11 @@ class SearchToolsTool(BaseTool):
     Use this tool when you need a capability that is not already in your
     core tool set.  Search results include only tools you are authorized
     to use — the list is automatically filtered by your permissions.
+
+    ``show_all=True`` returns a compact index (names, short summaries,
+    categories, flags) with NO parameter schemas, so the response never
+    overflows the context window.  Full ``params_schema`` is only returned
+    by filtered searches (query/category).
 
     Examples
     --------
@@ -43,7 +79,7 @@ class SearchToolsTool(BaseTool):
     """
 
     name: ClassVar[str] = "search_tools"
-    version: ClassVar[str] = "1.0.0"
+    version: ClassVar[str] = "1.1.0"
     summary: ClassVar[str] = "Search for available tools by keyword or category to discover specialized capabilities"
     category: ClassVar[str] = "utility"
     core_tool: ClassVar[bool] = True
@@ -77,8 +113,12 @@ class SearchToolsTool(BaseTool):
             "show_all": {
                 "type": "boolean",
                 "description": (
-                    "When true, return every tool you are authorized to use without "
-                    "applying search or category filters.  Defaults to false."
+                    "When true, return a COMPACT index of every tool you are "
+                    "authorized to use: names, short summaries, categories and "
+                    "flags — WITHOUT parameter schemas.  Use it to see what "
+                    "exists; then narrow the scope with 'category' or 'query' "
+                    "to receive full params_schema in small batches.  "
+                    "Defaults to false."
                 ),
                 "default": False,
             },
@@ -178,6 +218,44 @@ class SearchToolsTool(BaseTool):
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
+        filters_applied = {
+            "query": query or None,
+            "category": category_filter or None,
+            "show_all": show_all,
+        }
+
+        # ── Compact index for show_all ────────────────────────────────────
+        # ``show_all`` is an index over every visible tool — never a schema
+        # dump.  Returning the full params_schema of every tool has blown the
+        # context window (>100k input tokens) on DeepSeek-V3.2.  Emit one
+        # compact line per tool plus a category breakdown and a hint steering
+        # the model to drill down with ``category``/``query``, which return
+        # full schemas for a small batch.
+        if show_all:
+            entries = [_compact_tool_entry(t) for t in tools]
+            category_counts: dict[str, int] = {}
+            for t in tools:
+                cat = getattr(t, "category", "general")
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+            return self._success(
+                data={
+                    "tools": entries,
+                    "count": len(entries),
+                    "categories": dict(sorted(category_counts.items())),
+                    "hint": (
+                        f"COMPACT listing — {len(entries)} tool(s) returned "
+                        "without parameter schemas.  To inspect details in "
+                        "small batches, narrow the scope: "
+                        "search_tools(category=\"<category>\") or "
+                        "search_tools(query=\"<tool name>\").  Only filtered "
+                        "searches include params_schema."
+                    ),
+                    "filters_applied": filters_applied,
+                },
+                execution_time_ms=elapsed_ms,
+            )
+
+        # ── Detailed results for filtered searches ────────────────────────
         results = [
             {
                 "name": t.name,
@@ -198,15 +276,33 @@ class SearchToolsTool(BaseTool):
             for t in tools
         ]
 
+        # ── Payload size guard ─────────────────────────────────────────────
+        # Even a filtered search can return a huge params_schema for a single
+        # match.  If the detailed payload exceeds the budget, degrade to
+        # compact entries and tell the model to narrow the search further.
+        payload_size = len(json.dumps(results, ensure_ascii=False, default=str))
+        if payload_size > _MAX_DETAIL_PAYLOAD_CHARS:
+            entries = [_compact_tool_entry(t) for t in tools]
+            return self._success(
+                data={
+                    "tools": entries,
+                    "count": len(entries),
+                    "hint": (
+                        f"{len(entries)} match(es) found but the detailed "
+                        "schemas would exceed the context budget.  Narrow the "
+                        "search (specific category or tool name) and retry to "
+                        "receive params_schema for a smaller subset."
+                    ),
+                    "filters_applied": filters_applied,
+                },
+                execution_time_ms=elapsed_ms,
+            )
+
         return self._success(
             data={
                 "tools": results,
                 "count": len(results),
-                "filters_applied": {
-                    "query": query or None,
-                    "category": category_filter or None,
-                    "show_all": show_all,
-                },
+                "filters_applied": filters_applied,
             },
             execution_time_ms=elapsed_ms,
         )
