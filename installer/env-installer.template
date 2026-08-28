@@ -88,12 +88,12 @@ DEEPSEEK_MAKER_MODEL=@@PROMPT_OPT:deepseek_maker_model@@
 # ── vLLM (self-hosted, OpenAI-compatible) ────────────────────
 # IMPORTANT: start vLLM with tool-call support enabled:
 #   vllm serve <model> --enable-auto-tool-choice --tool-call-parser pythonic
-VLLM_API_KEY=@@PROMPT:vllm_api_key@@
-VLLM_BASE_URL=@@PROMPT:vllm_base_url@@
-VLLM_MAKER_MODEL=@@PROMPT:vllm_maker_model@@
+VLLM_API_KEY=@@PROMPT_OPT:vllm_api_key@@
+VLLM_BASE_URL=@@PROMPT_OPT:vllm_base_url@@
+VLLM_MAKER_MODEL=@@PROMPT_OPT:vllm_maker_model@@
 # Client-side recovery of tool calls leaked as plain text during streaming.
 # Valid parsers: gemma | qwen (alias: hermes) | none
-VLLM_TOOL_CALL_PARSER=@@PROMPT:vllm_tool_call_parser@@
+VLLM_TOOL_CALL_PARSER=@@PROMPT_OPT:vllm_tool_call_parser@@
 # Advanced tuning — edit post-install if needed. Defaults are tool-call friendly.
 VLLM_FORCE_NON_STREAMING=false
 VLLM_ENABLE_THINKING=
