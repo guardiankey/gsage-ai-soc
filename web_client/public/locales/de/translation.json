@@ -108,6 +108,15 @@
     "mermaidCopyError": "Diagrammquelle konnte nicht kopiert werden",
     "messageCopyError": "Nachricht konnte nicht kopiert werden",
     "newConversationInFolder": "Neue Unterhaltung im Ordner",
+    "bgTasks": {
+      "title": "Hintergrundaufgaben",
+      "running": "wird ausgeführt",
+      "queued": "in Warteschlange",
+      "empty": "Keine Hintergrundaufgaben",
+      "openTasks": "Aufgaben öffnen"
+    },
+    "messagesLoadError": "Nachrichten dieser Unterhaltung konnten nicht geladen werden.",
+    "retry": "Erneut versuchen",
     "inputHintNewline": "Shift+Enter zum Senden · Enter für neue Zeile",
     "promptLibrary": "Prompt-Bibliothek",
     "enterSends": "Enter sendet Nachricht",

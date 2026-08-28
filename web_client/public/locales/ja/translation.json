@@ -108,6 +108,15 @@
     "mermaidCopyError": "ダイアグラムのソースのコピーに失敗しました",
     "messageCopyError": "メッセージのコピーに失敗しました",
     "newConversationInFolder": "フォルダー内に新しい会話",
+    "bgTasks": {
+      "title": "バックグラウンドタスク",
+      "running": "実行中",
+      "queued": "待機中",
+      "empty": "実行中のバックグラウンドタスクはありません",
+      "openTasks": "タスクを開く"
+    },
+    "messagesLoadError": "この会話のメッセージを読み込めませんでした。",
+    "retry": "再試行",
     "inputHintNewline": "Shift+Enterで送信 · Enterで改行",
     "promptLibrary": "プロンプトライブラリ",
     "enterSends": "Enterで送信",

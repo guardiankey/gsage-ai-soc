@@ -63,6 +63,23 @@ class ContinuationSkipped(Exception):
     """
 
 
+class SessionBusy(ContinuationSkipped):
+    """The Agno session lock is held by an in-flight run.
+
+    Distinct from :class:`ResultsAlreadyConsumed`: the continuation must be
+    **re-queued with a bounded countdown** instead of being discarded, so it
+    runs as soon as the lock is released. The pending results remain
+    ``notified=False`` until a run injects them.
+    """
+
+
+class ResultsAlreadyConsumed(ContinuationSkipped):
+    """Pending results were already injected by another path.
+
+    Logical success — Celery tasks must NOT retry.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Helper: classify continuation errors as transient vs. permanent
 # ---------------------------------------------------------------------------
@@ -271,38 +288,18 @@ async def continue_after_bg_task(
             "another path; skipping continuation",
             task_id, tenant_session.id,
         )
-        raise ContinuationSkipped(
+        raise ResultsAlreadyConsumed(
             f"Background results for session {tenant_session.id} already notified"
         )
 
-    bg_block = build_bg_context_block(pending_bg_tasks)
-    # The bg_block already contains [BACKGROUND_TASKS_COMPLETED]...[/…] tags.
-    # In the normal chat flow (chat.py), the user's real message follows the
-    # "---" separator and remains visible after stripping.  Here there is no
-    # real user message, so we embed the instruction INSIDE the sentinel block
-    # (before the closing tag) so list_messages() strips the entire "user"
-    # message.  Only the assistant response will be visible to the end user.
-    #
-    # We replace the closing tag in bg_block with the instruction + closing tag.
-    instruction = (
-        "\nBackground tasks have completed. Summarize the results for the user "
-        "in a clear, concise message in the same language the user has been "
-        "using in this conversation. If any task failed, explain the error."
-    )
-    prompt = bg_block.replace(
-        "[/BACKGROUND_TASKS_COMPLETED]",
-        f"{instruction}\n[/BACKGROUND_TASKS_COMPLETED]\n\n---\n",
-    )
-
     # Concurrency control: only one ``agent.arun()`` may run at a time per
     # Agno session.  If the user is currently interacting (SSE stream holds
-    # the lock), we DO NOT block — we leave ``notified=False`` so the next
-    # user turn (see ``stream_message``/``send_message``) picks up the
-    # pending results via ``get_pending_bg_notifications`` and injects them
-    # naturally into that turn's context.  This avoids overwriting the
-    # in-flight run's history snapshot.
+    # the lock), we DO NOT block and we DO NOT discard: SessionBusy signals
+    # the Celery task to re-queue with a bounded countdown so the
+    # continuation runs as soon as the lock is released.  This avoids
+    # overwriting the in-flight run's history snapshot while guaranteeing
+    # delivery without waiting for the next user turn.
     from src.backend_api.app.services.agno_session_lock import (  # noqa: PLC0415
-        publish_conversation_updated,
         try_acquire,
         release,
     )
@@ -314,15 +311,48 @@ async def continue_after_bg_task(
     if lock_token is None:
         log.info(
             "continue_after_bg_task: task=%s session=%s — Agno session busy; "
-            "deferring to next user turn (results remain notified=False)",
+            "continuation deferred (results remain notified=False)",
             task_id, tenant_session.id,
         )
-        raise ContinuationSkipped(
+        raise SessionBusy(
             f"Agno session {tenant_session.agno_session_id} busy — deferred"
         )
 
     # Run agent (MCP cleanup runs in finally to avoid cancel busy-loop).
     try:
+        # Idempotency re-check under the lock: a concurrent continuation
+        # (e.g. a retry racing this one) may have consumed the pending
+        # results between the check above and the lock acquisition.  In that
+        # case there is nothing to deliver — return without running the
+        # agent so no duplicate continuation message is produced.
+        pending_bg_tasks = await get_pending_bg_notifications(tenant_session.id, db)
+        if not pending_bg_tasks:
+            log.info(
+                "continue_after_bg_task: task=%s session=%s — pending results "
+                "consumed by a concurrent continuation; skipping agent run",
+                task_id, tenant_session.id,
+            )
+            return tenant_session, ""
+
+        bg_block = build_bg_context_block(pending_bg_tasks)
+        # The bg_block already contains [BACKGROUND_TASKS_COMPLETED]...[/…] tags.
+        # In the normal chat flow (chat.py), the user's real message follows the
+        # "---" separator and remains visible after stripping.  Here there is no
+        # real user message, so we embed the instruction INSIDE the sentinel block
+        # (before the closing tag) so list_messages() strips the entire "user"
+        # message.  Only the assistant response will be visible to the end user.
+        #
+        # We replace the closing tag in bg_block with the instruction + closing tag.
+        instruction = (
+            "\nBackground tasks have completed. Summarize the results for the user "
+            "in a clear, concise message in the same language the user has been "
+            "using in this conversation. If any task failed, explain the error."
+        )
+        prompt = bg_block.replace(
+            "[/BACKGROUND_TASKS_COMPLETED]",
+            f"{instruction}\n[/BACKGROUND_TASKS_COMPLETED]\n\n---\n",
+        )
+
         run_output = await agent.arun(prompt)
     finally:
         await _safe_mcp_cleanup(agent)

@@ -7,6 +7,10 @@ export const apiClient: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   timeout: 120_000,
   headers: { 'Content-Type': 'application/json' },
+  // Serialize array query params as repeated keys (status=queued&status=running)
+  // instead of the default brackets form (status[]=queued) — required by
+  // FastAPI endpoints that accept repeated query parameters.
+  paramsSerializer: { indexes: null },
 })
 
 // Attach access token + dept header to every request

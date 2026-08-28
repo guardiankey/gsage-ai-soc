@@ -1,13 +1,14 @@
-import { useRef, useEffect, forwardRef, useImperativeHandle, useState } from 'react'
+import { useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, CheckCircle2, Clock } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertCircle, Clock, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { listMessages, checkMessages, subscribeConversationEvents, type Message, type MessageListResult, type MessageCheck } from '@/api/chat'
 import { useAuth } from '@/contexts/AuthContext'
 import { MessageBubble } from './MessageBubble'
 import { StreamingMessage } from './StreamingMessage'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -18,7 +19,6 @@ interface Props {
   pendingApprovals: boolean
   hasActiveBgTasks: boolean
   streamEndedAt: number
-  onBgTasksResolved?: () => void
   onPendingApprovalsDetected?: (pending: boolean) => void
   pendingUserMessage: string | null
   onFirstMessage?: () => void
@@ -37,7 +37,6 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
     pendingApprovals,
     hasActiveBgTasks,
     streamEndedAt,
-    onBgTasksResolved,
     onPendingApprovalsDetected,
     pendingUserMessage,
     onFirstMessage,
@@ -48,18 +47,31 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
   const { orgId } = useAuth()
   const queryClient = useQueryClient()
   const bottomRef = useRef<HTMLDivElement>(null)
-  const [prevMsgCount, setPrevMsgCount] = useState<number | null>(null)
   const lastMessageIdRef = useRef<string | null>(null)
 
   // Reset last-known message id when conversation changes.
   useEffect(() => {
     lastMessageIdRef.current = null
-    setPrevMsgCount(null)
   }, [conversationId])
+
+  // ── Full message list — fetched on mount / invalidation only ─────────
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['messages', orgId, conversationId],
+    queryFn: () => listMessages(orgId!, conversationId),
+    enabled: !!orgId && !!conversationId,
+    // No refetchInterval — updates are driven by the lightweight check
+    // query (below) and SSE events (further below).
+  })
+
+  const messages = data?.messages
 
   // ── Lightweight poll: only fetches last_message_id (cheap) ────────────
   // When the id changes the full message list is invalidated below.
-  const shouldPoll = pendingApprovals || hasActiveBgTasks
+  //
+  // ``needsPolling`` is the server-side authority (X-Needs-Polling header on
+  // GET /messages) and covers active background tasks, pending un-notified
+  // results, and pending approval delegations — spec B3 item 1.
+  const shouldPoll = !!data?.needsPolling || pendingApprovals || hasActiveBgTasks
     || (streamEndedAt > 0 && (Date.now() - streamEndedAt) < 60_000)
 
   const { data: checkData } = useQuery({
@@ -90,17 +102,6 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
     }
   }, [checkData?.last_message_id, orgId, conversationId, queryClient])
 
-  // ── Full message list — fetched on mount / invalidation only ─────────
-  const { data, isLoading } = useQuery({
-    queryKey: ['messages', orgId, conversationId],
-    queryFn: () => listMessages(orgId!, conversationId),
-    enabled: !!orgId && !!conversationId,
-    // No refetchInterval — updates are driven by the lightweight check
-    // query (above) and SSE events (below).
-  })
-
-  const messages = data?.messages
-
   // Track when this client's own stream was active / just ended so we can
   // suppress the SSE ``messages_updated`` event that the backend emits at
   // the end of OUR OWN message stream (chat.py publishes the event right
@@ -129,15 +130,28 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
   // follow-up event from the Celery background-task continuation.
   useEffect(() => {
     if (!orgId || !conversationId) return
-    const stop = subscribeConversationEvents(orgId, conversationId, () => {
-      // Skip events that coincide with our own just-finished stream
-      // (ChatPage.onDone already invalidates the messages query).
-      if (isStreamingRef.current) return
-      if (Date.now() - streamEndedAtRef.current < 300) return
-      queryClient.invalidateQueries({
-        queryKey: ['messages', orgId, conversationId],
-      })
-    })
+    const stop = subscribeConversationEvents(
+      orgId,
+      conversationId,
+      () => {
+        // Skip events that coincide with our own just-finished stream
+        // (ChatPage.onDone already invalidates the messages query).
+        if (isStreamingRef.current) return
+        if (Date.now() - streamEndedAtRef.current < 300) return
+        queryClient.invalidateQueries({
+          queryKey: ['messages', orgId, conversationId],
+        })
+      },
+      undefined,
+      () => {
+        // The connection was (re)established. Redis pub/sub has no replay,
+        // so refetch the message list (and its polling headers) to close
+        // any gap since the previous connection — spec B3 item 4.
+        queryClient.invalidateQueries({
+          queryKey: ['messages', orgId, conversationId],
+        })
+      }
+    )
     return stop
   }, [orgId, conversationId, queryClient])
 
@@ -148,21 +162,6 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
       onPendingApprovalsDetected?.(true)
     }
   }, [data?.hasPendingApprovals, onPendingApprovalsDetected])
-
-  // When polling with active bg tasks, detect new messages and stop polling.
-  // prevMsgCount starts as null and is seeded on first data load so the
-  // first message arrival during active bg tasks triggers resolution.
-  useEffect(() => {
-    const count = messages?.length ?? 0
-    if (prevMsgCount === null) {
-      setPrevMsgCount(count)
-      return
-    }
-    if (hasActiveBgTasks && count > prevMsgCount) {
-      onBgTasksResolved?.()
-    }
-    setPrevMsgCount(count)
-  }, [messages?.length, hasActiveBgTasks, onBgTasksResolved])
 
   useImperativeHandle(ref, () => ({
     scrollToBottom: () => {
@@ -185,6 +184,22 @@ export const ChatWindow = forwardRef<ChatWindowHandle, Props>(function ChatWindo
             <Skeleton className={cn('h-16 rounded-2xl', i % 2 === 0 ? 'w-3/4' : 'w-1/2')} />
           </div>
         ))}
+      </div>
+    )
+  }
+
+  // Message-load failure (spec B1): without this the conversation renders as
+  // permanently blank after a single failed GET /messages. Give the user an
+  // error state with an explicit retry action.
+  if (error && !isLoading && !pendingUserMessage && !streamingContent) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-muted-foreground">
+        <AlertCircle className="h-8 w-8 text-destructive" />
+        <p className="text-sm text-center max-w-md">{t('chat.messagesLoadError')}</p>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          {t('chat.retry')}
+        </Button>
       </div>
     )
   }

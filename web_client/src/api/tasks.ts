@@ -29,7 +29,7 @@ export async function listTasks(
   page = 1,
   limit = 20,
   toolName?: string,
-  status?: TaskStatus,
+  status?: TaskStatus | TaskStatus[],
   sessionId?: string
 ): Promise<PaginatedTasks> {
   const params: Record<string, unknown> = { page, limit }

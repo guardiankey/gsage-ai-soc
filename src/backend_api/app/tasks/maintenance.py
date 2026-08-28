@@ -284,6 +284,7 @@ def reap_orphan_background_tasks() -> dict:
 
         now = datetime.now(timezone.utc)
         reaped = 0
+        reaped_task_ids: list[str] = []
 
         async with async_session() as session:
             stmt = select(GSageBackgroundTask).where(
@@ -326,6 +327,7 @@ def reap_orphan_background_tasks() -> dict:
                 )[:2000]
                 row.completed_at = now
                 reaped += 1
+                reaped_task_ids.append(str(row.id))
                 log.warning(
                     "reap_orphan_background_tasks: reaped task %s (tool=%s "
                     "elapsed=%ds deadline=%ds)",
@@ -336,7 +338,7 @@ def reap_orphan_background_tasks() -> dict:
                 await session.commit()
 
         await engine.dispose()
-        return {"reaped": reaped, "scanned": len(rows)}
+        return {"reaped": reaped, "scanned": len(rows), "reaped_task_ids": reaped_task_ids}
 
     try:
         result = asyncio.run(_run())
@@ -345,6 +347,21 @@ def reap_orphan_background_tasks() -> dict:
                 "reap_orphan_background_tasks: reaped %d / %d running tasks",
                 result["reaped"], result["scanned"],
             )
+            # Surface a sanitized, user-visible message in each affected
+            # conversation (spec B3 item 3) — the technical details stay in
+            # the task row and the logs.
+            from src.backend_api.app.tasks.agent_continuation import (
+                _post_continuation_error_message,
+            )
+            for task_id in result["reaped_task_ids"]:
+                _post_continuation_error_message(
+                    task_id=task_id,
+                    error="background task timed out (orphan reap)",
+                    friendly=(
+                        "The background task took too long to complete and "
+                        "was cancelled automatically."
+                    ),
+                )
         return {"status": "ok", **result}
     except Exception as exc:
         log.error("reap_orphan_background_tasks failed: %s", exc, exc_info=True)

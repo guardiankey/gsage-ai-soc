@@ -111,7 +111,16 @@
     "mermaidCopySuccess": "Código do diagrama copiado para a área de transferência",
     "mermaidCopyError": "Falha ao copiar o código do diagrama",
     "messageCopyError": "Falha ao copiar a mensagem",
-    "newConversationInFolder": "Nova conversa nesta pasta"
+    "newConversationInFolder": "Nova conversa nesta pasta",
+    "bgTasks": {
+      "title": "Tarefas em segundo plano",
+      "running": "executando",
+      "queued": "na fila",
+      "empty": "Nenhuma tarefa em segundo plano",
+      "openTasks": "Abrir tarefas"
+    },
+    "messagesLoadError": "Não foi possível carregar as mensagens desta conversa.",
+    "retry": "Tentar novamente"
   },
   "interaction": {
     "title": "Entrada Necessária",

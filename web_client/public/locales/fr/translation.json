@@ -108,6 +108,15 @@
     "mermaidCopyError": "Échec de la copie du code du diagramme",
     "messageCopyError": "Échec de la copie du message",
     "newConversationInFolder": "Nouvelle conversation dans le dossier",
+    "bgTasks": {
+      "title": "Tâches en arrière-plan",
+      "running": "en cours",
+      "queued": "en attente",
+      "empty": "Aucune tâche en arrière-plan",
+      "openTasks": "Ouvrir les tâches"
+    },
+    "messagesLoadError": "Impossible de charger les messages de cette conversation.",
+    "retry": "Réessayer",
     "inputHintNewline": "Maj+Entrée pour envoyer · Entrée pour nouvelle ligne",
     "promptLibrary": "Bibliothèque de prompts",
     "enterSends": "Entrée envoie le message",

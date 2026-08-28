@@ -7,6 +7,7 @@ export interface Conversation {
   is_active: boolean
   folder_id?: string | null
   agent_id: string
+  agno_session_id: string
   created_at: string
   updated_at: string
   last_message_at?: string
@@ -295,7 +296,8 @@ export function subscribeConversationEvents(
   orgId: string,
   convId: string,
   onUpdate: (reason: string) => void,
-  onInteractionRequested?: (event: Record<string, unknown>) => void
+  onInteractionRequested?: (event: Record<string, unknown>) => void,
+  onOpen?: () => void
 ): () => void {
   const token = getAccessToken()
   const deptId = getDeptId()
@@ -308,6 +310,9 @@ export function subscribeConversationEvents(
     },
     signal: controller.signal,
     openWhenHidden: true,
+    // Optional hook for consumers to resync on (re)connect — Redis pub/sub
+    // has no replay, so the client should refetch to close any gap.
+    ...(onOpen ? { onopen: async () => { onOpen() } } : {}),
     onmessage(ev) {
       if (ev.event === 'messages_updated') {
         try {

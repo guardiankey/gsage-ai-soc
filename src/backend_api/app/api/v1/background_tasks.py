@@ -68,7 +68,9 @@ async def list_background_tasks(
     db: Annotated[AsyncSession, Depends(get_db)],
     pagination: Annotated[PaginationParams, Depends()],
     tool_name: Optional[str] = Query(default=None, description="Filter by tool name"),
-    task_status: Optional[str] = Query(default=None, alias="status", description="Filter by status"),
+    # Repeated ``status`` params are allowed (e.g. status=queued&status=running)
+    # and mean set membership; a single value remains backward-compatible.
+    task_status: Optional[List[str]] = Query(default=None, alias="status", description="Filter by status (repeatable)"),
     session_id: Optional[uuid.UUID] = Query(default=None, description="Filter by gSage session (conversation) ID"),
 ) -> PaginatedResponse[BackgroundTaskOut]:
     """List background tool executions for the organisation.
@@ -86,7 +88,7 @@ async def list_background_tasks(
     if tool_name:
         stmt = stmt.where(GSageBackgroundTask.tool_name == tool_name)
     if task_status:
-        stmt = stmt.where(GSageBackgroundTask.status == task_status)
+        stmt = stmt.where(GSageBackgroundTask.status.in_(task_status))
     if session_id:
         stmt = stmt.where(GSageBackgroundTask.gsage_session_id == session_id)
 

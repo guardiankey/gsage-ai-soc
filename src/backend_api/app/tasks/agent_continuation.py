@@ -26,19 +26,54 @@ log = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     acks_late=True,
-    max_retries=2,
+    max_retries=3,
     default_retry_delay=30,
     name="src.backend_api.app.tasks.agent_continuation.continue_after_bg_task_completed",
 )
 def continue_after_bg_task_completed(self, task_id: str) -> None:  # type: ignore[misc]
-    """Re-run the agent after a background tool completes and deliver the result."""
+    """Re-run the agent after a background tool completes and deliver the result.
+
+    Session-busy deferrals are re-queued with a bounded countdown (15/45/90 s)
+    so the continuation runs as soon as the session lock is released (spec B3
+    item 2). On final give-up the results stay ``notified=False`` (the next
+    user turn injects them) and a conversation update is published.
+    """
     from src.backend_api.app.services.agent_continuation import (
         ContinuationSkipped,
+        ResultsAlreadyConsumed,
+        SessionBusy,
         _is_transient_continuation_error,
     )
 
+    # One countdown per retry attempt (max_retries=3).
+    _BUSY_RETRY_COUNTDOWNS = (15, 45, 90)
+
     try:
         asyncio.run(_async_continue_bg_task(task_id))
+    except SessionBusy as exc:
+        delay = _BUSY_RETRY_COUNTDOWNS[
+            min(self.request.retries, len(_BUSY_RETRY_COUNTDOWNS) - 1)
+        ]
+        log.info(
+            "continue_after_bg_task_completed: session busy task_id=%s "
+            "retry=%d/%d countdown=%ds",
+            task_id, self.request.retries + 1, self.max_retries, delay,
+        )
+        try:
+            raise self.retry(exc=exc, countdown=delay)
+        except self.MaxRetriesExceededError:
+            log.error(
+                "continue_after_bg_task_completed: retries exhausted on busy "
+                "session task_id=%s — results remain pending for next user turn",
+                task_id,
+            )
+            _publish_bg_task_pending(task_id)
+    except ResultsAlreadyConsumed as exc:
+        log.info(
+            "continue_after_bg_task_completed: results already consumed task_id=%s: %s",
+            task_id, exc,
+        )
+        # Logical success — nothing to deliver, no retry.
     except ContinuationSkipped as exc:
         log.info(
             "continue_after_bg_task_completed skipped task_id=%s: %s",
@@ -195,11 +230,13 @@ def _post_continuation_error_message(
     approval_id: str | None = None,
     org_id: str | None = None,
     error: str = "",
+    friendly: str | None = None,
 ) -> None:
-    """Best-effort delivery of a friendly error message to the user.
+    """Best-effort delivery of a friendly, sanitized error message to the user.
 
-    Called after retries are exhausted (or a non-transient error occurs)
-    so the user is not left without feedback. Never raises.
+    Technical details (``error``) are logged only — never shown to the user
+    (spec B3 item 3). Called after retries are exhausted (or a non-transient
+    error occurs) so the user is not left without feedback. Never raises.
     """
     try:
         asyncio.run(_async_post_continuation_error(
@@ -207,6 +244,7 @@ def _post_continuation_error_message(
             approval_id=approval_id,
             org_id=org_id,
             error=error,
+            friendly=friendly,
         ))
     except Exception as exc:
         log.error(
@@ -215,12 +253,18 @@ def _post_continuation_error_message(
         )
 
 
+_DEFAULT_CONTINUATION_ERROR_TEXT = (
+    "The background task could not be completed automatically."
+)
+
+
 async def _async_post_continuation_error(
     *,
     task_id: str | None,
     approval_id: str | None,
     org_id: str | None,
     error: str,
+    friendly: str | None = None,
 ) -> None:
     """Resolve the originating session and deliver a friendly error message."""
     import uuid
@@ -237,12 +281,7 @@ async def _async_post_continuation_error(
     engine = create_pooled_engine(settings)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-    friendly = (
-        "I could not finish processing your request due to a problem with "
-        "the LLM provider. Please try again."
-    )
-    if error:
-        friendly = f"{friendly}\n\n_Details: {error}_"
+    message = friendly or _DEFAULT_CONTINUATION_ERROR_TEXT
 
     try:
         async with session_factory() as db:
@@ -281,9 +320,164 @@ async def _async_post_continuation_error(
                 )
                 return
 
-            from src.backend_api.app.services.channel_sender import deliver_response
+            # Technical details stay in the logs — the user only ever sees
+            # the sanitized message (spec B3 item 3).
+            log.error(
+                "continuation error for session=%s (task_id=%s approval_id=%s): %s",
+                tenant_session.id, task_id, approval_id, error,
+            )
 
-            await deliver_response(tenant_session, friendly, db)
+            if (tenant_session.source or "web") == "web":
+                await _persist_web_assistant_message(
+                    tenant_session.agno_session_id, message,
+                )
+                from src.backend_api.app.services.agno_session_lock import (
+                    publish_conversation_updated,
+                )
+                await publish_conversation_updated(
+                    tenant_session.id, reason="continuation_error"
+                )
+            else:
+                from src.backend_api.app.services.channel_sender import deliver_response
+
+                await deliver_response(tenant_session, message, db)
+
+            # Mark the originating task as notified so the next user turn
+            # does not re-inject an already-explained failure.
+            if task_id is not None:
+                from src.backend_api.app.services.background_tasks import (
+                    mark_bg_tasks_notified,
+                )
+                await mark_bg_tasks_notified([uuid.UUID(task_id)], db)
+                try:
+                    await db.commit()
+                except Exception as exc:
+                    log.warning(
+                        "_async_post_continuation_error: commit of notified "
+                        "flag failed: %s",
+                        exc,
+                    )
+    finally:
+        await engine.dispose()
+
+
+async def _persist_web_assistant_message(agno_session_id: str, text: str) -> None:
+    """Persist a standalone assistant message into the Agno session history.
+
+    Used to surface continuation failures to web clients, for which the Agno
+    post-hook never runs (no ``agent.run()`` was executed in this path).
+    Guarded by the Agno session lock so it never clobbers an in-flight run.
+    Best-effort: never raises.
+    """
+    try:
+        import uuid
+
+        from agno.db.base import SessionType
+        from agno.models.message import Message
+        from agno.run.agent import RunOutput
+        from agno.run.base import RunStatus
+
+        from src.backend_api.app.services.agent_factory import get_agno_db
+        from src.backend_api.app.services.agno_session_lock import (
+            release,
+            try_acquire,
+        )
+
+        lock_token = await try_acquire(agno_session_id, owner="continuation_error")
+        if lock_token is None:
+            log.warning(
+                "_persist_web_assistant_message: session %s busy — skipping "
+                "persistence (results remain pending for next user turn)",
+                agno_session_id,
+            )
+            return
+
+        try:
+            agno_db = get_agno_db()
+            agno_session = await agno_db.get_session(
+                session_id=agno_session_id,
+                session_type=SessionType.AGENT,
+            )
+            if agno_session is None:
+                log.warning(
+                    "_persist_web_assistant_message: agno session %s not found",
+                    agno_session_id,
+                )
+                return
+
+            message = Message(role="assistant", content=text)
+            run = RunOutput(
+                run_id=f"continuation-error-{uuid.uuid4()}",
+                session_id=agno_session_id,
+                status=RunStatus.completed,
+                content=text,
+                content_type="str",
+                messages=[message],
+            )
+            if agno_session.runs:
+                agno_session.runs.append(run)
+            else:
+                agno_session.runs = [run]
+            await agno_db.upsert_session(agno_session)
+        finally:
+            await release(agno_session_id, lock_token)
+    except Exception as exc:
+        log.error(
+            "_persist_web_assistant_message failed session=%s: %s",
+            agno_session_id, exc, exc_info=True,
+        )
+
+
+def _publish_bg_task_pending(task_id: str) -> None:
+    """Best-effort publish after a busy-session deferral exhausted its retries.
+
+    Results stay ``notified=False`` and will be injected by the next user
+    turn; the publish lets SSE clients re-arm polling in the meantime.
+    Never raises.
+    """
+    try:
+        asyncio.run(_async_publish_bg_task_pending(task_id))
+    except Exception as exc:
+        log.error(
+            "_publish_bg_task_pending failed task_id=%s: %s",
+            task_id, exc, exc_info=True,
+        )
+
+
+async def _async_publish_bg_task_pending(task_id: str) -> None:
+    import uuid
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from src.backend_api.app.services.agno_session_lock import (
+        publish_conversation_updated,
+    )
+    from src.shared.config.settings import get_settings
+    from src.shared.database import create_pooled_engine
+    from src.shared.models.background_task import GSageBackgroundTask
+
+    settings = get_settings()
+    engine = create_pooled_engine(settings)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as db:
+            result = await db.execute(
+                select(GSageBackgroundTask).where(
+                    GSageBackgroundTask.id == uuid.UUID(task_id)
+                )
+            )
+            task = result.scalar_one_or_none()
+            if task is None or task.gsage_session_id is None:
+                log.warning(
+                    "_async_publish_bg_task_pending: task not found or has no "
+                    "session: %s",
+                    task_id,
+                )
+                return
+            await publish_conversation_updated(
+                task.gsage_session_id, reason="bg_task_pending"
+            )
     finally:
         await engine.dispose()
 

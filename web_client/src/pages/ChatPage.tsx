@@ -7,6 +7,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import { ConversationList } from '@/components/chat/ConversationList'
 import { ChatWindow, type ChatWindowHandle } from '@/components/chat/ChatWindow'
 import { ChatInput } from '@/components/chat/ChatInput'
+import { BackgroundTasksIndicator } from '@/components/chat/BackgroundTasksIndicator'
+import { useConversationBgTasks } from '@/hooks/useConversationBgTasks'
 import { Button } from '@/components/ui/button'
 import { InteractionRenderer } from '@/components/interaction/InteractionRenderer'
 import { useInteraction } from '@/hooks/useInteraction'
@@ -30,6 +32,10 @@ export default function ChatPage() {
   const [streamEndedAt, setStreamEndedAt] = useState(0)
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  // The conversation the active stream belongs to. Every stream callback is
+  // guarded against this ref so a zombie stream from a previous conversation
+  // can never write into the current one (spec B2).
+  const currentConversationIdRef = useRef<string | null>(null)
   // Tracks whether onPaused fired in the current stream (avoids stale closure reads).
   const pausedRef = useRef(false)
   // Tracks whether we just created a new conversation (avoids resetting pendingUserMessage on nav).
@@ -52,7 +58,12 @@ export default function ChatPage() {
       }
     )
     return stop
-  }, [orgId, conversationId, interaction])
+    // NOTE: depend on the stable ``handleEvent`` callback only — the
+    // ``useInteraction`` hook returns a NEW object on every render, and
+    // depending on the whole object would abort/re-subscribe the SSE
+    // connection on every re-render (e.g. every streamed token), flooding
+    // the network log with canceled /events requests.
+  }, [orgId, conversationId, interaction.handleEvent])
 
   const handleInteractionSubmit = useCallback(
     async (interactionId: string, responses: Record<string, unknown>) => {
@@ -75,11 +86,20 @@ export default function ChatPage() {
     [interaction]
   )
 
-  // Reset streaming state when conversation changes
+  // Reset streaming state when the conversation changes.
+  //
+  // Aborting the previous stream is mandatory: without it, the old stream's
+  // callbacks keep firing into the new conversation (spec B2). The guard on
+  // currentConversationIdRef below additionally drops any callbacks that were
+  // already queued in the JS task queue before the abort took effect.
   useEffect(() => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    currentConversationIdRef.current = conversationId ?? null
     if (justCreatedRef.current) {
-      // Don't reset streaming state — handleSend is actively streaming
-      // into this newly created conversation.
+      // Don't reset the streaming placeholder — handleSend has just seeded
+      // state for the newly created conversation and is actively streaming
+      // into it.
       justCreatedRef.current = false
       setSidebarOpen(false)
       return
@@ -94,6 +114,14 @@ export default function ChatPage() {
     pausedRef.current = false
     setSidebarOpen(false)
   }, [conversationId])
+
+  // Abort the in-flight stream when leaving the chat page entirely. The
+  // agent run continues server-side; this client only stops listening.
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort()
+    }
+  }, [])
 
   const handleSend = useCallback(
     async (message: string, attachmentIds?: string[]) => {
@@ -111,6 +139,9 @@ export default function ChatPage() {
           targetConvId = conv.id
           justCreatedRef.current = true
           navigate(`/chat/${conv.id}`, { replace: true })
+          // Re-point the stream guard to the new conversation immediately so
+          // callbacks arriving before the next effect pass are accepted.
+          currentConversationIdRef.current = targetConvId
           queryClient.invalidateQueries({ queryKey: ['conversations', orgId] })
         } catch {
           toast.error(t('chat.createConvError'))
@@ -126,10 +157,15 @@ export default function ChatPage() {
 
       const callbacks = {
         onDelta: (text: string) => {
+          // Drop late events from a stream that belongs to a previous
+          // conversation (spec B2 — the abort may not have flushed
+          // callbacks already queued in the JS task queue).
+          if (targetConvId !== currentConversationIdRef.current) return
           accumulated += text
           setStreamingContent(accumulated)
         },
         onPaused: (_data: { pending_approvals: string[]; run_id?: string }) => {
+          if (targetConvId !== currentConversationIdRef.current) return
           // Agent paused for HITL approval — stop the streaming cursor.
           // Re-set pendingUserMessage here to survive the conversationId-change
           // reset effect (which may have fired when navigate() created a new conv).
@@ -140,6 +176,7 @@ export default function ChatPage() {
           setPendingUserMessage(message)
         },
         onDone: (metadata: SendMessageResponse['metadata'], status?: 'error' | 'paused' | null) => {
+          if (targetConvId !== currentConversationIdRef.current) return
           setIsStreaming(false)
           setStreamEndedAt(Date.now())
           setHasActiveBgTasks(!!metadata?.has_active_bg_tasks)
@@ -195,6 +232,7 @@ export default function ChatPage() {
           }
         },
         onError: (err: string) => {
+          if (targetConvId !== currentConversationIdRef.current) return
           // Do NOT clear streamingContent here — keep what was streamed so
           // the user sees the partial response. The next refetch (triggered
           // below) will surface the persisted error-status message.
@@ -230,13 +268,28 @@ export default function ChatPage() {
     setPendingUserMessage(null)
   }, [])
 
-  const handleBgTasksResolved = useCallback(() => {
-    setHasActiveBgTasks(false)
-  }, [])
-
   const handlePendingApprovalsDetected = useCallback((pending: boolean) => {
     setPendingApprovals(pending)
   }, [])
+
+  // Scope the background-tasks indicator to this conversation (spec F1).
+  // The endpoint's ``session_id`` filter maps to ``GSageTenantSession.id`` —
+  // the conversation UUID from the URL — NOT to the ``agno_session_id``
+  // string (which is not a valid UUID and would be rejected with 422).
+  // ``hasActiveBgTasks`` (from message_end metadata) keeps the poll armed
+  // even when the first fetch found no tasks yet.
+  const { count: activeBgTaskCount, tasks: activeBgTasks } = useConversationBgTasks(
+    orgId,
+    conversationId ?? null,
+    hasActiveBgTasks
+  )
+
+  // Authoritative resolution of the active-background-tasks flag (spec B3
+  // item 6): only the background-tasks query may clear it — never the arrival
+  // of a new chat message.
+  useEffect(() => {
+    if (activeBgTaskCount === 0) setHasActiveBgTasks(false)
+  }, [activeBgTaskCount])
 
   return (
     <div className="flex flex-1 h-full min-w-0">
@@ -258,7 +311,7 @@ export default function ChatPage() {
           </Button>
         </div>
         {conversationId ? (
-          <>
+          <div className="relative flex flex-col flex-1 min-h-0">
             <ChatWindow
               ref={chatWindowRef}
               conversationId={conversationId}
@@ -268,7 +321,6 @@ export default function ChatPage() {
               pendingApprovals={pendingApprovals}
               hasActiveBgTasks={hasActiveBgTasks}
               streamEndedAt={streamEndedAt}
-              onBgTasksResolved={handleBgTasksResolved}
               onPendingApprovalsDetected={handlePendingApprovalsDetected}
               pendingUserMessage={pendingUserMessage}
             />
@@ -284,7 +336,8 @@ export default function ChatPage() {
                   : undefined
               }
             />
-          </>
+            <BackgroundTasksIndicator count={activeBgTaskCount} tasks={activeBgTasks} />
+          </div>
         ) : (
           <div className="flex flex-col flex-1 items-center justify-between">
             {/* Empty state - still can accept a new message */}

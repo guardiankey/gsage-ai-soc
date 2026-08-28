@@ -111,7 +111,16 @@
     "mermaidCopySuccess": "Diagram source copied to clipboard",
     "mermaidCopyError": "Failed to copy diagram source",
     "messageCopyError": "Failed to copy message",
-    "newConversationInFolder": "New conversation in folder"
+    "newConversationInFolder": "New conversation in folder",
+    "bgTasks": {
+      "title": "Background tasks",
+      "running": "running",
+      "queued": "queued",
+      "empty": "No background tasks running",
+      "openTasks": "Open tasks"
+    },
+    "messagesLoadError": "Could not load messages for this conversation.",
+    "retry": "Retry"
   },
   "interaction": {
     "title": "Input Required",

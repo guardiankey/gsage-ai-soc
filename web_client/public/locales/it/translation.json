@@ -108,6 +108,15 @@
     "mermaidCopyError": "Impossibile copiare il codice del diagramma",
     "messageCopyError": "Impossibile copiare il messaggio",
     "newConversationInFolder": "Nuova conversazione nella cartella",
+    "bgTasks": {
+      "title": "Attività in background",
+      "running": "in esecuzione",
+      "queued": "in coda",
+      "empty": "Nessuna attività in background",
+      "openTasks": "Apri attività"
+    },
+    "messagesLoadError": "Impossibile caricare i messaggi di questa conversazione.",
+    "retry": "Riprova",
     "inputHintNewline": "Shift+Invio per inviare · Invio per nuova riga",
     "promptLibrary": "Libreria prompt",
     "enterSends": "Invio invia il messaggio",

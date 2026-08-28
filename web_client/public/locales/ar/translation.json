@@ -108,6 +108,15 @@
     "mermaidCopyError": "فشل نسخ مصدر المخطط",
     "messageCopyError": "فشل نسخ الرسالة",
     "newConversationInFolder": "محادثة جديدة في المجلد",
+    "bgTasks": {
+      "title": "مهام الخلفية",
+      "running": "قيد التنفيذ",
+      "queued": "في قائمة الانتظار",
+      "empty": "لا توجد مهام خلفية قيد التنفيذ",
+      "openTasks": "فتح المهام"
+    },
+    "messagesLoadError": "تعذّر تحميل رسائل هذه المحادثة.",
+    "retry": "إعادة المحاولة",
     "inputHintNewline": "Shift+Enter للإرسال · Enter لسطر جديد",
     "promptLibrary": "مكتبة المطالبات",
     "enterSends": "Enter يرسل الرسالة",

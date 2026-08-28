@@ -108,6 +108,15 @@
     "mermaidCopyError": "Error al copiar el código del diagrama",
     "messageCopyError": "Error al copiar el mensaje",
     "newConversationInFolder": "Nueva conversación en la carpeta",
+    "bgTasks": {
+      "title": "Tareas en segundo plano",
+      "running": "ejecutando",
+      "queued": "en cola",
+      "empty": "No hay tareas en segundo plano",
+      "openTasks": "Abrir tareas"
+    },
+    "messagesLoadError": "No se pudieron cargar los mensajes de esta conversación.",
+    "retry": "Reintentar",
     "inputHintNewline": "Shift+Enter para enviar · Enter para nueva línea",
     "promptLibrary": "Biblioteca de prompts",
     "enterSends": "Enter envía el mensaje",
