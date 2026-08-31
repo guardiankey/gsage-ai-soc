@@ -201,15 +201,56 @@ def _build_metadata_header(
     return "\n".join(lines)
 
 
-def _build_model_for_summarize(
+async def _load_org_for_summarize(agent_context: AgentContext):
+    """Load the organization row for org-aware LLM resolution.
+
+    Background execution (``background.py`` phase 2) runs tools without a
+    DB session in ``_tool_session_ctx``, so open a fresh short-lived
+    session here — same pattern as ``BaseTool._store_file``.  Returns
+    ``None`` on any failure so summarization still works with global
+    settings.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from src.shared.database import _get_session_maker  # noqa: PLC0415
+    from src.shared.models.organization import (  # noqa: PLC0415
+        GSageOrganization,
+    )
+
+    try:
+        store_session = _get_session_maker()()
+        try:
+            result = await store_session.execute(
+                select(GSageOrganization).where(
+                    GSageOrganization.id == agent_context.org_id
+                )
+            )
+            return result.scalar_one_or_none()
+        finally:
+            try:
+                await store_session.close()
+            except Exception:
+                pass
+    except Exception as exc:
+        log.warning(
+            "summarize_file: could not load organization %s for LLM "
+            "resolution, falling back to global settings: %s",
+            agent_context.org_id, exc,
+        )
+        return None
+
+
+async def _build_model_for_summarize(
     config: dict,
     agent_context: AgentContext,
 ):
     """Build an Agno model instance for summarization calls.
 
-    Follows the same pattern as ``_build_model()`` in ``agent_factory.py``,
-    but without a ``GSageOrganization`` dependency.  Uses tool config +
-    global settings for provider/model resolution.
+    Follows the org-aware resolution pattern of ``_build_model()`` in
+    ``agent_factory.py``: explicit tool config wins, then the
+    organization's LLM settings (provider, maker model, API key), then
+    global ``.env`` settings.  With ``llm_provider`` = ``"inherit"`` the
+    summarization model now matches the agent's model.
 
     Returns a tuple of ``(model, provider_name)``.
     """
@@ -217,17 +258,32 @@ def _build_model_for_summarize(
 
     settings = get_settings()
 
-    provider = (config.get("llm_provider") or "inherit").strip().lower()
+    provider_override = (config.get("llm_provider") or "inherit").strip().lower()
     model_override = (config.get("llm_model") or "").strip()
 
-    # If inherit, use the global settings provider
-    if provider == "inherit":
-        provider = settings.llm_provider.lower()
+    # Org-level overrides apply only when the provider is inherited from
+    # the environment (same behavior as agent_factory._build_model()).
+    # An explicit provider in the tool config keeps the previous
+    # settings-based resolution.
+    if provider_override == "inherit":
+        org = await _load_org_for_summarize(agent_context)
+        provider = (org.llm_provider if org else settings.llm_provider).lower()
+        org_model = (
+            org.default_maker_model.strip()
+            if org and org.default_maker_model
+            else None
+        )
+        org_key = org.llm_api_key if org else None
+    else:
+        provider = provider_override
+        org_model = None
+        org_key = None
 
     if provider == "openai":
         from agno.models.openai import OpenAIChat  # noqa: PLC0415
 
-        model_id = model_override or settings.openai_maker_model
+        model_id = model_override or org_model or settings.openai_maker_model
+        api_key = org_key or settings.openai_api_key
         # Same role_map fix as agent_factory._build_model(): keep the system
         # prompt as "system" — Agno's default maps it to "developer", which
         # Azure OpenAI / Azure AI Foundry endpoints reject with HTTP 422.
@@ -241,8 +297,8 @@ def _build_model_for_summarize(
                 "model": "assistant",
             },
         }
-        if settings.openai_api_key:
-            kwargs["api_key"] = settings.openai_api_key
+        if api_key:
+            kwargs["api_key"] = api_key
         if settings.openai_base_url:
             kwargs["base_url"] = settings.openai_base_url
         return OpenAIChat(**kwargs), provider
@@ -251,38 +307,45 @@ def _build_model_for_summarize(
         from agno.models.deepseek import DeepSeek  # noqa: PLC0415
 
         kwargs: dict = {
-            "id": model_override or settings.deepseek_maker_model,
+            "id": model_override or org_model or settings.deepseek_maker_model,
             "base_url": settings.deepseek_base_url,
         }
-        if settings.deepseek_api_key:
-            kwargs["api_key"] = settings.deepseek_api_key
+        api_key = org_key or settings.deepseek_api_key
+        if api_key:
+            kwargs["api_key"] = api_key
         return DeepSeek(**kwargs), provider
 
     if provider == "gemini":
         from agno.models.google import Gemini  # noqa: PLC0415
 
-        kwargs: dict = {"id": model_override or settings.gemini_maker_model}
-        if settings.gemini_api_key:
-            kwargs["api_key"] = settings.gemini_api_key
+        kwargs: dict = {
+            "id": model_override or org_model or settings.gemini_maker_model
+        }
+        api_key = org_key or settings.gemini_api_key
+        if api_key:
+            kwargs["api_key"] = api_key
         return Gemini(**kwargs), provider
 
     if provider == "anthropic":
         from agno.models.anthropic import Claude  # noqa: PLC0415
 
-        kwargs: dict = {"id": model_override or settings.anthropic_maker_model}
-        if settings.anthropic_api_key:
-            kwargs["api_key"] = settings.anthropic_api_key
+        kwargs: dict = {
+            "id": model_override or org_model or settings.anthropic_maker_model
+        }
+        api_key = org_key or settings.anthropic_api_key
+        if api_key:
+            kwargs["api_key"] = api_key
         return Claude(**kwargs), provider
 
     if provider == "vllm":
-        model_id = model_override or settings.vllm_maker_model
+        model_id = model_override or org_model or settings.vllm_maker_model
         from src.shared.llm.vllm_recovering import (  # noqa: PLC0415
             RecoveringToolCallVLLM,
         )
 
         return RecoveringToolCallVLLM(
             id=model_id,
-            api_key=settings.vllm_api_key or "EMPTY",
+            api_key=(org_key or settings.vllm_api_key) or "EMPTY",
             base_url=settings.vllm_base_url,
             timeout=300.0,
         ), provider
@@ -291,7 +354,7 @@ def _build_model_for_summarize(
     from agno.models.ollama import Ollama  # noqa: PLC0415
 
     return Ollama(
-        id=model_override or settings.ollama_maker_model,
+        id=model_override or org_model or settings.ollama_maker_model,
         host=settings.ollama_base_url,
     ), provider
 
@@ -413,14 +476,17 @@ class SummarizeFileTool(BaseTool):
                 "default": "inherit",
                 "description": (
                     "LLM provider for summarization calls. "
-                    "'inherit' uses the same provider/model as the agent."
+                    "'inherit' uses the same provider/model as the agent "
+                    "(organization LLM config, falling back to global "
+                    "settings)."
                 ),
             },
             "llm_model": {
                 "type": "string",
                 "description": (
-                    "Model name override. If empty, uses the provider's "
-                    "default maker model from settings."
+                    "Model name override. If empty, uses the same maker "
+                    "model as the agent (organization config), then the "
+                    "provider's default from settings."
                 ),
             },
             "llm_temperature": {
@@ -619,7 +685,7 @@ class SummarizeFileTool(BaseTool):
 
         # ── Build model ────────────────────────────────────────────────
         try:
-            model, resolved_provider = _build_model_for_summarize(
+            model, resolved_provider = await _build_model_for_summarize(
                 config, agent_context
             )
         except Exception as exc:
@@ -632,6 +698,10 @@ class SummarizeFileTool(BaseTool):
         resolved_model = (
             config.get("llm_model", "").strip()
             or getattr(model, "id", "unknown")
+        )
+        log.info(
+            "summarize_file: resolved provider=%s model=%s",
+            resolved_provider, resolved_model,
         )
         temperature = config.get("llm_temperature", 0.1)
         if hasattr(model, "temperature"):
@@ -744,7 +814,9 @@ class SummarizeFileTool(BaseTool):
                         else:
                             return self._failure(
                                 "LLM_ERROR",
-                                "LLM call timed out after 3 attempts.",
+                                "LLM call timed out after 3 attempts "
+                                f"(provider={resolved_provider}, "
+                                f"model={resolved_model}).",
                             )
                     except Exception as exc:
                         if self._extract_token_limit_error(exc):
@@ -761,7 +833,9 @@ class SummarizeFileTool(BaseTool):
                         else:
                             return self._failure(
                                 "LLM_ERROR",
-                                f"LLM call failed after 3 attempts: {exc}",
+                                f"LLM call failed after 3 attempts: {exc} "
+                                f"(provider={resolved_provider}, "
+                                f"model={resolved_model})",
                             )
 
                 # Handle token limit: reduce chunk and retry same position

@@ -49,8 +49,8 @@ gSage AI — Summarize File tool.
 | `chunk_min_chars` | `integer` | — | — | `4000` | Absolute minimum chunk size. Prevents infinite reduction loops. |
 | `chunk_overlap_chars` | `integer` | — | — | `500` | Characters from the END of the previous chunk to include at the START of the next chunk. |
 | `chunk_token_target` | `integer` | — | — | `12000` | Target tokens per chunk (~3.8 chars/token). Auto-reduced if LLM reports context limit exceeded. |
-| `llm_model` | `string` | — | — | `""` | Model name override. If empty, uses the provider's default maker model from settings. |
-| `llm_provider` | `string` | — | — | `"inherit"` | LLM provider for summarization calls. 'inherit' uses the same provider/model as the agent. |
+| `llm_model` | `string` | — | — | `""` | Model name override. If empty, uses the same maker model as the agent (organization config), then the provider's default from settings. |
+| `llm_provider` | `string` | — | — | `"inherit"` | LLM provider for summarization calls. 'inherit' uses the same provider/model as the agent (organization LLM config, falling back to global settings). |
 | `llm_temperature` | `number` | — | — | `0.1` | Temperature for summarization calls. Lower = more deterministic, less hallucination. 0.0-0.2 recommended for factual tasks. |
 | `max_iterations` | `integer` | — | — | `500` | Maximum LLM iterations before stopping. Returns partial summary with warning if reached. |
 | `summary_tail_tokens` | `integer` | — | — | `2000` | Approximate tokens from the END of the accumulated summary to show as context (~3.8 chars/token). Higher values preserve more coherence across iterations but consume more prompt space. |
@@ -65,8 +65,8 @@ The variables below are derived automatically from each tool's `config_schema`. 
 | `TOOL_SUMMARIZE_FILE__CHUNK_MIN_CHARS` | `chunk_min_chars` | `integer` | `4000` | — | Absolute minimum chunk size. Prevents infinite reduction loops. |
 | `TOOL_SUMMARIZE_FILE__CHUNK_OVERLAP_CHARS` | `chunk_overlap_chars` | `integer` | `500` | — | Characters from the END of the previous chunk to include at the START of the next chunk. |
 | `TOOL_SUMMARIZE_FILE__CHUNK_TOKEN_TARGET` | `chunk_token_target` | `integer` | `12000` | — | Target tokens per chunk (~3.8 chars/token). Auto-reduced if LLM reports context limit exceeded. |
-| `TOOL_SUMMARIZE_FILE__LLM_MODEL` | `llm_model` | `string` | `""` | — | Model name override. If empty, uses the provider's default maker model from settings. |
-| `TOOL_SUMMARIZE_FILE__LLM_PROVIDER` | `llm_provider` | `string` | `"inherit"` | — | LLM provider for summarization calls. 'inherit' uses the same provider/model as the agent. |
+| `TOOL_SUMMARIZE_FILE__LLM_MODEL` | `llm_model` | `string` | `""` | — | Model name override. If empty, uses the same maker model as the agent (organization config), then the provider's default from settings. |
+| `TOOL_SUMMARIZE_FILE__LLM_PROVIDER` | `llm_provider` | `string` | `"inherit"` | — | LLM provider for summarization calls. 'inherit' uses the same provider/model as the agent (organization LLM config, falling back to global settings). |
 | `TOOL_SUMMARIZE_FILE__LLM_TEMPERATURE` | `llm_temperature` | `number` | `0.1` | — | Temperature for summarization calls. Lower = more deterministic, less hallucination. 0.0-0.2 recommended for factual tasks. |
 | `TOOL_SUMMARIZE_FILE__LLM_TIMEOUT` | `llm_timeout` | `—` | `300` | — | — |
 | `TOOL_SUMMARIZE_FILE__MAX_ITERATIONS` | `max_iterations` | `integer` | `500` | — | Maximum LLM iterations before stopping. Returns partial summary with warning if reached. |
