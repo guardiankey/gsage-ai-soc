@@ -137,6 +137,82 @@ def _patch_agno_unknown_tool_message() -> None:
     log.info("agno patch installed: helpful unknown-tool message")
 
 
+# ── Conversation history token budget ──────────────────────────────────────
+# Conservative chars-per-token divisor used to estimate prompt size.  The
+# deployed models (DeepSeek/Qwen family) have no matching tiktoken encoding;
+# chars/3.5 overestimates for EN/PT, keeping the real prompt safely under
+# budget.
+_HISTORY_CHARS_PER_TOKEN = 3.5
+
+_TRUNCATED_BY_BUDGET_NOTE = (
+    "\n\n[OUTPUT TRUNCATED BY HISTORY BUDGET — original was {orig} chars]"
+)
+
+
+def _estimate_message_tokens(message: Any) -> int:
+    """Conservative token estimate for a single message."""
+    text = ""
+    try:
+        text = message.get_content_string()
+    except Exception:
+        text = str(getattr(message, "content", "") or "")
+    if not text:
+        return 0
+    return max(1, int(len(text) / _HISTORY_CHARS_PER_TOKEN) + 1)
+
+
+def _prune_history_to_budget(
+    messages: list, budget_tokens: int
+) -> tuple[list, int]:
+    """Trim the oldest messages so the estimated history fits ``budget_tokens``.
+
+    Walks newest → oldest and keeps every message that fits whole.  A tool
+    message that does not fit is deep-copied, truncated to the remaining
+    budget and kept; user/assistant messages that do not fit are dropped
+    together with all older messages (their text is never split).  Tool-call
+    pairing stays valid because pruning only removes from the front of the
+    list (tool replies are newer than the assistant call that produced them).
+
+    Returns ``(pruned_messages, pruned_tokens)``.
+    """
+    if budget_tokens <= 0:
+        return list(messages), 0
+
+    total = sum(_estimate_message_tokens(m) for m in messages)
+    if total <= budget_tokens:
+        return list(messages), 0
+
+    remaining = budget_tokens
+    kept: list = []
+    for message in reversed(messages):
+        est = _estimate_message_tokens(message)
+        if est == 0 or est <= remaining:
+            kept.append(message)
+            remaining -= est
+            continue
+
+        # Does not fit whole.  Truncate tool outputs to the remaining budget;
+        # anything else (or no room left) stops the walk.
+        if getattr(message, "role", None) == "tool" and remaining > 0:
+            content = getattr(message, "content", "") or ""
+            if isinstance(content, str) and content:
+                from copy import deepcopy
+
+                message = deepcopy(message)
+                max_chars = max(1, int(remaining * _HISTORY_CHARS_PER_TOKEN))
+                note = _TRUNCATED_BY_BUDGET_NOTE.format(orig=len(content))
+                if len(content) + len(note) > max_chars:
+                    message.content = (
+                        content[: max(0, max_chars - len(note))] + note
+                    )
+            kept.append(message)
+        break
+
+    kept.reverse()
+    pruned = max(0, total - sum(_estimate_message_tokens(m) for m in kept))
+    return kept, pruned
+
+
 def _patch_agno_session_history_includes_paused() -> None:
     """Include ``paused`` runs in the conversation history fed to the LLM.
 
@@ -241,6 +317,23 @@ def _patch_agno_session_history_includes_paused() -> None:
         # Stub orphan tool_calls only when paused runs may be present.
         if override_default:
             messages = _stub_orphan_tool_calls(messages)
+
+        # Token-budget pruning — applies to every history fetch (fresh runs
+        # and continue-run alike).  Tool messages are truncated to fit;
+        # user/assistant messages are dropped oldest-first.
+        from src.shared.config.settings import get_settings
+
+        budget_tokens = get_settings().agent_history_max_tokens
+        if budget_tokens > 0:
+            messages, pruned_tokens = _prune_history_to_budget(
+                messages, budget_tokens
+            )
+            if pruned_tokens > 0:
+                log.info(
+                    "history_budget: session=%s pruned_tokens=%d "
+                    "kept_messages=%d",
+                    self.session_id, pruned_tokens, len(messages),
+                )
         return messages
 
     _patched_get_messages._gsage_patched = True  # type: ignore[attr-defined]
