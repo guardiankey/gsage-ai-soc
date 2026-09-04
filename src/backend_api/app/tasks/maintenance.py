@@ -4,7 +4,8 @@ Tasks
 -----
 cleanup_inactive_sessions
     Deletes Agno sessions that have been idle for more than
-    ``SESSION_IDLE_DAYS`` days.  Runs hourly via Celery Beat.
+    ``SESSION_IDLE_DAYS`` days (``-1``/``<=0`` disables pruning).
+    Runs hourly via Celery Beat.
 
 prune_es_trace_indices
     Deletes Elasticsearch trace indices older than the configured
@@ -31,23 +32,30 @@ from src.backend_api.app.celery_app import celery_app
 
 log = logging.getLogger(__name__)
 
-# Sessions idle longer than this many seconds will be purged
-_SESSION_IDLE_SECONDS = 7 * 24 * 3600  # 7 days
-
 
 @celery_app.task(name="src.backend_api.app.tasks.maintenance.cleanup_inactive_sessions")
 def cleanup_inactive_sessions() -> dict:
-    """Remove Agno sessions that have been idle for over 7 days.
+    """Remove Agno sessions idle for more than ``SESSION_IDLE_DAYS`` days.
 
-    Returns a summary dict with ``deleted`` count.
+    ``SESSION_IDLE_DAYS <= 0`` (default ``-1``) disables time-based
+    pruning entirely.  Returns a summary dict with ``deleted`` count.
     """
     import asyncio
 
     from src.backend_api.app.services.agent_factory import get_agno_db
+    from src.shared.config.settings import get_settings
+
+    idle_days = get_settings().session_idle_days
+    if idle_days <= 0:
+        log.debug(
+            "cleanup_inactive_sessions: disabled (SESSION_IDLE_DAYS=%s)",
+            idle_days,
+        )
+        return {"deleted": 0, "status": "disabled"}
 
     async def _run() -> int:
         agno_db = get_agno_db()
-        cutoff = int(time.time()) - _SESSION_IDLE_SECONDS
+        cutoff = int(time.time()) - idle_days * 24 * 3600
         # Load sessions in small pages to avoid OOM — each session's
         # JSONB ``runs`` column can be multiple MB.  Processing 50 at a
         # time keeps peak memory under ~250 MB even with large runs.

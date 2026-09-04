@@ -372,6 +372,8 @@ async def _persist_web_assistant_message(agno_session_id: str, text: str) -> Non
     try:
         import uuid
 
+        from typing import Any, cast
+
         from agno.db.base import SessionType
         from agno.models.message import Message
         from agno.run.agent import RunOutput
@@ -394,9 +396,16 @@ async def _persist_web_assistant_message(agno_session_id: str, text: str) -> Non
 
         try:
             agno_db = get_agno_db()
-            agno_session = await agno_db.get_session(
-                session_id=agno_session_id,
-                session_type=SessionType.AGENT,
+            # agno's get_session() is typed as ``Session | Dict[str, Any]``,
+            # but with session_type=AGENT it always returns an AgentSession.
+            # The union plus the invariant ``runs`` list type would reject
+            # attribute access/assignment that is valid at runtime.
+            agno_session = cast(
+                Any,
+                await agno_db.get_session(
+                    session_id=agno_session_id,
+                    session_type=SessionType.AGENT,
+                ),
             )
             if agno_session is None:
                 log.warning(
@@ -517,17 +526,31 @@ async def _async_continue_bg_task(task_id: str) -> None:
             )
             from src.backend_api.app.services.channel_sender import deliver_response
 
-            tenant_session, response_text = await continue_after_bg_task(task_id, session)
+            tenant_session, response_text, run_errored = await continue_after_bg_task(
+                task_id, session
+            )
             if response_text:
-                await deliver_response(tenant_session, response_text, session)
+                if run_errored and (tenant_session.source or "web") == "web":
+                    # channel_sender is a no-op for web (the Agno post-hook
+                    # only persists successful runs), so persist the friendly
+                    # error as a standalone COMPLETED run. The errored run
+                    # itself remains in history with its terminal-message
+                    # error badge (see chat.py list_messages).
+                    await _persist_web_assistant_message(
+                        tenant_session.agno_session_id, response_text
+                    )
+                else:
+                    await deliver_response(tenant_session, response_text, session)
 
             await publish_conversation_updated(
-                tenant_session.id, reason="bg_task_completed"
+                tenant_session.id,
+                reason="continuation_error" if run_errored else "bg_task_completed",
             )
 
             log.info(
-                "continue_after_bg_task_completed: delivered task=%s session=%s source=%s",
-                task_id, tenant_session.id, tenant_session.source,
+                "continue_after_bg_task_completed: delivered task=%s session=%s "
+                "source=%s run_errored=%s",
+                task_id, tenant_session.id, tenant_session.source, run_errored,
             )
         finally:
             try:
@@ -560,18 +583,28 @@ async def _async_continue_approval(approval_id: str, org_id: str) -> None:
             )
             from src.backend_api.app.services.channel_sender import deliver_response
 
-            tenant_session, response_text = await continue_after_approval(
+            tenant_session, response_text, run_errored = await continue_after_approval(
                 approval_id, uuid.UUID(org_id), session
             )
-            await deliver_response(tenant_session, response_text, session)
+            if response_text:
+                if run_errored and (tenant_session.source or "web") == "web":
+                    # See _async_continue_bg_task: persist the friendly error
+                    # as a standalone COMPLETED run for web sessions.
+                    await _persist_web_assistant_message(
+                        tenant_session.agno_session_id, response_text
+                    )
+                else:
+                    await deliver_response(tenant_session, response_text, session)
 
             await publish_conversation_updated(
-                tenant_session.id, reason="approval_resolved"
+                tenant_session.id,
+                reason="continuation_error" if run_errored else "approval_resolved",
             )
 
             log.info(
-                "continue_after_approval_resolved: delivered approval=%s session=%s source=%s",
-                approval_id, tenant_session.id, tenant_session.source,
+                "continue_after_approval_resolved: delivered approval=%s session=%s "
+                "source=%s run_errored=%s",
+                approval_id, tenant_session.id, tenant_session.source, run_errored,
             )
         finally:
             try:

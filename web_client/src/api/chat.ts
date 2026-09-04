@@ -51,9 +51,11 @@ export interface Message {
   attachments?: Attachment[]
   // Optional run-level status surfaced from the backend.
   // 'error' means the underlying agent run failed; the UI should render an
-  // error badge so users can see the turn ended in failure.
+  // error badge so users can see the turn ended in failure. The backend
+  // attaches it only to the terminal assistant message of the failed run.
   // 'paused' means the run is awaiting HITL approval.
-  status?: 'error' | 'paused' | null
+  // 'cancelled' means the run was cancelled (not rendered by the UI today).
+  status?: 'error' | 'paused' | 'cancelled' | null
 }
 
 export interface SendMessageResponse {

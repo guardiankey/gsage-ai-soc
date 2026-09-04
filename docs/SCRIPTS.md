@@ -211,3 +211,57 @@ sudo bash gsage-0.1.0/installer.sh
 
 See [docs-local/architecture/50-INSTALLER.md](../docs-local/architecture/50-INSTALLER.md)
 for the full installer design.
+
+---
+
+## `scripts/backfill_agno_runs.py`
+
+Restores agno 2.x chat history after an agno 3.x downgrade.
+
+While the stack ran agno 3.x, the v3.0.0 storage migration moved session runs
+out of `ai.agno_sessions.runs` into the `ai.agno_runs` table (`run_data` JSONB
+per row). agno 2.x reads runs only from the legacy `runs` column, so
+conversations whose runs live in `agno_runs` show up empty in the web client.
+
+The script ships inside the backend image (the Dockerfile copies `scripts/`
+to `/app/scripts/`, and the dev compose bind-mounts `./scripts` over it).
+
+### Workflow
+
+1. Loads every session that has rows in `ai.agno_runs`.
+2. Merges the `agno_runs` payloads back into the legacy `runs` column,
+   deduplicating by `run_id`:
+   - the legacy column keeps its stored order;
+   - on a `run_id` conflict, the newest copy is kept (more messages wins; on
+     a tie, the most final status wins; on a tie, the table copy is kept);
+   - runs that only exist in `agno_runs` are interleaved by `created_at`.
+3. Re-sorts the merged list by `created_at` so post-downgrade runs and
+   3.x-window runs end up in chronological order.
+
+### Usage
+
+```bash
+# Inside the backend container (recommended)
+docker compose exec backend python scripts/backfill_agno_runs.py --dry-run
+docker compose exec backend python scripts/backfill_agno_runs.py --apply
+
+# Or from the repo root with the project venv active
+python scripts/backfill_agno_runs.py --dry-run
+python scripts/backfill_agno_runs.py --apply
+
+# Custom schema (default: ai)
+python scripts/backfill_agno_runs.py --schema ai --apply
+```
+
+### Output
+
+The script reports the number of sessions processed, the total number of
+merged runs, how conflicts were resolved, and how many sessions changed.
+
+### Notes
+
+- Idempotent: re-running only rewrites the same merged result.
+- The `agno_runs` table is left in place as a safety backup; it is ignored by
+  agno 2.x.
+- Post-downgrade runs (written inline by agno 2.x) are preserved: they only
+  exist in the legacy column and are merged, never overwritten.

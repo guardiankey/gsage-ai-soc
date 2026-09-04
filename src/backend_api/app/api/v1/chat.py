@@ -858,9 +858,11 @@ async def list_messages(
         # Map the run status to a user-visible message status badge.
         # ``error``, ``paused``, and ``cancelled`` are surfaced so the
         # frontend can render an indicator; everything else is None.
-        # Cancelled runs are NOT skipped — they may contain valid
-        # conversation history (e.g. a run cancelled by a background-task
-        # timeout still has all the tool calls and agent reasoning).
+        # ``error`` is attached only to the terminal assistant message of
+        # the run (see below). Cancelled runs are NOT skipped — they may
+        # contain valid conversation history (e.g. a run cancelled by a
+        # background-task timeout still has all the tool calls and agent
+        # reasoning).
         status_str: Optional[str] = None
         if run_status == RunStatus.error:
             status_str = "error"
@@ -882,6 +884,14 @@ async def list_messages(
             )
             for m in run_messages
         )
+
+        # Project this run's messages into a local list first so the
+        # run-level error status can be attached to the TERMINAL assistant
+        # message only — blanket-badging every assistant message of an
+        # errored run brands normal-looking intermediate messages (e.g.
+        # tool-call summaries) as failures.
+        run_entries: list[MessageOut] = []
+        last_assistant_idx: Optional[int] = None
 
         for msg in run_messages:
             role = getattr(msg, "role", "assistant")
@@ -951,15 +961,34 @@ async def list_messages(
                     # Completely empty message — skip it
                     continue
 
-            out.append(
+            if role == "assistant":
+                last_assistant_idx = len(run_entries)
+
+            run_entries.append(
                 MessageOut(
                     id=getattr(msg, "id", None),
                     role=role,
                     content=content_str,
                     created_at=created_at,
-                    status=status_str if role == "assistant" else None,
+                    status=None,
                 )
             )
+
+        # Apply the run-level status to the projected messages. ``error``
+        # is surfaced ONLY on the terminal assistant message (or on the
+        # synthesized placeholder below) so normal-looking intermediate
+        # messages are not branded as failures. ``paused`` / ``cancelled``
+        # keep the previous behaviour (applied to every assistant message;
+        # the frontend currently renders only ``error``).
+        if status_str == "error":
+            if last_assistant_idx is not None:
+                run_entries[last_assistant_idx].status = "error"
+        elif status_str is not None:
+            for entry in run_entries:
+                if entry.role == "assistant":
+                    entry.status = status_str
+
+        out.extend(run_entries)
 
         # Synthesize a placeholder assistant message for failed runs that
         # produced no visible assistant output, so the user sees a clear

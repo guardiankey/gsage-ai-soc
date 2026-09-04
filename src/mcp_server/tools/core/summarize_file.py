@@ -9,6 +9,7 @@ Permission: ``files:read`` + ``files:write``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 import time
@@ -168,16 +169,20 @@ def _build_metadata_header(
     covered: bool,
     max_iterations: int,
     covered_chars: int = 0,
+    tool_version: str = "1.0.0",
 ) -> str:
     """Build the metadata header block (Markdown blockquote)."""
+    instr_raw = instructions.strip()
     instr_display = (
-        instructions.strip()[:100] if instructions.strip() else "(padrão)"
+        (instr_raw[:100] + "…" if len(instr_raw) > 100 else instr_raw)
+        if instr_raw
+        else "(padrão)"
     )
     ratio = (summary_size_chars / source_size_chars * 100) if source_size_chars else 0
     timestamp = datetime.now(timezone.utc).isoformat()
 
     lines = [
-        "> **Resumo gerado por IA** — `summarize_file` v1.2.0",
+        f"> **Resumo gerado por IA** — `summarize_file` v{tool_version}",
         f"> **Documento original:** `{source_filename}` (`{source_file_id}`)",
         f"> **Data da sumarização:** `{timestamp}`",
         f"> **Tamanho original:** `{source_size_chars}` caracteres",
@@ -418,7 +423,7 @@ class SummarizeFileTool(BaseTool):
     """
 
     name: ClassVar[str] = "summarize_file"
-    version: ClassVar[str] = "1.2.0"
+    version: ClassVar[str] = "1.2.1"
     summary: ClassVar[str] = (
         "Summarize a large Markdown or plain-text file using an LLM "
         "incrementally. Runs in background; result is injected into the "
@@ -600,14 +605,28 @@ class SummarizeFileTool(BaseTool):
         pos: int,
         iteration: int,
         chunk_size: int,
+        *,
+        file_id: str,
+        org_id: str,
+        content_hash: str,
     ) -> None:
-        """Save checkpoint state for resume-after-crash."""
+        """Save checkpoint state for resume-after-crash.
+
+        The checkpoint carries the identity of the source document
+        (``file_id`` + ``content_hash``) and the tenant (``org_id``) so a
+        later execution can verify it is resuming the SAME run.  Without
+        these checks a stale checkpoint leaks a previous document's
+        accumulated summary into a new, unrelated summarization request.
+        """
         # Checkpoint is stored in memory for the current execution.
         # If the Celery worker dies, the task is re-enqueued (acks_late=True)
         # and the next run loads from the persisted GSageBackgroundTask row.
         # We store minimal state in instance variables for the
         # _dispatch_background mechanism to serialize.
         self._checkpoint = {
+            "file_id": file_id,
+            "org_id": org_id,
+            "content_hash": content_hash,
             "accumulated": accumulated,
             "position": pos,
             "iteration": iteration,
@@ -670,6 +689,7 @@ class SummarizeFileTool(BaseTool):
 
         content = data.decode("utf-8", errors="replace")
         total_chars = len(content)
+        content_hash = hashlib.md5(data).hexdigest()
 
         # ── Resolve config ─────────────────────────────────────────────
         chunk_chars = int(config.get("chunk_token_target", 12000) * _CHARS_PER_TOKEN)
@@ -711,8 +731,42 @@ class SummarizeFileTool(BaseTool):
                 pass
 
         # ── Check for checkpoint resume ────────────────────────────────
+        # The tool instance is a registry singleton AND the state dict is
+        # persisted per (org, tool) in gsage_tool_state.  A checkpoint is
+        # only valid when it belongs to the SAME file, organization and
+        # content — otherwise the accumulated summary of a previous run
+        # would leak into this one.
         checkpoint = getattr(self, "_checkpoint", None) or state.get("_checkpoint")
-        if checkpoint and checkpoint.get("position", 0) > 0:
+        resume_ok = False
+        if isinstance(checkpoint, dict) and checkpoint.get("position", 0) > 0:
+            resume_ok = (
+                checkpoint.get("file_id") == file_id
+                and checkpoint.get("org_id") == str(agent_context.org_id)
+                and checkpoint.get("content_hash") == content_hash
+                and 0 < checkpoint.get("position", 0) < total_chars
+                and isinstance(checkpoint.get("accumulated"), str)
+                and bool(checkpoint["accumulated"].strip())
+            )
+            if not resume_ok:
+                log.warning(
+                    "summarize_file: discarding stale checkpoint "
+                    "(ckpt_file_id=%s ckpt_org=%s ckpt_pos=%s ckpt_hash=%s) "
+                    "— does not match file_id=%s org=%s hash=%s len=%d",
+                    checkpoint.get("file_id"),
+                    checkpoint.get("org_id"),
+                    checkpoint.get("position"),
+                    (
+                        checkpoint.get("content_hash", "")[:8]
+                        if checkpoint.get("content_hash")
+                        else "-"
+                    ),
+                    file_id,
+                    agent_context.org_id,
+                    content_hash[:8],
+                    total_chars,
+                )
+
+        if resume_ok:
             accumulated = checkpoint["accumulated"]
             pos = checkpoint["position"]
             iteration = checkpoint["iteration"]
@@ -720,14 +774,18 @@ class SummarizeFileTool(BaseTool):
             checkpoint_was_resumed = True
             log.info(
                 "summarize_file: resuming from checkpoint — "
-                "pos=%d iteration=%d chunk=%d",
-                pos, iteration, chunk_chars,
+                "file_id=%s pos=%d iteration=%d chunk=%d",
+                file_id, pos, iteration, chunk_chars,
             )
         else:
             accumulated = ""
             pos = 0
             iteration = 0
             checkpoint_was_resumed = False
+            # Clear the stale checkpoint so it is not persisted again and
+            # does not contaminate future runs.
+            self._checkpoint = None
+            state["_checkpoint"] = None
 
         auto_reductions = 0
         search_window = int(chunk_chars * 0.1)  # 10% for smart cut
@@ -775,9 +833,15 @@ class SummarizeFileTool(BaseTool):
                         # resume.
                         if time.monotonic() > deadline:
                             await self._save_checkpoint(
-                                accumulated, pos, iteration, chunk_chars
+                                accumulated, pos, iteration, chunk_chars,
+                                file_id=file_id,
+                                org_id=str(agent_context.org_id),
+                                content_hash=content_hash,
                             )
                             state["_checkpoint"] = {
+                                "file_id": file_id,
+                                "org_id": str(agent_context.org_id),
+                                "content_hash": content_hash,
                                 "accumulated": accumulated,
                                 "position": pos,
                                 "iteration": iteration,
@@ -881,7 +945,10 @@ class SummarizeFileTool(BaseTool):
                 # Checkpoint
                 if checkpoint_every > 0 and iteration % checkpoint_every == 0:
                     await self._save_checkpoint(
-                        accumulated, pos, iteration, chunk_chars
+                        accumulated, pos, iteration, chunk_chars,
+                        file_id=file_id,
+                        org_id=str(agent_context.org_id),
+                        content_hash=content_hash,
                     )
                     log.debug(
                         "summarize_file: checkpoint saved at iteration %d",
@@ -892,9 +959,15 @@ class SummarizeFileTool(BaseTool):
             # Hard timeout from the background worker — save checkpoint
             # so the next run can resume from this point.
             await self._save_checkpoint(
-                accumulated, pos, iteration, chunk_chars
+                accumulated, pos, iteration, chunk_chars,
+                file_id=file_id,
+                org_id=str(agent_context.org_id),
+                content_hash=content_hash,
             )
             state["_checkpoint"] = {
+                "file_id": file_id,
+                "org_id": str(agent_context.org_id),
+                "content_hash": content_hash,
                 "accumulated": accumulated,
                 "position": pos,
                 "iteration": iteration,
@@ -908,6 +981,13 @@ class SummarizeFileTool(BaseTool):
                 f"Progress saved. Retry the tool to resume from this point.",
                 retryable=True,
             )
+
+        # ── Full coverage: clear the checkpoint so the next run starts ──
+        # fresh (a leftover checkpoint would otherwise leak this file's
+        # summary into a future, unrelated summarization).
+        if pos >= total_chars:
+            self._checkpoint = None
+            state["_checkpoint"] = None
 
         # ── Build output ───────────────────────────────────────────────
         summary_chars = len(accumulated)
@@ -932,6 +1012,7 @@ class SummarizeFileTool(BaseTool):
             covered=(pos >= total_chars),
             max_iterations=max_iter,
             covered_chars=pos,
+            tool_version=self.version,
         )
         final_content = header + accumulated
 

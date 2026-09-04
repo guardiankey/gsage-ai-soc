@@ -228,6 +228,11 @@ class Settings(BaseSettings):
     # large tool outputs (e.g. bulk Zabbix data) from flooding the context window.
     # 0 = no limit (not recommended for models with small context windows).
     agent_tool_output_max_chars: int = 40000
+    # Idle-time retention for Agno chat sessions, in days.  Sessions whose
+    # updated_at is older than this are deleted by the hourly
+    # ``cleanup_inactive_sessions`` Celery task.  ``-1`` (default) or any
+    # value <= 0 disables time-based pruning entirely.
+    session_idle_days: int = -1
 
     # ── Knowledge base auto-injection (per-turn preamble) ───────────────────
     # When enabled, every chat turn prepends a short ``<kb_hints>`` block to

@@ -7,8 +7,10 @@ Provides two async entry points that can be called from Celery tasks:
 * ``continue_after_approval(approval_id, db)`` — resume a paused run after
   an approval is resolved (approved or rejected).
 
-Both functions return ``(session, response_text)`` so the caller (Celery task)
-can dispatch delivery via :mod:`channel_sender`.
+Both functions return ``(session, response_text, run_errored)`` so the
+caller (Celery task) can dispatch delivery via :mod:`channel_sender` —
+``run_errored=True`` signals the agent run ended with ``RunStatus.error``
+and ``response_text`` is the friendly fallback to show the user.
 """
 
 from __future__ import annotations
@@ -225,11 +227,15 @@ async def _safe_mcp_cleanup(agent) -> None:
 async def continue_after_bg_task(
     task_id: str,
     db: AsyncSession,
-) -> tuple[GSageTenantSession, str]:
+) -> tuple[GSageTenantSession, str, bool]:
     """Re-run the agent after a background tool has completed.
 
     Returns:
-        (session, response_text) — caller is responsible for delivery.
+        ``(session, response_text, run_errored)`` — caller is responsible
+        for delivery. ``run_errored`` is True when the agent run ended with
+        ``RunStatus.error`` and *response_text* is the friendly fallback
+        message (the errored run itself stays persisted in the Agno
+        session).
 
     Raises:
         ValueError: if the task or session is not found.
@@ -332,7 +338,7 @@ async def continue_after_bg_task(
                 "consumed by a concurrent continuation; skipping agent run",
                 task_id, tenant_session.id,
             )
-            return tenant_session, ""
+            return tenant_session, "", False
 
         bg_block = build_bg_context_block(pending_bg_tasks)
         # The bg_block already contains [BACKGROUND_TASKS_COMPLETED]...[/…] tags.
@@ -360,17 +366,27 @@ async def continue_after_bg_task(
 
     # Agno swallows provider errors and returns RunOutput with status=RunStatus.error.
     # The error run is already persisted in the Agno session, so the chat history
-    # will surface it via list_messages() (see chat.py). We only re-raise on
-    # transient errors so the Celery task can retry; for non-transient errors
-    # we return a friendly message so the user sees clear feedback.
+    # will surface it via list_messages() (see chat.py). We re-raise on transient
+    # errors so the Celery task can retry; for non-transient errors we return a
+    # friendly message (with run_errored=True) so the caller shows clear feedback.
     from agno.run import RunStatus
     if getattr(run_output, "status", None) == RunStatus.error:
         err_content = str(getattr(run_output, "content", "") or "")
         log.error(
-            "continue_after_bg_task: agent run failed — task=%s error=%s",
-            task_id, err_content,
+            "continue_after_bg_task: agent run failed — task=%s run_id=%s error=%s",
+            task_id, getattr(run_output, "run_id", None), err_content,
         )
-        # Mark notified so we don't loop forever on the same bg result
+
+        # Transient: re-raise for Celery retry. Do NOT mark the pending
+        # notifications as notified here — the retry needs them to rebuild
+        # the context block, and marking them now would make the retry hit
+        # ResultsAlreadyConsumed and silently drop the summary.
+        if _is_transient_continuation_error(err_content):
+            raise RuntimeError(f"Agent run failed (transient): {err_content}")
+
+        # Non-transient: mark notified so we don't loop forever on the same
+        # bg result, and return the synthesized response so the caller
+        # delivers it to the user.
         try:
             await mark_bg_tasks_notified([t.id for t in pending_bg_tasks], db)
             await db.commit()
@@ -380,18 +396,13 @@ async def continue_after_bg_task(
                 exc,
             )
 
-        if _is_transient_continuation_error(err_content):
-            # Surface as exception so Celery retries.
-            raise RuntimeError(f"Agent run failed (transient): {err_content}")
-
-        # Non-transient: return synthesized response so caller delivers it.
         friendly = (
             "I could not finish processing the background task results due to "
             "a problem with the LLM provider. Please try again."
         )
         if err_content:
             friendly = f"{friendly}\n\n_Details: {err_content}_"
-        return tenant_session, friendly
+        return tenant_session, friendly, True
 
     # Mark notified — commit immediately (no enclosing session.begin() here)
     await mark_bg_tasks_notified([t.id for t in pending_bg_tasks], db)
@@ -433,7 +444,7 @@ async def continue_after_bg_task(
         "continue_after_bg_task: task=%s session=%s response_len=%d",
         task_id, tenant_session.id, len(response_text),
     )
-    return tenant_session, response_text
+    return tenant_session, response_text, False
 
 
 # ---------------------------------------------------------------------------
@@ -566,11 +577,13 @@ async def continue_after_approval(
     approval_id: str,
     org_id: uuid.UUID,
     db: AsyncSession,
-) -> tuple[GSageTenantSession, str]:
+) -> tuple[GSageTenantSession, str, bool]:
     """Resume a paused agent run after approval resolution.
 
     Returns:
-        (session, response_text) — caller is responsible for delivery.
+        ``(session, response_text, run_errored)`` — caller is responsible
+        for delivery. ``run_errored`` is True when the resumed run failed
+        and *response_text* is the friendly fallback message.
 
     Raises:
         ValueError: if the approval, delegation, or session is not found.
@@ -716,15 +729,15 @@ async def continue_after_approval(
         )
         if err_text:
             friendly = f"{friendly}\n\n_Details: {err_text}_"
-        return tenant_session, friendly
+        return tenant_session, friendly, True
 
     # Handle Agno's swallowed-error path (RunStatus.error returned).
     from agno.run import RunStatus
     if getattr(run_output, "status", None) == RunStatus.error:
         err_content = str(getattr(run_output, "content", "") or "")
         log.error(
-            "continue_after_approval: agent run failed approval=%s error=%s",
-            approval_id, err_content,
+            "continue_after_approval: agent run failed approval=%s run_id=%s error=%s",
+            approval_id, getattr(run_output, "run_id", None), err_content,
         )
         if _is_transient_continuation_error(err_content):
             raise RuntimeError(f"Agent run failed (transient): {err_content}")
@@ -734,7 +747,7 @@ async def continue_after_approval(
         )
         if err_content:
             friendly = f"{friendly}\n\n_Details: {err_content}_"
-        return tenant_session, friendly
+        return tenant_session, friendly, True
 
     response_text = _extract_text(getattr(run_output, "content", None))
 
@@ -929,7 +942,7 @@ async def continue_after_approval(
         "continue_after_approval: approval=%s session=%s response_len=%d",
         approval_id, tenant_session.id, len(response_text),
     )
-    return tenant_session, response_text
+    return tenant_session, response_text, False
 
 
 # ---------------------------------------------------------------------------

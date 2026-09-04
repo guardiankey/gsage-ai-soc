@@ -32,7 +32,11 @@ uvicorn[standard]>=0.29,<1
 gunicorn>=22.0,<23
 requests>=2.31,<3
 weaviate-client>=4.6,<5
-agno>=0.1
+# agno 3.0.6 imports `MCPError` from `mcp.shared.exceptions`, a name that only
+# exists in mcp>=2 (the project pins mcp<2, where it is `McpError`), so the
+# backend fails to boot with that pair.  Stay on the 2.x line (2.5.17 was the
+# last known-good version used with mcp 1.x) until agno ships a fix.
+agno>=2.5.17,<3
 markitdown[docx,pptx,xlsx,pdf]>=0.1,<1
 striprtf>=0.0.1,<1
 pdfplumber>=0.11,<1        # PDF text extraction for OCR detection (transitive via markitdown[pdf]; explicit for direct use)

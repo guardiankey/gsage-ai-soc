@@ -147,8 +147,11 @@ class MessageOut(BaseModel):
     attachments: Optional[list[dict]] = None
     # Status of the underlying run when projecting from Agno history.
     # ``None`` means "no special status" (default — completed or unknown).
-    # ``"error"`` indicates the run failed; the frontend should render this
-    # message with an error badge so users understand what happened.
+    # ``"error"`` indicates the run failed. It is attached ONLY to the
+    # terminal assistant message of the run (or to the synthesized
+    # placeholder when the run produced no visible assistant output) so
+    # the frontend error badge does not brand normal-looking intermediate
+    # messages (e.g. tool-call summaries) as failures.
     # ``"paused"`` indicates the run is awaiting HITL approval.
     status: Optional[str] = None
 

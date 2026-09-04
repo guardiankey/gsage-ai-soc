@@ -82,7 +82,7 @@ The variables below are derived automatically from each tool's `config_schema`. 
 
 | Tool | Version | Rate limit/min | Timeout (s) | Circuit breaker | Background | Multi-config |
 | --- | --- | ---: | ---: | :---: | :---: | :---: |
-| `summarize_file` | `1.2.0` | 10 | 900 | — | always | — |
+| `summarize_file` | `1.2.1` | 10 | 900 | — | always | — |
 
 ## Source files
 
