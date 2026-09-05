@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
@@ -138,19 +139,42 @@ def _patch_agno_unknown_tool_message() -> None:
 
 
 # ── Conversation history token budget ──────────────────────────────────────
-# Conservative chars-per-token divisor used to estimate prompt size.  The
-# deployed models (DeepSeek/Qwen family) have no matching tiktoken encoding;
-# chars/3.5 overestimates for EN/PT, keeping the real prompt safely under
-# budget.
-_HISTORY_CHARS_PER_TOKEN = 3.5
+# Token estimator for the history budget.  Primary: tiktoken cl100k_base
+# (close to the deployed DeepSeek/Qwen tokenizers; handles token-dense
+# content like JSON, UUIDs and base64) scaled by a safety factor.  Fallback:
+# conservative chars/2.5 divisor when tiktoken is unavailable.  The estimate
+# must be >= the real token count so the budget acts as a hard ceiling for
+# the request size.
+_HISTORY_CHARS_PER_TOKEN = 2.5
+_TOKEN_ESTIMATE_SAFETY_FACTOR = 1.15
 
 _TRUNCATED_BY_BUDGET_NOTE = (
     "\n\n[OUTPUT TRUNCATED BY HISTORY BUDGET — original was {orig} chars]"
 )
 
+_tiktoken_encoding: Any = None  # lazy-loaded cl100k_base; False when unavailable
+
+
+def _get_tiktoken_encoding() -> Any:
+    """Lazy-load the cl100k_base tokenizer (cached; None when unavailable)."""
+    global _tiktoken_encoding
+    if _tiktoken_encoding is None:
+        try:
+            import tiktoken
+
+            _tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            _tiktoken_encoding = False
+    return _tiktoken_encoding or None
+
 
 def _estimate_message_tokens(message: Any) -> int:
-    """Conservative token estimate for a single message."""
+    """Conservative token estimate for a single message.
+
+    Uses cl100k_base × 1.15 when tiktoken is available (close to the
+    deployed DeepSeek/Qwen tokenizers, including dense JSON/base64); falls
+    back to ``chars / 2.5`` otherwise.  Always >= the real token count.
+    """
     text = ""
     try:
         text = message.get_content_string()
@@ -158,6 +182,14 @@ def _estimate_message_tokens(message: Any) -> int:
         text = str(getattr(message, "content", "") or "")
     if not text:
         return 0
+
+    encoding = _get_tiktoken_encoding()
+    if encoding is not None:
+        try:
+            exact = len(encoding.encode(text))
+            return max(1, int(exact * _TOKEN_ESTIMATE_SAFETY_FACTOR) + 1)
+        except Exception:
+            pass
     return max(1, int(len(text) / _HISTORY_CHARS_PER_TOKEN) + 1)
 
 
@@ -169,9 +201,12 @@ def _prune_history_to_budget(
     Walks newest → oldest and keeps every message that fits whole.  A tool
     message that does not fit is deep-copied, truncated to the remaining
     budget and kept; user/assistant messages that do not fit are dropped
-    together with all older messages (their text is never split).  Tool-call
-    pairing stays valid because pruning only removes from the front of the
-    list (tool replies are newer than the assistant call that produced them).
+    together with all older messages (their text is never split).
+
+    NOTE: when the first non-fitting message is an assistant message that
+    issued tool calls, its newer ``tool`` replies were already kept, so the
+    returned list can start with orphan ``tool`` messages.  Callers must
+    run :func:`_sanitize_tool_ordering` afterwards.
 
     Returns ``(pruned_messages, pruned_tokens)``.
     """
@@ -213,6 +248,192 @@ def _prune_history_to_budget(
     return kept, pruned
 
 
+# ── Reactive context fallback ──────────────────────────────────────────────
+# When the provider rejects a request for exceeding the model context length,
+# these helpers shrink the context for the NEXT attempt: ``num_history_runs``
+# is halved (agno reads it at run time) and the history token budget is
+# halved via a task-local override read by ``_patched_get_messages``.
+
+_CONTEXT_LENGTH_MARKERS = (
+    "maximum context length",
+    "context length",
+    "requested token count",
+    "too many tokens",
+    "reduce the length",
+    "maximum sequence length",
+    "context window",
+)
+
+_HISTORY_BUDGET_OVERRIDE: ContextVar[Optional[int]] = ContextVar(
+    "gsage_history_budget_override", default=None
+)
+
+
+def _is_context_length_error(text: str) -> bool:
+    """Return True when *text* indicates the model context window overflowed."""
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in _CONTEXT_LENGTH_MARKERS)
+
+
+def reduce_agent_context(agent: Any) -> None:
+    """Halve the context used by the agent's next run (reactive fallback).
+
+    Called after a provider context-length rejection.  Mutates the ephemeral
+    agent instance (``num_history_runs``) and sets a task-local budget
+    override that ``_patched_get_messages`` honours for the retried run.
+    """
+    current_runs = getattr(agent, "num_history_runs", None)
+    if current_runs is not None and current_runs > 1:
+        agent.num_history_runs = max(1, current_runs // 2)
+
+    override = _HISTORY_BUDGET_OVERRIDE.get()
+    if override is None:
+        override = get_settings().agent_history_max_tokens
+    if override and override > 0:
+        _HISTORY_BUDGET_OVERRIDE.set(max(4096, override // 2))
+
+
+def _run_is_context_length_error(run_output: Any) -> bool:
+    """True when an Agno RunOutput ended in error due to context length."""
+    from agno.run import RunStatus
+
+    if getattr(run_output, "status", None) != RunStatus.error:
+        return False
+    return _is_context_length_error(str(getattr(run_output, "content", "") or ""))
+
+
+async def run_agent_with_context_fallback(
+    agent: Any,
+    run_factory,
+    *,
+    max_reductions: int = 2,
+):
+    """Run ``run_factory()`` and retry with reduced context on overflow.
+
+    ``run_factory`` is a zero-arg callable returning a fresh awaitable each
+    call (coroutines cannot be awaited twice).  When the returned RunOutput
+    reports a context-length error, :func:`reduce_agent_context` is applied
+    and the factory is invoked again, up to ``max_reductions`` times.
+
+    Returns the last RunOutput (or the first non-error one).
+    """
+    result = await run_factory()
+    reductions = 0
+    while reductions < max_reductions and _run_is_context_length_error(result):
+        reductions += 1
+        reduce_agent_context(agent)
+        log.warning(
+            "context_reduce: session=%s reduction=%d/%d",
+            getattr(agent, "session_id", "unknown"),
+            reductions,
+            max_reductions,
+        )
+        result = await run_factory()
+    return result
+
+
+def _stub_orphan_tool_calls(messages: list) -> list:
+    """Inject synthetic ``tool`` messages for any ``tool_call`` that has
+    no matching response further down the list.
+
+    Without this, when a paused (HITL) run enters the history its
+    assistant message carrying ``tool_calls`` reaches the LLM with no
+    corresponding ``tool`` reply, and OpenAI rejects the request with
+    ``invalid_request_error: insufficient tool messages following
+    tool_calls message``.
+
+    We collect every ``tool_call_id`` that already has a matching
+    ``tool`` message in the list (regardless of position — agno keeps
+    them in order) and, for every assistant message with unanswered
+    tool_calls, append synthetic stubs immediately after it.
+    """
+    from agno.models.message import Message
+
+    if not messages:
+        return messages
+    answered_ids = {
+        m.tool_call_id
+        for m in messages
+        if m.role == "tool" and m.tool_call_id
+    }
+    result = []
+    for msg in messages:
+        result.append(msg)
+        if msg.role != "assistant" or not msg.tool_calls:
+            continue
+        for tc in msg.tool_calls:
+            tc_id = tc.get("id") if isinstance(tc, dict) else None
+            if not tc_id or tc_id in answered_ids:
+                continue
+            fn = (
+                tc.get("function", {}).get("name")
+                if isinstance(tc, dict)
+                else None
+            ) or "unknown_tool"
+            stub = Message(
+                role="tool",
+                tool_call_id=tc_id,
+                tool_name=fn,
+                content=(
+                    "[pending] This tool call has not been executed yet "
+                    "(awaiting human approval or background task "
+                    "completion). Do not retry it; the system will "
+                    "report the result automatically once it is "
+                    "resolved."
+                ),
+                from_history=getattr(msg, "from_history", False),
+            )
+            answered_ids.add(tc_id)
+            result.append(stub)
+    return result
+
+
+def _sanitize_tool_ordering(messages: list) -> list:
+    """Drop orphan ``tool`` messages whose ``tool_call_id`` has no preceding
+    assistant ``tool_calls`` in the list.
+
+    History pruning (``_prune_history_to_budget``) can drop the assistant
+    message that issued a tool call while keeping its newer ``tool`` reply,
+    and merged paused runs can surface fragments whose first message is a
+    tool reply.  Such orphans land right after the system message and
+    providers (vLLM serving DeepSeek V3.2-class models, Azure serverless)
+    reject the request with ``Invalid messages at 1``.
+
+    Walks the list once, tracking every ``tool_call_id`` declared by
+    assistant messages; drops any ``tool`` message whose id was never
+    declared.  Synthetic stubs created by :func:`_stub_orphan_tool_calls`
+    always follow their assistant message and therefore survive.
+    """
+    if not messages:
+        return messages
+    declared_ids: set = set()
+    sanitized: list = []
+    dropped = 0
+    for msg in messages:
+        role = getattr(msg, "role", None)
+        if role == "assistant":
+            for tc in getattr(msg, "tool_calls", None) or []:
+                if isinstance(tc, dict) and tc.get("id"):
+                    declared_ids.add(tc["id"])
+            sanitized.append(msg)
+            continue
+        if role == "tool":
+            tool_call_id = getattr(msg, "tool_call_id", None)
+            if tool_call_id and tool_call_id in declared_ids:
+                sanitized.append(msg)
+            else:
+                dropped += 1
+            continue
+        sanitized.append(msg)
+    if dropped:
+        log.warning(
+            "history_sanitize: dropped %d orphan tool message(s) with no "
+            "preceding assistant tool_calls",
+            dropped,
+        )
+    return sanitized
+
+
 def _patch_agno_session_history_includes_paused() -> None:
     """Include ``paused`` runs in the conversation history fed to the LLM.
 
@@ -228,7 +449,6 @@ def _patch_agno_session_history_includes_paused() -> None:
     We narrow the default to ``[cancelled, error]`` only.  ``paused`` runs
     carry valid user/assistant/tool messages that the LLM SHOULD see.
     """
-    from agno.models.message import Message
     from agno.run.base import RunStatus
     from agno.session.agent import AgentSession
 
@@ -236,59 +456,6 @@ def _patch_agno_session_history_includes_paused() -> None:
         return
 
     _orig_get_messages = AgentSession.get_messages
-
-    def _stub_orphan_tool_calls(messages):  # type: ignore[no-untyped-def]
-        """Inject synthetic ``tool`` messages for any ``tool_call`` that has
-        no matching response further down the list.
-
-        Without this, when a paused (HITL) run enters the history its
-        assistant message carrying ``tool_calls`` reaches the LLM with no
-        corresponding ``tool`` reply, and OpenAI rejects the request with
-        ``invalid_request_error: insufficient tool messages following
-        tool_calls message``.
-
-        We collect every ``tool_call_id`` that already has a matching
-        ``tool`` message in the list (regardless of position — agno keeps
-        them in order) and, for every assistant message with unanswered
-        tool_calls, append synthetic stubs immediately after it.
-        """
-        if not messages:
-            return messages
-        answered_ids = {
-            m.tool_call_id
-            for m in messages
-            if m.role == "tool" and m.tool_call_id
-        }
-        result = []
-        for msg in messages:
-            result.append(msg)
-            if msg.role != "assistant" or not msg.tool_calls:
-                continue
-            for tc in msg.tool_calls:
-                tc_id = tc.get("id") if isinstance(tc, dict) else None
-                if not tc_id or tc_id in answered_ids:
-                    continue
-                fn = (
-                    tc.get("function", {}).get("name")
-                    if isinstance(tc, dict)
-                    else None
-                ) or "unknown_tool"
-                stub = Message(
-                    role="tool",
-                    tool_call_id=tc_id,
-                    tool_name=fn,
-                    content=(
-                        "[pending] This tool call has not been executed yet "
-                        "(awaiting human approval or background task "
-                        "completion). Do not retry it; the system will "
-                        "report the result automatically once it is "
-                        "resolved."
-                    ),
-                    from_history=getattr(msg, "from_history", False),
-                )
-                answered_ids.add(tc_id)
-                result.append(stub)
-        return result
 
     def _patched_get_messages(  # type: ignore[no-untyped-def]
         self,
@@ -314,26 +481,51 @@ def _patch_agno_session_history_includes_paused() -> None:
             skip_statuses=skip_statuses,
             skip_history_messages=skip_history_messages,
         )
+        # agno 2.9+ persists the system message inside every run's messages
+        # (add_to_agent_memory defaults to True).  Replaying it from history
+        # puts a second "system" message after the run's own system message
+        # and providers (DeepSeek/Azure serverless) reject the request with
+        # "Invalid messages at 1".  History must never carry system messages.
+        messages = [
+            m for m in messages if getattr(m, "role", None) != "system"
+        ]
         # Stub orphan tool_calls only when paused runs may be present.
         if override_default:
             messages = _stub_orphan_tool_calls(messages)
 
         # Token-budget pruning — applies to every history fetch (fresh runs
-        # and continue-run alike).  Tool messages are truncated to fit;
-        # user/assistant messages are dropped oldest-first.
+        # and continue-run alike).  A runtime override (set by
+        # ``reduce_agent_context``) wins over the global setting so the
+        # reactive context fallback can shrink the budget per-retry.
         from src.shared.config.settings import get_settings
 
-        budget_tokens = get_settings().agent_history_max_tokens
+        budget_tokens = _HISTORY_BUDGET_OVERRIDE.get()
+        if budget_tokens is None:
+            budget_tokens = get_settings().agent_history_max_tokens
+
+        est_tokens = sum(_estimate_message_tokens(m) for m in messages)
+        pruned_tokens = 0
         if budget_tokens > 0:
             messages, pruned_tokens = _prune_history_to_budget(
                 messages, budget_tokens
             )
-            if pruned_tokens > 0:
-                log.info(
-                    "history_budget: session=%s pruned_tokens=%d "
-                    "kept_messages=%d",
-                    self.session_id, pruned_tokens, len(messages),
-                )
+        # Final ordering guard: pruning or paused-run merging can leave
+        # orphan ``tool`` messages at the head of the list, which providers
+        # (vLLM/DeepSeek, Azure serverless) reject with
+        # "Invalid messages at 1".  Applies to every fetch — fresh runs and
+        # continue-run alike.
+        messages = _sanitize_tool_ordering(messages)
+        log.debug(
+            "history_budget: session=%s est_tokens=%d budget=%d "
+            "messages=%d pruned=%d",
+            self.session_id, est_tokens, budget_tokens,
+            len(messages), pruned_tokens,
+        )
+        if pruned_tokens > 0:
+            log.info(
+                "history_budget: session=%s pruned_tokens=%d kept_messages=%d",
+                self.session_id, pruned_tokens, len(messages),
+            )
         return messages
 
     _patched_get_messages._gsage_patched = True  # type: ignore[attr-defined]
@@ -434,6 +626,15 @@ def _patch_agno_continue_run_messages_dedup() -> None:
             if msg is not system_message:
                 run_messages.messages.append(msg)
 
+        # Final safety net: the combined list (system + history + input) must
+        # have no orphan ``tool`` messages and every assistant ``tool_call``
+        # must keep a matching ``tool`` reply, regardless of which run
+        # supplied each part.  Stub first so genuinely pending calls stay
+        # valid, then sanitize.
+        run_messages.messages = _sanitize_tool_ordering(
+            _stub_orphan_tool_calls(list(run_messages.messages))
+        )
+
         if run_context is not None:
             run_context.messages = run_messages.messages
 
@@ -444,9 +645,56 @@ def _patch_agno_continue_run_messages_dedup() -> None:
     log.info("agno patch installed: continue_run history dedup")
 
 
+def _patch_agno_system_message_not_persisted() -> None:
+    """Stop agno 2.9 from persisting the system message inside every run.
+
+    agno 2.9's run persisters keep any message with ``add_to_agent_memory``
+    (default True) in ``run_response.messages`` — including the system
+    message.  Replayed history then carries a second ``system`` message and
+    providers (DeepSeek/Azure serverless) reject the request with
+    ``Invalid messages at 1``.  Patch ``get_run_messages``/
+    ``aget_run_messages`` to flag the system message as not-to-persist so
+    runs store only the actual conversation.
+    """
+    from agno.agent import _messages as _agno_messages
+
+    _orig_sync = _agno_messages.get_run_messages
+    if not getattr(_orig_sync, "_gsage_no_system_persist", False):
+
+        def _patched_get_run_messages(*args: Any, **kwargs: Any) -> Any:
+            run_messages = _orig_sync(*args, **kwargs)
+            if (
+                run_messages is not None
+                and run_messages.system_message is not None
+            ):
+                run_messages.system_message.add_to_agent_memory = False
+            return run_messages
+
+        _patched_get_run_messages._gsage_no_system_persist = True  # type: ignore[attr-defined]
+        _agno_messages.get_run_messages = _patched_get_run_messages  # type: ignore[assignment]
+        log.info("agno patch installed: system message not persisted (get_run_messages)")
+
+    _orig_async = _agno_messages.aget_run_messages
+    if not getattr(_orig_async, "_gsage_no_system_persist", False):
+
+        async def _patched_aget_run_messages(*args: Any, **kwargs: Any) -> Any:
+            run_messages = await _orig_async(*args, **kwargs)
+            if (
+                run_messages is not None
+                and run_messages.system_message is not None
+            ):
+                run_messages.system_message.add_to_agent_memory = False
+            return run_messages
+
+        _patched_aget_run_messages._gsage_no_system_persist = True  # type: ignore[attr-defined]
+        _agno_messages.aget_run_messages = _patched_aget_run_messages  # type: ignore[assignment]
+        log.info("agno patch installed: system message not persisted (aget_run_messages)")
+
+
 _patch_agno_unknown_tool_message()
 _patch_agno_session_history_includes_paused()
 _patch_agno_continue_run_messages_dedup()
+_patch_agno_system_message_not_persisted()
 
 
 # ---------------------------------------------------------------------------
@@ -667,9 +915,15 @@ References & citations:
   them with ``[N]``.
 
 # Files
-- Generated files (``files`` in tool result data): render each as
-  ``[filename](download_path)`` using the EXACT ``download_path``.  Never
+- Generated files: tool results may carry a ``file`` object or ``files``/
+  ``artifacts``/``generated_file``/``csv_file``/``json_file`` entries;
+  background-task blocks carry them under ``result_meta``.  Each entry has
+  a real ``download_path`` value.  Render as ``[filename](download_path)``
+  using the EXACT ``download_path`` value from the tool result.  Never
   expose raw storage paths.
+- NEVER emit the literal placeholder ``download_path``.  If a file entry
+  has no real ``download_path`` value, list the filename as plain text
+  without a link.
 - Attached files (``[ATTACHED_FILES]`` block, internal context): never
   mention the block name or quote its syntax.  Each entry has a relative
   ``download`` path (e.g. ``/v1/orgs/<uuid>/files/<uuid>/download``); when
@@ -1150,6 +1404,38 @@ def _build_model(org: Optional["GSageOrganization"] = None):
 # ---------------------------------------------------------------------------
 
 
+# Top-level keys re-emitted uncut after tool-output truncation, so the agent
+# never loses references to downloadable artifacts when the payload is large.
+# Mirrors ``_BG_RESULT_PRESERVE_KEYS`` in the background-task service.
+_TOOL_OUTPUT_PRESERVE_KEYS = (
+    "file",
+    "files",
+    "artifacts",
+    "generated_file",
+    "csv_file",
+    "json_file",
+)
+
+
+def _extract_preserved_file_meta(raw_content: str) -> dict:
+    """Best-effort extraction of file-related keys from a tool result JSON.
+
+    Returns ``{key: value}`` for each key in :data:`_TOOL_OUTPUT_PRESERVE_KEYS`
+    present at the top level of ``data`` (or of the whole payload when there
+    is no ``data`` wrapper).  Returns ``{}`` when *raw_content* is not JSON.
+    """
+    try:
+        parsed = json.loads(raw_content)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    data = parsed.get("data")
+    if not isinstance(data, dict):
+        data = parsed
+    return {key: data[key] for key in _TOOL_OUTPUT_PRESERVE_KEYS if key in data}
+
+
 class ApprovalAwareMCPTools(MCPTools):
     """MCPTools subclass that auto-detects ``requires_approval`` from MCP
     tool metadata and marks the corresponding Agno Functions for HITL
@@ -1518,13 +1804,24 @@ class ApprovalAwareMCPTools(MCPTools):
             # when replayed across multiple history turns.
             max_chars = _settings.agent_tool_output_max_chars
             if max_chars > 0 and len(content) > max_chars:
+                original_len = len(content)
+                # Prefix truncation cuts the JSON mid-way and can hide file
+                # download paths.  Extract the file-related keys from the
+                # FULL payload before slicing and re-emit them uncut (same
+                # pattern as the background-task result blocks).
+                preserved = _extract_preserved_file_meta(content)
                 content = (
                     content[:max_chars]
-                    + f"\n\n[OUTPUT TRUNCATED — original response was {len(content)} chars; "
+                    + f"\n\n[OUTPUT TRUNCATED — original response was {original_len} chars; "
                     f"only the first {max_chars} chars are shown here. "
                     f"Use more specific parameters (e.g. smaller limit, narrower time range, "
                     f"specific hostid) to retrieve a smaller result.]"
                 )
+                if preserved:
+                    content += (
+                        "\n\nresult_meta: "
+                        + json.dumps(preserved, ensure_ascii=False, default=str)
+                    )
 
             return ToolResult(
                 content=content,

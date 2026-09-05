@@ -52,7 +52,15 @@ from src.backend_api.app.schemas.chat import (
     SendMessageRequest,
     SendMessageResponse,
 )
-from src.backend_api.app.services.agent_factory import AGENT_REGISTRY, DEFAULT_AGENT_ID, _fetch_tool_catalog, build_agent, load_interface_profiles
+from src.backend_api.app.services.agent_factory import (
+    AGENT_REGISTRY,
+    DEFAULT_AGENT_ID,
+    _fetch_tool_catalog,
+    _is_context_length_error,
+    build_agent,
+    load_interface_profiles,
+    reduce_agent_context,
+)
 from src.backend_api.app.services.agent_continuation import process_auto_approvals
 import logging
 
@@ -406,11 +414,20 @@ async def _cleanup_agent_mcp(agent, *, timeout: float = _MCP_CLEANUP_TIMEOUT) ->
     await cleanup_agent_mcp(agent, timeout=timeout)
 
 
-async def _run_with_retry(coro_fn, *, context: str = "agent") -> Any:
+async def _run_with_retry(
+    coro_fn,
+    *,
+    context: str = "agent",
+    on_context_length: Any = None,
+) -> Any:
     """Execute ``await coro_fn()`` with automatic retry on transient LLM errors.
 
     Handles both raised exceptions and agno's ``RunStatus.error`` return value
     (agno swallows some provider HTTP errors and returns an error-status RunOutput).
+
+    When the error is a model context-length overflow and ``on_context_length``
+    is provided, the callback is invoked once per retry (it should shrink the
+    agent context, e.g. via ``reduce_agent_context(agent)``) before retrying.
 
     Raises :exc:`HTTPException` 502 with a user-friendly message after all
     retries are exhausted or on non-transient errors.
@@ -426,6 +443,19 @@ async def _run_with_retry(coro_fn, *, context: str = "agent") -> Any:
             # Agno may swallow HTTP errors (e.g. 503) and return error status
             if getattr(result, "status", None) == RunStatus.error:
                 err_str = str(getattr(result, "content", ""))
+                if (
+                    retries_left > 0
+                    and _is_context_length_error(err_str)
+                    and on_context_length is not None
+                ):
+                    retries_left -= 1
+                    on_context_length()
+                    log.warning(
+                        "Context length error [%s], reducing context and "
+                        "retrying (%d left)",
+                        context, retries_left,
+                    )
+                    continue
                 if retries_left > 0 and _is_transient_llm_error(err_str):
                     retries_left -= 1
                     delay = _LLM_RETRY_BASE_DELAY_SECONDS * (2 ** (_LLM_RETRY_ATTEMPTS - retries_left - 1))
@@ -444,7 +474,22 @@ async def _run_with_retry(coro_fn, *, context: str = "agent") -> Any:
         except HTTPException:
             raise
         except Exception as exc:
-            if retries_left > 0 and _is_transient_llm_error(str(exc)):
+            err_str = str(exc)
+            is_context_length = _is_context_length_error(err_str)
+            if (
+                retries_left > 0
+                and is_context_length
+                and on_context_length is not None
+            ):
+                retries_left -= 1
+                on_context_length()
+                log.warning(
+                    "Context length exception [%s], reducing context and "
+                    "retrying (%d left)",
+                    context, retries_left,
+                )
+                continue
+            if retries_left > 0 and _is_transient_llm_error(err_str):
                 retries_left -= 1
                 delay = _LLM_RETRY_BASE_DELAY_SECONDS * (2 ** (_LLM_RETRY_ATTEMPTS - retries_left - 1))
                 log.warning(
@@ -1233,6 +1278,7 @@ async def send_message(
                 run_output = await _run_with_retry(
                     lambda: agent.arun(effective_message),
                     context=f"send_message conv={conv_id}",
+                    on_context_length=lambda: reduce_agent_context(agent),
                 )
         except LockAcquireError as exc:
             log.warning(
@@ -1394,6 +1440,7 @@ async def continue_run(
         run_output = await _run_with_retry(
             lambda: agent.acontinue_run(run_id=payload.run_id),
             context=f"continue_run conv={conv_id} run={payload.run_id}",
+            on_context_length=lambda: reduce_agent_context(agent),
         )
     finally:
         await _cleanup_agent_mcp(agent)
@@ -1629,6 +1676,33 @@ async def _sse_stream(
                             if delta:
                                 _agent_content_started = True
 
+                        # Context-length overflow before any content →
+                        # shrink context and retry inside the agent Task.
+                        if event_type == RunEvent.run_error:
+                            err_str = str(getattr(chunk, "content", ""))
+                            log.debug(
+                                "run_error event: session=%s retries_left=%d "
+                                "content_started=%s ctx_error=%s err=%s",
+                                agno_session_id, _retries_left,
+                                _agent_content_started,
+                                _is_context_length_error(err_str),
+                                err_str[:200],
+                            )
+                            if (
+                                not _agent_content_started
+                                and _retries_left > 0
+                                and _is_context_length_error(err_str)
+                            ):
+                                _retries_left -= 1
+                                reduce_agent_context(agent)
+                                log.warning(
+                                    "Context length run_error, reducing "
+                                    "context and retrying (%d left): %s",
+                                    _retries_left, err_str,
+                                )
+                                retry_needed = True
+                                break  # break inner for → retry outer while
+
                         # Transient LLM error before any content →
                         # retry inside the agent Task.
                         if event_type == RunEvent.run_error:
@@ -1668,19 +1742,39 @@ async def _sse_stream(
                     break  # exit outer while → agent finished
 
                 except Exception as exc:
+                    err_str = str(exc)
+                    log.debug(
+                        "arun exception: session=%s retries_left=%d "
+                        "content_started=%s ctx_error=%s err=%s",
+                        agno_session_id, _retries_left,
+                        _agent_content_started,
+                        _is_context_length_error(err_str),
+                        err_str[:200],
+                    )
+                    is_context_length = _is_context_length_error(err_str)
                     if (
                         not _agent_content_started
                         and _retries_left > 0
-                        and _is_transient_llm_error(str(exc))
+                        and (_is_transient_llm_error(err_str) or is_context_length)
                     ):
                         _retries_left -= 1
+                        if is_context_length:
+                            reduce_agent_context(agent)
+                            log.warning(
+                                "Context length SSE error, reducing context "
+                                "and retrying (%d left): %s",
+                                _retries_left, exc,
+                            )
+                        else:
+                            log.warning(
+                                "Transient LLM SSE error, retrying in "
+                                "%.1fs (%d left): %s",
+                                _LLM_RETRY_BASE_DELAY_SECONDS
+                                * (2 ** (_LLM_RETRY_ATTEMPTS - _retries_left - 1)),
+                                _retries_left, exc,
+                            )
                         delay = _LLM_RETRY_BASE_DELAY_SECONDS * (
                             2 ** (_LLM_RETRY_ATTEMPTS - _retries_left - 1)
-                        )
-                        log.warning(
-                            "Transient LLM SSE error, retrying in "
-                            "%.1fs (%d left): %s",
-                            delay, _retries_left, exc,
                         )
                         await asyncio.sleep(delay)
                         continue

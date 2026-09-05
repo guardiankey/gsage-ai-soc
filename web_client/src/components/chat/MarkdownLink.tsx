@@ -21,6 +21,17 @@ function extractDownloadPath(href: string): string | null {
 }
 
 /**
+ * True when an href is safe to render as a normal link.  The LLM may emit
+ * the literal `download_path` template token instead of a real path; such
+ * values have no scheme and no leading slash — render them as plain text
+ * instead of a dead anchor.
+ */
+function isRenderableHref(href: string): boolean {
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) return true // http:, mailto:, …
+  return href.startsWith('/') || href.startsWith('#')
+}
+
+/**
  * Custom `<a>` renderer for ReactMarkdown.
  *
  * Intercepts links whose `href` matches the authenticated file download
@@ -60,6 +71,10 @@ export function MarkdownLink(props: Props) {
         {children}
       </a>
     )
+  }
+
+  if (href && !isRenderableHref(href)) {
+    return <span {...rest}>{children}</span>
   }
 
   return (

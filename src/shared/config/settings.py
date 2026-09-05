@@ -237,7 +237,7 @@ class Settings(BaseSettings):
     # every turn.  Messages from previous runs are pruned (oldest first;
     # tool messages are truncated to fit) so the estimated history size never
     # exceeds this budget.  ``<= 0`` disables pruning.
-    agent_history_max_tokens: int = 100000
+    agent_history_max_tokens: int = 60000
 
     # ── Knowledge base auto-injection (per-turn preamble) ───────────────────
     # When enabled, every chat turn prepends a short ``<kb_hints>`` block to

@@ -28,6 +28,7 @@ from src.backend_api.app.services.agent_factory import (
     build_agent,
     get_agno_db,
     load_interface_profiles,
+    run_agent_with_context_fallback,
 )
 from src.backend_api.app.services.approval_delegations import (
     extract_approval_ids_from_run_output,
@@ -353,13 +354,20 @@ async def continue_after_bg_task(
             "\nBackground tasks have completed. Summarize the results for the user "
             "in a clear, concise message in the same language the user has been "
             "using in this conversation. If any task failed, explain the error."
+            "\nFor each generated file listed under ``result_meta`` (keys such "
+            "as ``file``, ``files``, ``artifacts``), render a markdown link as "
+            "``[filename](download_path)`` using the EXACT ``download_path`` "
+            "value shown in the block. If a file has no ``download_path`` "
+            "value, list its filename as plain text without a link."
         )
         prompt = bg_block.replace(
             "[/BACKGROUND_TASKS_COMPLETED]",
             f"{instruction}\n[/BACKGROUND_TASKS_COMPLETED]\n\n---\n",
         )
 
-        run_output = await agent.arun(prompt)
+        run_output = await run_agent_with_context_fallback(
+            agent, lambda: agent.arun(prompt)
+        )
     finally:
         await _safe_mcp_cleanup(agent)
         await release(tenant_session.agno_session_id, lock_token)
@@ -533,7 +541,9 @@ async def continue_after_interaction(
     response_text = ""
     for attempt in range(1 + _AGENT_RETRY_ATTEMPTS):
         try:
-            run_output = await agent.arun(response_block)
+            run_output = await run_agent_with_context_fallback(
+                agent, lambda: agent.arun(response_block)
+            )
         except Exception as exc:
             if attempt < _AGENT_RETRY_ATTEMPTS and _is_transient_continuation_error(str(exc)):
                 import asyncio
@@ -707,7 +717,9 @@ async def continue_after_approval(
     raised_exc: Optional[Exception] = None
     try:
         try:
-            run_output = await agent.acontinue_run(run_id=run_id)
+            run_output = await run_agent_with_context_fallback(
+                agent, lambda: agent.acontinue_run(run_id=run_id)
+            )
         except Exception as exc:
             log.error(
                 "continue_after_approval: acontinue_run failed approval=%s run_id=%s: %s",
