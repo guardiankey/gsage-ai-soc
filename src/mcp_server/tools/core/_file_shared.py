@@ -7,6 +7,8 @@ duplication across the file-tool family.  Follows the same pattern as
 
 from __future__ import annotations
 
+from src.shared.config.settings import get_settings as _get_settings
+
 # ── Text MIME prefixes ─────────────────────────────────────────────────────
 # Content types that can be decoded to UTF-8 and treated as text.
 # Kept in sync with GSageFile.content_type values produced by _store_file.
@@ -22,8 +24,17 @@ TEXT_MIME_PREFIXES: tuple[str, ...] = (
 )
 
 # ── Size limits ────────────────────────────────────────────────────────────
-# Hard cap on bytes for read/write operations (5 MB).
+# Hard cap on bytes for read/display operations (read_file).  Kept small so
+# an agent read can never pull an oversized payload into memory/context.
 MAX_FILE_BYTES: int = 5 * 1024 * 1024
+
+# Cap for file-manipulation operations (write_file create/edit/append/diff/
+# copy/insert_file).  Mirrors the global storage limit
+# (settings.file_max_size_bytes / FILE_MAX_SIZE_BYTES, default 1 GB) so the
+# tools never reject what the storage layer can hold.  Manipulation output
+# is not returned inline to the agent — the agent receives file metadata
+# plus a bounded preview — so this cap does not drive token consumption.
+MAX_EDIT_FILE_BYTES: int = _get_settings().file_max_size_bytes
 
 
 # ── Text detection ─────────────────────────────────────────────────────────

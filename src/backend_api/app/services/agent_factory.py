@@ -1248,6 +1248,22 @@ async def load_interface_profiles(
 # Model factory
 # ---------------------------------------------------------------------------
 
+def get_max_output_tokens(org: Optional["GSageOrganization"] = None) -> int:
+    """Return the effective output-token cap for *org*.
+
+    Mirrors the derivation in :func:`_build_model`: reserve at least 4096
+    tokens for output, up to half the org's context window.  The chat layer
+    uses this to detect runs truncated by ``max_tokens`` (the model hits
+    the cap and the answer is cut off).
+    """
+    _ctx_tokens = (
+        org.max_context_tokens
+        if org and org.max_context_tokens
+        else 32768
+    )
+    return max(4096, _ctx_tokens // 2)
+
+
 def _build_model(org: Optional["GSageOrganization"] = None):
     """Build the Agno model instance.
 
@@ -1268,15 +1284,12 @@ def _build_model(org: Optional["GSageOrganization"] = None):
     # ── Derive output token limit from org max_context_tokens ─────────
     # max_context_tokens = total context window (input + output).
     # Reserve at least 4 096 tokens for output, up to half the window.
-    _ctx_tokens = (
-        org.max_context_tokens
-        if org and org.max_context_tokens
-        else 32768
-    )
-    max_output_tokens = max(4096, _ctx_tokens // 2)
+    max_output_tokens = get_max_output_tokens(org)
     log.info(
         "_build_model: provider=%s max_context_tokens=%d max_output_tokens=%d",
-        provider, _ctx_tokens, max_output_tokens,
+        provider,
+        org.max_context_tokens if org and org.max_context_tokens else 32768,
+        max_output_tokens,
     )
 
     # Resolve maker model and API key from org (if set) or .env

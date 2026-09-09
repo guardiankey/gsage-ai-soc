@@ -31,7 +31,9 @@ from sqlalchemy import select
 from src.mcp_server.tools.base import BaseTool, ToolResult, _tool_session_ctx
 from src.mcp_server.tools.core._file_shared import (
     EXT_TO_MIME,
-    MAX_FILE_BYTES,
+    # Manipulation cap (settings.file_max_size_bytes, default 1 GB).
+    # The 5 MB MAX_FILE_BYTES read/display cap does NOT apply here.
+    MAX_EDIT_FILE_BYTES as MAX_FILE_BYTES,
     TEXT_MIME_PREFIXES,
     infer_content_type,
     is_text_content,
@@ -517,6 +519,14 @@ class WriteFileTool(BaseTool):
             return self._failure(
                 "LOAD_FAILED",
                 f"Failed to load current content for file '{file_id}'.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if loaded.get("truncated"):
+            return self._failure(
+                "FILE_TOO_LARGE",
+                f"File '{file_id}' exceeds the manipulation limit "
+                f"({MAX_FILE_BYTES} bytes) and cannot be edited safely. "
+                "Split the file into smaller chunks.",
                 execution_time_ms=int((time.monotonic() - t0) * 1000),
             )
 
@@ -1053,6 +1063,14 @@ class WriteFileTool(BaseTool):
                 f"Failed to load current content for file '{file_id}'.",
                 execution_time_ms=int((time.monotonic() - t0) * 1000),
             )
+        if loaded.get("truncated"):
+            return self._failure(
+                "FILE_TOO_LARGE",
+                f"File '{file_id}' exceeds the manipulation limit "
+                f"({MAX_FILE_BYTES} bytes) and cannot be appended safely. "
+                "Split the file into smaller chunks.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
 
         current_bytes: bytes = loaded["data"]
         size_before = len(current_bytes)
@@ -1212,6 +1230,13 @@ class WriteFileTool(BaseTool):
                 f"Failed to load source file '{source_file_id}'.",
                 execution_time_ms=int((time.monotonic() - t0) * 1000),
             )
+        if source_loaded.get("truncated"):
+            return self._failure(
+                "FILE_TOO_LARGE",
+                f"Source file '{source_file_id}' exceeds the manipulation "
+                f"limit ({MAX_FILE_BYTES} bytes) and cannot be inserted safely.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
         source_text = source_loaded["data"].decode("utf-8")
 
         # ── Load target file content ──────────────────────────────────
@@ -1227,6 +1252,13 @@ class WriteFileTool(BaseTool):
             return self._failure(
                 "LOAD_FAILED",
                 f"Failed to load target file '{target_file_id}'.",
+                execution_time_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if target_loaded.get("truncated"):
+            return self._failure(
+                "FILE_TOO_LARGE",
+                f"Target file '{target_file_id}' exceeds the manipulation "
+                f"limit ({MAX_FILE_BYTES} bytes) and cannot be edited safely.",
                 execution_time_ms=int((time.monotonic() - t0) * 1000),
             )
 

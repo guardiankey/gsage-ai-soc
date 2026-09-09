@@ -58,6 +58,7 @@ from src.backend_api.app.services.agent_factory import (
     _fetch_tool_catalog,
     _is_context_length_error,
     build_agent,
+    get_max_output_tokens,
     load_interface_profiles,
     reduce_agent_context,
 )
@@ -392,6 +393,23 @@ _LLM_SESSION_BUSY_MSG = (
     "Another response is still being generated for this conversation. "
     "Please wait a moment and try again."
 )
+
+
+def _truncation_notice(output_cap: int) -> str:
+    """Notice appended when the model output hit the ``max_tokens`` cap.
+
+    Shown to the user at the end of a truncated answer so they know why
+    the response stopped and how to continue or raise the limit.
+    """
+    return (
+        "\n\n---\n\n"
+        f"⚠️ **The response may have been truncated** — the model reached "
+        f"the maximum output limit of {output_cap} tokens and the answer "
+        f"was cut off.\n"
+        f"You can ask me to continue from where it stopped, or an "
+        f"administrator can raise the limit with "
+        f"`admin org update --max-tokens <value>` (admin console or CLI)."
+    )
 
 
 def _is_transient_llm_error(text: str) -> bool:
@@ -1368,6 +1386,17 @@ async def send_message(
         FilterContext(org_id=ctx.org_id, interface=ctx.interface, db=db),
     )
     metrics = getattr(run_output, "metrics", None)
+    output_cap = get_max_output_tokens(org)
+    if (
+        metrics is not None
+        and getattr(metrics, "output_tokens", None) is not None
+        and metrics.output_tokens >= output_cap
+    ):
+        log.warning(
+            "send_message: output truncated at max_tokens cap=%d conv=%s",
+            output_cap, conv_id,
+        )
+        content += _truncation_notice(output_cap)
 
     return SendMessageResponse(
         id=run_output.run_id or str(uuid.uuid4()),
@@ -1497,6 +1526,17 @@ async def continue_run(
         FilterContext(org_id=ctx.org_id, interface=ctx.interface, db=db),
     )
     metrics = getattr(run_output, "metrics", None)
+    output_cap = get_max_output_tokens(org)
+    if (
+        metrics is not None
+        and getattr(metrics, "output_tokens", None) is not None
+        and metrics.output_tokens >= output_cap
+    ):
+        log.warning(
+            "continue_run: output truncated at max_tokens cap=%d conv=%s",
+            output_cap, conv_id,
+        )
+        content += _truncation_notice(output_cap)
 
     return SendMessageResponse(
         id=run_output.run_id or str(uuid.uuid4()),
@@ -2090,6 +2130,28 @@ async def _sse_stream(
         tail = await stream_filter.flush()
         if tail:
             yield _fmt_sse("content_delta", {"delta": tail})
+
+        # ── max_tokens truncation notice ───────────────────────────────
+        # When the final output token count hit the org-level output cap
+        # (equivalent to finish_reason=length), tell the user the answer
+        # was cut off and how to raise the limit / continue.
+        output_cap = get_max_output_tokens(org)
+        output_truncated = (
+            final_metrics.get("output") is not None
+            and int(final_metrics["output"]) >= output_cap
+        )
+        if output_truncated:
+            log.warning(
+                "SSE: output truncated at max_tokens cap=%d session=%s",
+                output_cap, agno_session_id,
+            )
+            notice = _truncation_notice(output_cap)
+            emit = await stream_filter.feed(notice)
+            if emit:
+                yield _fmt_sse("content_delta", {"delta": emit})
+            notice_tail = await stream_filter.flush()
+            if notice_tail:
+                yield _fmt_sse("content_delta", {"delta": notice_tail})
 
         # Detect active background tasks for frontend polling.
         if gsage_session_id is not None:
