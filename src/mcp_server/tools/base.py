@@ -505,6 +505,7 @@ class BaseTool(ABC):
         task_db = GSageBackgroundTask(
             org_id=agent_context.org_id,
             user_id=agent_context.user_id,
+            dept_id=agent_context.dept_id,
             gsage_session_id=gsage_session_id,
             tool_name=self.name,
             profile_id=profile_id,

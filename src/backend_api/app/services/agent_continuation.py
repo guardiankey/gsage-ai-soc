@@ -177,6 +177,45 @@ async def _rebuild_tenant_context(
     )
 
 
+async def _resolve_continuation_dept(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user_id: Optional[uuid.UUID],
+    stored_dept_id: Optional[uuid.UUID] = None,
+) -> Optional[uuid.UUID]:
+    """Resolve the department to restore in a continuation context.
+
+    Priority:
+        1. ``stored_dept_id`` — used only when the department still exists,
+           is active and belongs to ``org_id`` (multi-tenant safety).
+        2. The user's active department (preferred default → first active
+           membership) via :func:`resolve_user_active_dept_id`.
+
+    Returns ``None`` when no department can be resolved.
+    """
+    if stored_dept_id is not None:
+        from src.shared.models.department import GSageDepartment  # noqa: PLC0415
+
+        dept_result = await db.execute(
+            select(GSageDepartment).where(
+                GSageDepartment.id == stored_dept_id,
+                GSageDepartment.org_id == org_id,
+                GSageDepartment.is_active.is_(True),
+            )
+        )
+        if dept_result.scalar_one_or_none() is not None:
+            return stored_dept_id
+
+    if user_id is not None:
+        from src.backend_api.app.services.background_tasks import (  # noqa: PLC0415
+            resolve_user_active_dept_id,
+        )
+        return await resolve_user_active_dept_id(db, user_id, org_id)
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Helper: build agent for a session
 # ---------------------------------------------------------------------------
@@ -270,8 +309,32 @@ async def continue_after_bg_task(
     # Determine interface from session source
     interface = _source_to_interface(tenant_session.source)
 
+    # Restore the department context that was active when the tool was
+    # dispatched.  The TenantSession row does not persist the UI-selected
+    # department, so prefer the value captured in the background task row
+    # (agent_context_data covers rows created before dept_id was populated)
+    # and fall back to the user's active department.
+    stored_dept_id: Optional[uuid.UUID] = None
+    agent_ctx_data = task.agent_context_data or {}
+    raw_dept = agent_ctx_data.get("dept_id")
+    if raw_dept:
+        try:
+            stored_dept_id = uuid.UUID(str(raw_dept))
+        except (ValueError, TypeError):
+            stored_dept_id = None
+    if stored_dept_id is None:
+        stored_dept_id = task.dept_id
+    dept_id = await _resolve_continuation_dept(
+        db,
+        org_id=tenant_session.org_id,
+        user_id=tenant_session.user_id,
+        stored_dept_id=stored_dept_id,
+    )
+
     # Rebuild context
-    ctx = await _rebuild_tenant_context(tenant_session, db, interface=interface)
+    ctx = await _rebuild_tenant_context(
+        tenant_session, db, interface=interface, override_dept_id=dept_id,
+    )
 
     # Load org
     org = await db.get(GSageOrganization, tenant_session.org_id)
@@ -365,6 +428,39 @@ async def continue_after_bg_task(
             f"{instruction}\n[/BACKGROUND_TASKS_COMPLETED]\n\n---\n",
         )
 
+        # Inject the [DEPARTMENT_CONTEXT] block when a department is active,
+        # mirroring the chat flow so department-scoped tools (datastores,
+        # files, tool configs) work during the continuation.
+        if ctx.dept_id is not None:
+            from src.backend_api.app.services.background_tasks import (  # noqa: PLC0415
+                build_dept_context_block,
+                load_dept_name,
+            )
+            dept_name = await load_dept_name(ctx.dept_id, db)
+            prompt = (
+                f"{build_dept_context_block(ctx.dept_id, dept_name)}"
+                f"\n\n---\n{prompt}"
+            )
+
+        # Close the read transaction before the (potentially minutes-long)
+        # agent run.  The engine enforces
+        # idle_in_transaction_session_timeout (DATABASE_IDLE_IN_TX_TIMEOUT_MS,
+        # default 30 s) server-side, so holding the transaction open across
+        # the run guarantees Postgres kills the connection (asyncpg
+        # InterfaceError) and poisons the session for the post-run work
+        # (notified flag, approval delegations).  expire_on_commit=False
+        # keeps already-loaded ORM objects usable after the commit.
+        try:
+            await db.commit()
+        except Exception as exc:
+            log.warning(
+                "continue_after_bg_task: pre-run commit failed: %s", exc,
+            )
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+
         run_output = await run_agent_with_context_fallback(
             agent, lambda: agent.arun(prompt)
         )
@@ -403,6 +499,10 @@ async def continue_after_bg_task(
                 "continue_after_bg_task: commit of notified flag (after error) failed: %s",
                 exc,
             )
+            try:
+                await db.rollback()
+            except Exception:
+                pass
 
         friendly = (
             "I could not finish processing the background task results due to "
@@ -418,6 +518,25 @@ async def continue_after_bg_task(
         await db.commit()
     except Exception as exc:
         log.warning("continue_after_bg_task: commit of notified flag failed: %s", exc)
+        # Reset the poisoned session state before anything else touches it.
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        # Retry once on a fresh transaction — the flag must persist, otherwise
+        # the next user turn re-injects these results (duplicate summary).
+        try:
+            await mark_bg_tasks_notified([t.id for t in pending_bg_tasks], db)
+            await db.commit()
+        except Exception as retry_exc:
+            log.warning(
+                "continue_after_bg_task: notified flag retry failed: %s",
+                retry_exc,
+            )
+            try:
+                await db.rollback()
+            except Exception:
+                pass
 
     # Extract response
     response_text = _extract_text(getattr(run_output, "content", None))
@@ -441,6 +560,10 @@ async def continue_after_bg_task(
                 await db.commit()
             except Exception as exc:
                 log.warning("continue_after_bg_task: commit of delegations failed: %s", exc)
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
         # Still deliver partial content if any
         if not response_text or response_text == "Background tasks completed.":
             response_text = (
@@ -514,8 +637,20 @@ async def continue_after_interaction(
     # Determine interface
     interface = _source_to_interface(tenant_session.source)
 
+    # Restore the department context.  Interactions do not persist the
+    # department, so fall back to the session row and then to the user's
+    # active department.
+    dept_id = await _resolve_continuation_dept(
+        db,
+        org_id=tenant_session.org_id,
+        user_id=tenant_session.user_id,
+        stored_dept_id=tenant_session.dept_id,
+    )
+
     # Rebuild context
-    ctx = await _rebuild_tenant_context(tenant_session, db, interface=interface)
+    ctx = await _rebuild_tenant_context(
+        tenant_session, db, interface=interface, override_dept_id=dept_id,
+    )
 
     # Load org and user
     org = await db.get(GSageOrganization, tenant_session.org_id)
@@ -532,10 +667,37 @@ async def continue_after_interaction(
         context=interaction.context_json,
     )
 
+    # Inject the [DEPARTMENT_CONTEXT] block when a department is active so
+    # department-scoped tool calls made while replanning keep working.
+    if ctx.dept_id is not None:
+        from src.backend_api.app.services.background_tasks import (  # noqa: PLC0415
+            build_dept_context_block,
+            load_dept_name,
+        )
+        dept_name = await load_dept_name(ctx.dept_id, db)
+        response_block = (
+            f"{build_dept_context_block(ctx.dept_id, dept_name)}"
+            f"\n\n---\n{response_block}"
+        )
+
     # Build agent
     agent = await _build_agent_for_session(
         tenant_session, ctx, db, org=org, user=user, source="interaction"
     )
+
+    # Close the read transaction before the agent run so the
+    # idle_in_transaction_session_timeout cannot kill the connection
+    # mid-run (same protection as the bg-task/approval flows).
+    try:
+        await db.commit()
+    except Exception as exc:
+        log.warning(
+            "continue_after_interaction: pre-run commit failed: %s", exc,
+        )
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
     # Run the agent with the interaction response as input
     response_text = ""
@@ -712,6 +874,19 @@ async def continue_after_approval(
         except Exception as exc:
             log.warning("continue_after_approval: flush of continued_at failed: %s", exc)
 
+    # Close the transaction before the (potentially long) resume so the
+    # idle_in_transaction_session_timeout cannot kill the connection
+    # mid-run.  Committing also persists ``continued_at``, which the
+    # concurrent /continue-run HTTP guard depends on.
+    try:
+        await db.commit()
+    except Exception as exc:
+        log.warning("continue_after_approval: pre-run commit failed: %s", exc)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+
     # Continue the paused run (MCP cleanup in finally to avoid cancel busy-loop).
     run_output = None
     raised_exc: Optional[Exception] = None
@@ -859,6 +1034,10 @@ async def continue_after_approval(
                                             "continue_after_approval: commit of "
                                             "re-prompt delegations failed: %s", exc,
                                         )
+                                        try:
+                                            await db.rollback()
+                                        except Exception:
+                                            pass
                                     if not response_text:
                                         response_text = (
                                             "The approved action has been executed, "

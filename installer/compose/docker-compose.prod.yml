@@ -266,7 +266,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
 
   celery-worker-tools:
     image: ${GSAGE_IMAGE_REGISTRY:-guardiankey}/gsage-worker_tools:${GSAGE_VERSION}
@@ -294,7 +294,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
 
   celery-worker-email:
     image: ${GSAGE_IMAGE_REGISTRY:-guardiankey}/gsage-backend_api:${GSAGE_VERSION}
@@ -334,7 +334,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
 
   celery-worker-knowledge:
     image: ${GSAGE_IMAGE_REGISTRY:-guardiankey}/gsage-backend_api:${GSAGE_VERSION}
