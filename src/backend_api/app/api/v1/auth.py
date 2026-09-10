@@ -70,6 +70,7 @@ from src.backend_api.app.schemas.auth import (
 )
 from src.shared.models.department import GSageDepartment
 from src.shared.models.organization import GSageOrganization
+from src.shared.models.org_email_domain import GSageOrgEmailDomain
 from src.shared.models.trusted_device import GSageTrustedDevice
 from src.shared.models.user import GSageUser
 from src.shared.models.user_department import GSageUserDepartment
@@ -157,6 +158,28 @@ async def _get_membership_for_login(
             detail="User does not belong to any active organization",
         )
     return membership
+
+
+async def _org_id_from_email_domain(
+    db: AsyncSession,
+    email: str,
+) -> uuid.UUID | None:
+    """Resolve an organization id from the email-domain mapping.
+
+    Fallback for external-auth users (LDAP/SSO) who are not provisioned
+    locally yet and therefore have no membership to derive the org from.
+    Mirrors the domain lookup performed by ``POST /v1/auth/lookup``.
+    """
+    if not email or "@" not in email:
+        return None
+    domain = email.rsplit("@", 1)[1].strip().lower()
+    if not domain:
+        return None
+    res = await db.execute(
+        select(GSageOrgEmailDomain).where(GSageOrgEmailDomain.domain == domain)
+    )
+    mapping = res.scalar_one_or_none()
+    return mapping.org_id if mapping is not None else None
 
 
 async def _resolve_org_for_login(
@@ -266,6 +289,11 @@ async def _run_auth_chain(
         # External provider — auto-provision user and sync group memberships
         provider_config = provider_configs.get(auth_result.provider_name, {})
         user, membership = await upsert_external_user(db, org, auth_result, provider_config)
+        # Persist immediately: get_db only closes the request session (it never
+        # commits), so external-auth provisioning would otherwise be rolled back
+        # and the issued tokens would reference a user that no longer exists
+        # ("Could not validate credentials" on /me, "User not found" on /refresh).
+        await db.commit()
     else:
         # Local provider — user must already exist in the DB
         if existing_user is None:
@@ -427,7 +455,13 @@ async def login_form(
     )
     existing_user = result.scalar_one_or_none()
 
-    org = await _resolve_org_for_login(None, existing_user, db)
+    # External-auth users may not be provisioned locally yet — fall back to
+    # the email-domain → org mapping when no org_id is supplied.
+    org_id = None
+    if existing_user is None:
+        org_id = await _org_id_from_email_domain(db, form_data.username)
+
+    org = await _resolve_org_for_login(org_id, existing_user, db)
     try:
         auth_result, user, membership = await _run_auth_chain(
             form_data.username, form_data.password, org, existing_user, db
@@ -478,7 +512,13 @@ async def login_json(
     )
     existing_user = result.scalar_one_or_none()
 
-    org = await _resolve_org_for_login(body.org_id, existing_user, db)
+    # External-auth users may not be provisioned locally yet — fall back to
+    # the email-domain → org mapping when no org_id is supplied.
+    org_id = body.org_id
+    if org_id is None and existing_user is None:
+        org_id = await _org_id_from_email_domain(db, body.email)
+
+    org = await _resolve_org_for_login(org_id, existing_user, db)
     try:
         auth_result, user, membership = await _run_auth_chain(
             body.email, body.password, org, existing_user, db

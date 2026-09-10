@@ -14,6 +14,7 @@ The provider has no configurable fields; ``config_schema`` and
 from __future__ import annotations
 
 import logging
+from typing import ClassVar
 
 from src.shared.auth.base import (
     AuthErrorType,
@@ -30,6 +31,8 @@ class LocalAuthProvider(BaseAuthProvider):
 
     name = "local"
     display_name = "Local (bcrypt / database)"
+
+    supports_password_login: ClassVar[bool] = True
 
     # No external configuration required
     config_schema = None

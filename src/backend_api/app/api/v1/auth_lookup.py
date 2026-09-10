@@ -131,17 +131,21 @@ async def auth_lookup(
     providers: list[str] = list(org.auth_providers or [])
     auth_config: dict = org.auth_config or {}
 
-    allow_password = "local" in providers
+    registry = get_registry()
+
+    allow_password = any(
+        getattr(registry.get(p), "supports_password_login", False)
+        for p in providers
+    )
     sso_infos: list[SSOProviderInfo] = []
 
-    registry = get_registry()
     for provider_name in providers:
-        if provider_name == "local":
-            continue
         provider = registry.get(provider_name)
         if provider is None:
             continue
-        # Only surface providers that actually have non-empty config
+        # Only surface browser-SSO-capable providers with non-empty config
+        if not getattr(provider, "supports_browser_sso", False):
+            continue
         cfg = auth_config.get(provider_name) or {}
         if not cfg:
             continue

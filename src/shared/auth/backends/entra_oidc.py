@@ -70,6 +70,8 @@ class EntraOIDCProvider(BaseAuthProvider):
     name = "entra_oidc"
     display_name = "Microsoft Entra ID"
 
+    supports_browser_sso: ClassVar[bool] = True
+
     config_defaults: ClassVar[dict] = {
         "client_id": "",
         "tenant_id": "",

@@ -342,6 +342,44 @@ Provider names in `auth_providers` must match the provider class `name` exactly.
 
 ---
 
+## Provider Capability Flags
+
+Providers declare two class attributes used by the login-discovery endpoints:
+
+- `supports_password_login` — `True` for `local` and `ldap`.
+- `supports_browser_sso` — `True` for `entra_oidc`.
+
+`POST /v1/auth/lookup` and `GET /v1/auth/sso/{org_slug}/providers` use these
+flags to decide what to advertise: the password form is shown when **any**
+provider in the chain supports password login, and only browser-SSO-capable
+providers are listed as SSO buttons (so `ldap` is never offered as a browser
+SSO flow).
+
+---
+
+## LDAP On Non-AD Directories (FreeIPA, OpenLDAP)
+
+The LDAP provider requests a fixed AD-oriented attribute list. When the server
+rejects it (`LDAPAttributeError` — the directory schema has no AD attributes
+such as `userPrincipalName`), the search is retried with every available
+attribute, so non-AD directories work without extra configuration. The stable
+external identifier falls back to `entryUUID` / `ipaUniqueID` when
+`objectGUID` is absent.
+
+When the directory has no `mail` attribute, enable domain stripping so the
+login email's local part is used for the `{username}` placeholder:
+
+```json
+{
+  "strip_email_domain": true,
+  "user_search_filter": "(uid={username})"
+}
+```
+
+`strip_email_domain` is opt-in and defaults to `false` (AD behavior preserved).
+
+---
+
 ## Automatic User, Group, And Department Sync
 
 For successful non-local authentication, the backend calls `upsert_external_user()`.

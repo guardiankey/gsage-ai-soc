@@ -207,10 +207,11 @@ async def list_sso_providers(
     registry = get_registry()
     out: list[SSOProvidersListItem] = []
     for name in (org.auth_providers or []):
-        if name == "local":
-            continue
         provider = registry.get(name)
         if provider is None:
+            continue
+        # Only advertise browser-SSO-capable providers (e.g. entra_oidc)
+        if not getattr(provider, "supports_browser_sso", False):
             continue
         cfg = (org.auth_config or {}).get(name) or {}
         if not cfg:

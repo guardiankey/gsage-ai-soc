@@ -32,6 +32,15 @@ Example group_mapping::
       }
     }
 
+Non-Active-Directory directories (e.g. FreeIPA)
+------------------------------------------------
+The user search first requests a fixed AD-oriented attribute list.  When the
+server rejects it (``LDAPAttributeError`` — the directory schema has no AD
+attributes such as ``userPrincipalName``), the search is retried with
+``ALL_ATTRIBUTES``.  With ``strip_email_domain=True`` the part before the
+``@`` of the login email is used for the ``{username}`` placeholder, so
+directories without a ``mail`` attribute can still match users by ``uid``.
+
 must_change_password detection
 -------------------------------
 The provider reads the ``pwdLastSet`` AD attribute.  When its value is
@@ -96,6 +105,8 @@ class LDAPAuthProvider(BaseAuthProvider):
     name = "ldap"
     display_name = "LDAP / Active Directory"
 
+    supports_password_login: ClassVar[bool] = True
+
     config_defaults: ClassVar[dict] = {
         "server_url": "",
         "bind_dn": "",
@@ -114,6 +125,7 @@ class LDAPAuthProvider(BaseAuthProvider):
         "default_role": "viewer",
         "auto_create_groups": True,
         "resolve_nested_groups": False,
+        "strip_email_domain": False,      # use local part of email for {username}
         "required_groups": [],           # non-empty = login gate (list of group DNs)
     }
 
@@ -188,6 +200,10 @@ class LDAPAuthProvider(BaseAuthProvider):
                 "type": "boolean",
                 "description": "Resolve nested (transitive) group memberships via memberOf:1.2.840.113556.1.4.1941:",
             },
+            "strip_email_domain": {
+                "type": "boolean",
+                "description": "Strip the '@domain' part of the login email before applying user_search_filter (for directories without a mail attribute)",
+            },
             "required_groups": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -243,6 +259,7 @@ class LDAPAuthProvider(BaseAuthProvider):
                 SUBTREE,
             )
             from ldap3.core.exceptions import (  # type: ignore[import-not-found]
+                LDAPAttributeError,
                 LDAPBindError,
                 LDAPException,
                 LDAPSocketOpenError,
@@ -277,6 +294,7 @@ class LDAPAuthProvider(BaseAuthProvider):
             "group_search_filter", "(member={user_dn})"
         )
         resolve_nested: bool = bool(config.get("resolve_nested_groups", False))
+        strip_email_domain: bool = bool(config.get("strip_email_domain", False))
 
         if not server_url or not bind_dn or not user_search_base:
             return AuthResult(
@@ -330,13 +348,28 @@ class LDAPAuthProvider(BaseAuthProvider):
             )
 
         # ── Find user entry ───────────────────────────────────────────────
-        search_filter = user_search_filter.replace("{username}", _escape_filter_chars(username))
-        svc_conn.search(
-            search_base=user_search_base,
-            search_filter=search_filter,
-            search_scope=SUBTREE,
-            attributes=self._USER_ATTRS,
+        search_name = username
+        if strip_email_domain and "@" in search_name:
+            search_name = search_name.split("@", 1)[0]
+        search_filter = user_search_filter.replace(
+            "{username}", _escape_filter_chars(search_name)
         )
+        try:
+            svc_conn.search(
+                search_base=user_search_base,
+                search_filter=search_filter,
+                search_scope=SUBTREE,
+                attributes=self._USER_ATTRS,
+            )
+        except LDAPAttributeError:
+            # Non-AD schemas (e.g. FreeIPA) reject AD-only attribute names
+            # such as userPrincipalName — retry with every available attribute.
+            svc_conn.search(
+                search_base=user_search_base,
+                search_filter=search_filter,
+                search_scope=SUBTREE,
+                attributes=ALL_ATTRIBUTES,
+            )
 
         if not svc_conn.entries:
             svc_conn.unbind()
@@ -548,7 +581,7 @@ class LDAPAuthProvider(BaseAuthProvider):
 
     @staticmethod
     def _get_guid(entry: Any) -> Optional[str]:
-        """Read objectGUID as a hex string (stable identifier)."""
+        """Read a stable external identifier (AD objectGUID or entryUUID/ipaUniqueID)."""
         try:
             raw = entry["objectGUID"].raw_values
             if raw:
@@ -556,6 +589,14 @@ class LDAPAuthProvider(BaseAuthProvider):
                 return str(_uuid.UUID(bytes_le=raw[0]))
         except Exception:
             pass
+        # Non-AD fallbacks (e.g. OpenLDAP entryUUID, FreeIPA ipaUniqueID)
+        for attr in ("entryUUID", "ipaUniqueID"):
+            try:
+                values = entry[attr].values
+                if values:
+                    return str(values[0])
+            except Exception:
+                continue
         return None
 
     @staticmethod

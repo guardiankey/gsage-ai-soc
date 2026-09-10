@@ -126,6 +126,11 @@ class BaseAuthProvider(ABC):
     name: ClassVar[str]
     display_name: ClassVar[str]
 
+    # Capability flags — used by the auth lookup / SSO endpoints to decide
+    # which login methods to advertise for a provider chain.
+    supports_password_login: ClassVar[bool] = False
+    supports_browser_sso: ClassVar[bool] = False
+
     # ── 3-layer config (mirrors BaseTool pattern) ────────────────────────
     config_schema: ClassVar[Optional[dict]] = None
     config_defaults: ClassVar[dict] = {}

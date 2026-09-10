@@ -671,8 +671,13 @@ async def _domain_add_async(args: argparse.Namespace) -> int:
     from src.shared.database import _get_session_maker  # noqa: PLC0415
     from src.shared.models import GSageOrgEmailDomain  # noqa: PLC0415
 
-    domain = args.domain.strip().lower()
-    if not domain or "." not in domain:
+    domain = args.domain.strip().lower().lstrip("@")
+    if (
+        not domain
+        or "." not in domain
+        or any(ch.isspace() for ch in domain)
+        or "@" in domain
+    ):
         print(f"ERROR: invalid domain {args.domain!r}", file=sys.stderr)
         return 2
 
