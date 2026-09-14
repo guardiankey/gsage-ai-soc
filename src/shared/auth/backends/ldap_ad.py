@@ -361,9 +361,14 @@ class LDAPAuthProvider(BaseAuthProvider):
                 search_scope=SUBTREE,
                 attributes=self._USER_ATTRS,
             )
-        except LDAPAttributeError:
+        except LDAPAttributeError as exc:
             # Non-AD schemas (e.g. FreeIPA) reject AD-only attribute names
             # such as userPrincipalName — retry with every available attribute.
+            logger.debug(
+                "LDAPAuthProvider: server rejected AD-oriented attribute list "
+                "(%s) — retrying search with ALL_ATTRIBUTES for user '%s'",
+                exc, username,
+            )
             svc_conn.search(
                 search_base=user_search_base,
                 search_filter=search_filter,
@@ -373,13 +378,46 @@ class LDAPAuthProvider(BaseAuthProvider):
 
         if not svc_conn.entries:
             svc_conn.unbind()
+            logger.warning(
+                "LDAPAuthProvider: user '%s' not found with filter '%s' "
+                "(search_base='%s')",
+                username, search_filter, user_search_base,
+            )
             return AuthResult(
                 success=False,
                 error_type=AuthErrorType.USER_NOT_FOUND,
                 error_message="User not found in LDAP directory",
             )
 
-        user_entry = svc_conn.entries[0]
+        # A single login identifier can match multiple directory entries
+        # (e.g. FreeIPA exposes the same user under cn=users,cn=compat and
+        # cn=users,cn=accounts). Prefer the entry whose 'mail' attribute
+        # equals the login username and warn with every matched DN so the
+        # ambiguity is visible in the logs.
+        if len(svc_conn.entries) > 1:
+            matched_dns = [entry.entry_dn for entry in svc_conn.entries]
+            logger.warning(
+                "LDAPAuthProvider: filter '%s' matched %d entries for user '%s': %s",
+                search_filter, len(matched_dns), username, matched_dns,
+            )
+            preferred = next(
+                (
+                    entry
+                    for entry in svc_conn.entries
+                    if (self._get_attr(entry, "mail") or "").lower() == username.lower()
+                ),
+                None,
+            )
+            user_entry = preferred or svc_conn.entries[0]
+            if preferred is None:
+                logger.warning(
+                    "LDAPAuthProvider: no entry with mail='%s' among matches; "
+                    "using first entry '%s'",
+                    username, user_entry.entry_dn,
+                )
+        else:
+            user_entry = svc_conn.entries[0]
+
         user_dn: str = user_entry.entry_dn
 
         # ── Authenticate the user ─────────────────────────────────────────
@@ -414,15 +452,35 @@ class LDAPAuthProvider(BaseAuthProvider):
                     receive_timeout=timeout,
                 )
             else:
-                # SIMPLE — direct bind with user DN
-                user_conn = Connection(
-                    server,
-                    user=user_dn,
-                    password=password,
-                    authentication=ldap3.SIMPLE,
-                    auto_bind=ldap3.AUTO_BIND_TLS_BEFORE_BIND if use_tls else ldap3.AUTO_BIND_NO_TLS,
-                    receive_timeout=timeout,
-                )
+                # SIMPLE — direct bind with user DN.
+                # AUTO_BIND_* constants bind inside Connection.__init__ and
+                # RAISE LDAPBindError on invalid credentials instead of
+                # returning False. Catch it explicitly so a wrong password is
+                # mapped to INVALID_CREDENTIALS (chain stops) rather than being
+                # masked as PROVIDER_UNAVAILABLE by the generic handler below.
+                try:
+                    user_conn = Connection(
+                        server,
+                        user=user_dn,
+                        password=password,
+                        authentication=ldap3.SIMPLE,
+                        auto_bind=ldap3.AUTO_BIND_TLS_BEFORE_BIND if use_tls else ldap3.AUTO_BIND_NO_TLS,
+                        receive_timeout=timeout,
+                    )
+                except LDAPBindError as exc:
+                    svc_conn.unbind()
+                    result_desc: str = str(exc)
+                    error_code = self._extract_ad_error_code(result_desc)
+                    error_type = self._map_ad_error(error_code)
+                    logger.warning(
+                        "LDAPAuthProvider: user bind failed for '%s' (dn=%s): %s",
+                        username, user_dn, result_desc,
+                    )
+                    return AuthResult(
+                        success=False,
+                        error_type=error_type,
+                        error_message=f"LDAP bind failed: {result_desc}",
+                    )
 
             if not user_conn.bind():
                 svc_conn.unbind()
@@ -432,6 +490,10 @@ class LDAPAuthProvider(BaseAuthProvider):
                     (user_conn.result or {}).get("message", "")
                 )
                 error_type = self._map_ad_error(error_code)
+                logger.warning(
+                    "LDAPAuthProvider: user bind failed for '%s' (dn=%s): %s",
+                    username, user_dn, result_desc or "unknown error",
+                )
                 return AuthResult(
                     success=False,
                     error_type=error_type,
@@ -440,6 +502,10 @@ class LDAPAuthProvider(BaseAuthProvider):
 
         except Exception as exc:
             svc_conn.unbind()
+            logger.error(
+                "LDAPAuthProvider: user bind raised exception for '%s' (dn=%s): %s",
+                username, user_dn, exc, exc_info=True,
+            )
             return AuthResult(
                 success=False,
                 error_type=AuthErrorType.PROVIDER_UNAVAILABLE,
@@ -496,9 +562,11 @@ class LDAPAuthProvider(BaseAuthProvider):
             user_groups_lower = {dn.lower() for dn in groups}
             if not required_lower.intersection(user_groups_lower):
                 logger.warning(
-                    "LDAPAuthProvider: user '%s' authenticated but is not a member "
-                    "of any required group — access denied.",
-                    username,
+                    "LDAPAuthProvider: user '%s' (dn=%s) authenticated but is not a "
+                    "member of any required group — access denied. required_groups=%s; "
+                    "resolved_groups=%s (if empty, check group_search_filter/group_search_base — "
+                    "e.g. POSIX groups may use memberUid instead of member)",
+                    username, user_dn, required_groups, groups or ["<none>"],
                 )
                 return AuthResult(
                     success=False,

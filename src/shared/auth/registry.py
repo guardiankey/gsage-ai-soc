@@ -143,9 +143,13 @@ class AuthProviderRegistry:
                 )
                 return result
 
+            error_detail = (result.error_message or "").strip().replace("\n", " ")
+            if len(error_detail) > 300:
+                error_detail = error_detail[:300] + "…"
             logger.info(
-                "Auth chain: provider '%s' returned %s for user '%s' — trying next",
+                "Auth chain: provider '%s' returned %s for user '%s' — trying next (%s)",
                 provider_name, result.error_type, username,
+                error_detail or "no error details",
             )
             last_result = result
 
