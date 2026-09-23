@@ -93,17 +93,21 @@ export default function ChatPage() {
   // currentConversationIdRef below additionally drops any callbacks that were
   // already queued in the JS task queue before the abort took effect.
   useEffect(() => {
-    abortControllerRef.current?.abort()
-    abortControllerRef.current = null
-    currentConversationIdRef.current = conversationId ?? null
     if (justCreatedRef.current) {
-      // Don't reset the streaming placeholder — handleSend has just seeded
-      // state for the newly created conversation and is actively streaming
-      // into it.
+      // The conversation was just created by handleSend and its stream is
+      // already active. This effect fires because navigate() changed the URL,
+      // and abortControllerRef already points to the NEW stream's controller —
+      // aborting here would silently kill that stream (fetch-event-source
+      // treats aborts as a quiet close, firing no callbacks), leaving the UI
+      // stuck streaming until a page reload. So skip the abort and the state
+      // reset entirely; handleSend keeps streaming into the new conversation.
       justCreatedRef.current = false
       setSidebarOpen(false)
       return
     }
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    currentConversationIdRef.current = conversationId ?? null
     setStreamingContent('')
     setIsStreaming(false)
     setStreamError(null)
