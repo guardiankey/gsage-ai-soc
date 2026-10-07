@@ -116,18 +116,39 @@ CMD ["gunicorn", "-k", "src.backend_api.app.gunicorn_worker.AsyncioUvicornWorker
 #
 # Built ONCE and reused by runtime-api, runtime-mermaid and runtime-tools.
 # Eliminates ~3x duplication of these heavy installs in sibling stages.
+#
+# The installs are intentionally split into several RUN layers: each RUN is a
+# distinct cache entry, so touching one item (e.g. a font) only invalidates
+# that layer and its descendants — not the whole chromium/node/mermaid stack.
+# Keep the most volatile items (npm install) at the bottom.
 # =============================================================================
 FROM base AS base-mermaid
 
+# Layer 1/4 — repository tooling required by the NodeSource setup script.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        gnupg ca-certificates
+
+# Layer 2/4 — headless browser used by mermaid-cli (mmdc) to render diagrams.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && DEBIAN_FRONTEND=noninteractive apt-get update \
     && apt-get install -y --no-install-recommends \
-        gnupg ca-certificates chromium fonts-liberation fonts-noto-color-emoji \
+        chromium fonts-liberation fonts-noto-color-emoji
+
+# Layer 3/4 — Node.js 20 from NodeSource (provides npm for the step below).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs
 
+# Layer 4/4 — mermaid-cli (pinned). PUPPETEER_SKIP_DOWNLOAD keeps the Debian
+# chromium installed above as the only browser in the image.
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     PUPPETEER_SKIP_DOWNLOAD=1 npm install -g --omit=dev \
         @mermaid-js/mermaid-cli@11.4.2

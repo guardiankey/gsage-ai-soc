@@ -45,14 +45,23 @@ def _redact_config(config: dict) -> dict:
     }
 
 
-def _serialize(tc: GSageToolConfig, include_config: bool = False) -> dict:
+def _serialize(
+    tc: GSageToolConfig,
+    include_config: bool = False,
+    dept_ids: list[str] | None = None,
+) -> dict:
+    if dept_ids is None:
+        # Only safe when the collection was eager-loaded (lazy="selectin");
+        # for a freshly created config pass ``dept_ids=[]`` explicitly instead
+        # of touching ``tc.departments`` (would emit sync IO -> MissingGreenlet).
+        dept_ids = [str(d.dept_id) for d in tc.departments]
     data: dict = {
         "id": str(tc.id),
         "org_id": str(tc.org_id),
         "tool_name": tc.tool_name,
         "profile_id": tc.profile_id,
         "scope": tc.scope,
-        "dept_ids": [str(d.dept_id) for d in tc.departments],
+        "dept_ids": dept_ids,
         "updated_by_user_id": str(tc.updated_by_user_id) if tc.updated_by_user_id else None,
         "created_at": tc.created_at.isoformat(),
         "updated_at": tc.updated_at.isoformat(),
@@ -204,6 +213,7 @@ class ToolConfigCrudTool(CrudBaseTool):
         )
         tc = result.scalar_one_or_none()
 
+        existing_dept_ids: list[str] = []
         if tc:
             # Merge: preserve existing secret keys, overwrite non-secret keys
             existing = tc.config
@@ -213,6 +223,8 @@ class ToolConfigCrudTool(CrudBaseTool):
             merged.update(new_config)
             tc.config = merged
             tc.updated_by_user_id = agent_context.user_id
+            # Loaded by the ``selectin`` eager strategy on the query above.
+            existing_dept_ids = [str(d.dept_id) for d in tc.departments]
             created = False
         else:
             tc = GSageToolConfig(
@@ -230,7 +242,10 @@ class ToolConfigCrudTool(CrudBaseTool):
 
         elapsed = int((time.monotonic() - start) * 1000)
         return self._success(
-            data={**_serialize(tc, include_config=True), "created": created},
+            data={
+                **_serialize(tc, include_config=True, dept_ids=existing_dept_ids),
+                "created": created,
+            },
             execution_time_ms=elapsed,
         )
 

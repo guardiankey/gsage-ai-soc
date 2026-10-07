@@ -14,7 +14,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -83,20 +83,26 @@ async def _validate_dept_ids(
 async def _replace_departments(
     db: AsyncSession, tc: GSageToolConfig, dept_ids: list[uuid.UUID]
 ) -> None:
-    """Replace the config's department scope with ``dept_ids`` (empty = org-wide).
+    """Replace the config's department rows with ``dept_ids`` (empty = org-wide).
 
-    Uses the ORM ``departments`` collection so the ``delete-orphan`` cascade
-    removes the previous rows; the collection is always loaded (``lazy="selectin"``
-    on fetch, empty for a newly created config).  The intermediate flush emits
-    the DELETEs before the new INSERTs, so re-scoping to an overlapping set
-    (e.g. ``{A, B}`` → ``{B, C}``) cannot trip the ``(org, tool, profile, dept)``
-    unique constraint.
+    Uses a Core ``DELETE`` plus explicit inserts instead of the ORM
+    ``departments`` collection: the collection is not guaranteed to be loaded
+    (e.g. right after creating the config), and touching it in async context
+    would trigger a lazy load and raise ``MissingGreenlet``.  The DELETE runs
+    before the new rows are added, so re-scoping to an overlapping set
+    (e.g. ``{A, B}`` → ``{B, C}``) cannot trip the
+    ``(org, tool, profile, dept)`` unique constraint.
     """
-    tc.departments.clear()
+    await db.execute(
+        delete(GSageToolConfigDepartment).where(
+            GSageToolConfigDepartment.tool_config_id == tc.id
+        )
+    )
     await db.flush()
     for dept_id in dept_ids:
-        tc.departments.append(
+        db.add(
             GSageToolConfigDepartment(
+                tool_config_id=tc.id,
                 org_id=tc.org_id,
                 tool_name=tc.tool_name,
                 profile_id=tc.profile_id,

@@ -166,23 +166,40 @@ python scripts/manage_users.py add-to-group \
 
 ## `scripts_operations/publish-images.sh`
 
-Builds and pushes the production Docker images to a registry.
+Builds (and optionally pushes) the gSage runtime images to a registry. When
+buildx is available, all selected targets are built in a single
+`docker buildx bake` run, so stages shared by several images (`builder`,
+`base`, `base-mermaid`) are built exactly once — even on a cold cache — and
+heavy layers are cached in the registry (`type=registry,mode=max`) for fast
+incremental rebuilds.
 
-Defaults read the release tag from the `./VERSION` file at the repo root.
-Default targets are `backend_api`, `worker_tools`, `mcp_server`, `frontend`,
-and `curator`. Images are named `<registry>/gsage-<target>:<tag>` (e.g.
-`guardiankey/gsage-backend_api:0.1.0`).
+Images are named `<registry>/gsage-<target>:<tag>`, with `:latest` published
+only for versioned releases (never alongside the default `dev` tag).
+
+Key options: `--registry <R>` (required), `--target a,b,c`, `--tag <TAG>`,
+`--production` (tag from `./VERSION` + `:latest`), `--push`,
+`--cache-registry <R>` / `--no-cache-registry`, `--dry-run`, `--no-buildx`,
+`--no-latest`. Run with `--help` for the full list.
 
 ```bash
-# Dry-run (prints the docker commands it would execute)
-scripts_operations/publish-images.sh --dry-run
+# Generate + validate the buildx bake file without building
+scripts_operations/publish-images.sh --registry docker.io/guardiankey --dry-run
 
-# Publish every baseline image at the version from ./VERSION to Docker Hub
-scripts_operations/publish-images.sh --registry guardiankey --push
+# Development build (tag :dev; :latest is never published for dev)
+scripts_operations/publish-images.sh --registry docker.io/guardiankey --push
 
-# Publish a single image
-scripts_operations/publish-images.sh -t backend_api --tag 0.1.0 --push
+# Versioned release (tag from ./VERSION + :latest)
+scripts_operations/publish-images.sh --registry docker.io/guardiankey --production --push
+
+# A single image
+scripts_operations/publish-images.sh --registry docker.io/guardiankey --target backend_api --push
 ```
+
+When `--push` is used, the layer cache is exported to
+`<registry>/gsage-buildcache:<target>` with `mode=max` (intermediate stages
+included). Use `--no-cache-registry` to opt out and fall back to the inline
+cache embedded in the published image. Stale build-cache generations can be
+reclaimed with `docker buildx prune --max-used-space 40gb`.
 
 ---
 

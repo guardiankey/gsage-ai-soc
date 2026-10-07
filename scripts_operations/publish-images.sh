@@ -8,7 +8,8 @@
 # ── Image / target mapping ──────────────────────────────────────────────────
 #
 # Multi-target images (all built from docker/Dockerfile):
-#   gsage-backend_api     → runtime-minimal   FastAPI backend + celery + workers
+#   gsage-backend_api     → runtime-api       FastAPI backend + celery + workers
+#                                             (+ chromium/node for Teams mermaid)
 #   gsage-worker_tools    → runtime-tools     Celery worker + nmap/tshark/pandoc
 #   gsage-mcp_server      → runtime-mermaid   MCP server + chromium + mermaid-cli
 #   gsage-dev-full        → dev               Superset used by dev docker-compose
@@ -16,6 +17,18 @@
 # Single-Dockerfile images (standalone build context):
 #   gsage-frontend        (web_client/Dockerfile)   React SPA served by nginx
 #   gsage-curator         (curator/Dockerfile)      Reputation list service
+#
+# ── Build strategy (buildx) ─────────────────────────────────────────────────
+# All selected targets are built in a single `docker buildx bake` run, so
+# stages shared by several images (builder, base, base-mermaid) are built
+# exactly once even on a cold cache, and independent targets can be built in
+# parallel by BuildKit.
+#
+# The layer cache is registry-backed with `type=registry,mode=max` (it also
+# exports intermediate stages): when --push is used it defaults to
+# <registry>/gsage-buildcache:<target>, so follow-up builds are mostly cache
+# hits — on this machine, in CI, or on any host sharing the registry.
+# Disable with --no-cache-registry.
 #
 # ── Usage ───────────────────────────────────────────────────────────────────
 #   # Development build (default) — tags images as <registry>/<image>:dev
@@ -53,13 +66,17 @@
 #                        mcp_server, frontend, curator, dev-full.
 #   --no-latest          Skip the extra `:latest` tag.
 #   --push               Push images to the registry after build.
+#   --dry-run            Buildx only: generate + validate the bake file, print
+#                        the bake file and exit (no build, no push).
 #   --no-buildx          Use legacy `docker build` (default uses buildx with
-#                        cache mounts, parallel stages and registry cache).
-#   --cache-registry <R> When using buildx, also publish a registry-backed
-#                        layer cache at <R>/gsage-buildcache:<short>. Useful
-#                        in CI to share heavy layers (texlive, chromium)
-#                        across machines. Without this flag the script falls
-#                        back to inline cache embedded in the published image.
+#                        cache mounts, bake and registry cache).
+#   --cache-registry <R> Registry used for the layer cache at
+#                        <R>/gsage-buildcache:<target> (exported with
+#                        mode=max). Defaults to <registry> when --push is
+#                        used; set it to share the cache via another
+#                        namespace.
+#   --no-cache-registry  Do not use/update the registry-backed layer cache
+#                        (inline cache embedded in the published image only).
 #   -h | --help          Show this help.
 #
 # Authentication:
@@ -83,10 +100,14 @@ NO_LATEST=0
 # Use buildx by default (gives cache mounts, registry cache, parallel stages).
 # Override with --no-buildx for environments where buildx is unavailable.
 USE_BUILDX=1
-# When set (and using buildx), publish/consume a registry cache image
-# `<registry>/gsage-buildcache:<short>` to share layers across machines/CI.
-# Empty = inline cache only (cache embedded in the image manifest, no extra image).
+# Registry used for buildx layer cache images at <R>/gsage-buildcache:<short>.
+# Empty = default: when --push is used it falls back to $REGISTRY (disable
+# with --no-cache-registry). Otherwise the inline cache is used.
 CACHE_REGISTRY=""
+# Disable the fallback to $REGISTRY for the layer cache when pushing.
+NO_CACHE_REGISTRY=0
+# buildx only: generate + validate the bake file, print it and exit.
+DRY_RUN=0
 
 # All runtime targets published by default (dev-full is opt-in).
 DEFAULT_TARGETS=(backend_api worker_tools mcp_server frontend curator)
@@ -138,7 +159,8 @@ image_build_context() {
 }
 
 usage() {
-    sed -n '1,68p' "$0" | sed -n 's/^# \{0,1\}//p'
+    # Print the header comment block (everything before `set -euo pipefail`).
+    sed -n '2,/^set -euo pipefail$/p' "$0" | sed -e 's/^# \{0,1\}//' -e '$d'
     exit "${1:-0}"
 }
 
@@ -153,6 +175,8 @@ while [[ $# -gt 0 ]]; do
         --no-latest)    NO_LATEST=1; shift ;;
         --no-buildx)    USE_BUILDX=0; shift ;;
         --cache-registry) CACHE_REGISTRY="${2:-}"; shift 2 ;;
+        --no-cache-registry) NO_CACHE_REGISTRY=1; shift ;;
+        --dry-run)      DRY_RUN=1; shift ;;
         -h|--help)      usage 0 ;;
         *) echo "Unknown argument: $1" >&2; usage 1 ;;
     esac
@@ -207,6 +231,15 @@ fi
 # in the Dockerfiles are honored.
 export DOCKER_BUILDKIT=1
 
+# ── Registry-backed layer cache (default when pushing) ─────────────────────
+# Heavy layers (python deps, chromium, texlive, npm) are exported to
+# <CACHE_REGISTRY>/gsage-buildcache:<target> with mode=max, including
+# intermediate stages, so follow-up builds are mostly cache hits even on a
+# fresh builder or machine. Disable with --no-cache-registry.
+if [[ -z "$CACHE_REGISTRY" && $NO_CACHE_REGISTRY -eq 0 && $PUSH -eq 1 && $USE_BUILDX -eq 1 ]]; then
+    CACHE_REGISTRY="$REGISTRY"
+fi
+
 # Build list of targets to process.
 if [[ -z "$TARGETS_ARG" ]]; then
     SELECTED=("${DEFAULT_TARGETS[@]}")
@@ -230,6 +263,12 @@ fi
 echo "  Tag      : $TAG $([[ $NO_LATEST -eq 0 ]] && echo '+ latest')"
 echo "  Targets  : ${SELECTED[*]}"
 echo "  Push     : $([[ $PUSH -eq 1 ]] && echo 'yes' || echo 'no (build only)')"
+if [[ -n "$CACHE_REGISTRY" ]]; then
+    echo "  Cache    : registry ($CACHE_REGISTRY/gsage-buildcache:<target>, mode=max)"
+else
+    echo "  Cache    : inline (no registry cache)"
+fi
+[[ $DRY_RUN -eq 1 ]] && echo "  Dry run  : yes (no build, no push)"
 echo "══════════════════════════════════════════════════════════"
 echo ""
 
@@ -257,81 +296,169 @@ echo ""
 
 FAILED_PUSH=0
 
-# ── Build + tag + push loop ────────────────────────────────────────────────
+# ── Per-target refs / build plan ───────────────────────────────────────────
+# Resolve names, contexts and tags once; the buildx path feeds them into a
+# single `docker buildx bake` run (below), the legacy path into the
+# sequential `docker build` loop.
+declare -A TARGET_OF=() NAME_OF=() CTX_OF=() DF_OF=() FULL_TAG_OF=() LATEST_TAG_OF=()
 for short in "${SELECTED[@]}"; do
-    target="$(image_target "$short")"
-    base_name="$(image_name "$short")"
+    TARGET_OF[$short]="$(image_target "$short")"
+    NAME_OF[$short]="$(image_name "$short")"
     IFS=$'\t' read -r ctx_dir df_path < <(image_build_context "$short")
-    full_tag="$REGISTRY/$base_name:$TAG"
-    latest_tag="$REGISTRY/$base_name:latest"
+    CTX_OF[$short]="$ctx_dir"
+    DF_OF[$short]="$df_path"
+    FULL_TAG_OF[$short]="$REGISTRY/${NAME_OF[$short]}:$TAG"
+    LATEST_TAG_OF[$short]="$REGISTRY/${NAME_OF[$short]}:latest"
+done
 
+# Print the banner block for one target (shared by both build paths).
+print_plan() {
+    local short="$1"
     echo "──────────────────────────────────────────────────────────"
-    echo "  Building $base_name"
-    [[ "$target" != "-" ]] && echo "     target   = $target"
-    echo "     context  = $ctx_dir"
-    echo "     df       = $df_path"
-    echo "     → $full_tag"
-    [[ $NO_LATEST -eq 0 ]] && echo "     → $latest_tag"
+    echo "  Building ${NAME_OF[$short]}"
+    [[ "${TARGET_OF[$short]}" != "-" ]] && echo "     target   = ${TARGET_OF[$short]}"
+    echo "     context  = ${CTX_OF[$short]}"
+    echo "     df       = ${DF_OF[$short]}"
+    echo "     → ${FULL_TAG_OF[$short]}"
+    [[ $NO_LATEST -eq 0 ]] && echo "     → ${LATEST_TAG_OF[$short]}"
     echo "──────────────────────────────────────────────────────────"
+}
 
-    build_args=(build -f "$df_path")
-    [[ "$target" != "-" ]] && build_args+=(--target "$target")
-    build_args+=(-t "$full_tag")
-    [[ $NO_LATEST -eq 0 ]] && build_args+=(-t "$latest_tag")
-
-    if [[ $USE_BUILDX -eq 1 ]]; then
-        # buildx: enable inline cache + optional registry cache for cross-machine reuse.
-        build_args=(buildx "${build_args[@]}")
-        build_args+=(--build-arg BUILDKIT_INLINE_CACHE=1)
-        if [[ -n "$CACHE_REGISTRY" ]]; then
-            cache_ref="$CACHE_REGISTRY/gsage-buildcache:$short"
-            build_args+=(--cache-from "type=registry,ref=$cache_ref")
-            build_args+=(--cache-to   "type=registry,ref=$cache_ref,mode=max")
-        else
-            # Inline cache: layers are embedded in the image manifest itself.
-            # Effective only when --push is used (cache lives in the registry image).
-            build_args+=(--cache-to "type=inline,mode=max")
-            # Reuse layers from previously published image.
-            # Prefer :latest for cache (wider reuse across builds); fall back
-            # to the exact tag when :latest is not being published.
-            if [[ $NO_LATEST -eq 0 ]]; then
-                cache_from_ref="$latest_tag"
-            else
-                cache_from_ref="$full_tag"
-            fi
-            build_args+=(--cache-from "type=registry,ref=$cache_from_ref")
-        fi
-        # buildx: push and load are mutually exclusive. Push directly to skip the
-        # local daemon round-trip (faster I/O); otherwise load into local docker.
-        if [[ $PUSH -eq 1 ]]; then
-            build_args+=(--push)
-        else
-            build_args+=(--load)
-        fi
+# ── buildx bake definition (one entry per selected target) ─────────────────
+# Emitted as JSON at runtime so the image/target mapping stays defined only in
+# this script. A single bake graph lets BuildKit build stages shared by
+# several images (builder/base/base-mermaid) exactly once even on a cold
+# cache, and schedule independent targets in parallel.
+bake_cache_flags_of() {
+    # Output: "<cache-from json>;<cache-to json>;<build-args json or empty>"
+    local short="$1"
+    local prev_img="${FULL_TAG_OF[$short]}"
+    [[ $NO_LATEST -eq 0 ]] && prev_img="${LATEST_TAG_OF[$short]}"
+    if [[ -n "$CACHE_REGISTRY" ]]; then
+        local cache_ref="$CACHE_REGISTRY/gsage-buildcache:$short"
+        # Prefer the dedicated buildcache, but also accept layers from the
+        # last published image (covers the first run, before the cache image
+        # exists yet).
+        printf '["type=registry,ref=%s", "type=registry,ref=%s"];["type=registry,ref=%s,mode=max"];\n' \
+            "$cache_ref" "$prev_img" "$cache_ref"
+    else
+        # No registry cache: inline cache embedded in the pushed image.
+        printf '["type=registry,ref=%s"];["type=inline"];{"BUILDKIT_INLINE_CACHE": "1"}\n' "$prev_img"
     fi
-    build_args+=("$ctx_dir")
+}
 
-    docker "${build_args[@]}"
+bake_target_json() {
+    local short="$1" rel_df cache_from cache_to build_args
+    rel_df="$(realpath --relative-to="${CTX_OF[$short]}" "${DF_OF[$short]}")"
+    IFS=';' read -r cache_from cache_to build_args < <(bake_cache_flags_of "$short")
 
-    if [[ $PUSH -eq 1 && $USE_BUILDX -eq 0 ]]; then
+    printf '    "%s": {\n' "$short"
+    printf '      "context": "%s",\n' "${CTX_OF[$short]}"
+    printf '      "dockerfile": "%s",\n' "$rel_df"
+    [[ "${TARGET_OF[$short]}" != "-" ]] && printf '      "target": "%s",\n' "${TARGET_OF[$short]}"
+    printf '      "tags": ["%s"' "${FULL_TAG_OF[$short]}"
+    [[ $NO_LATEST -eq 0 ]] && printf ', "%s"' "${LATEST_TAG_OF[$short]}"
+    printf '],\n'
+    printf '      "cache-from": %s,\n' "$cache_from"
+    printf '      "cache-to": %s' "$cache_to"
+    [[ -n "$build_args" ]] && printf ',\n      "args": %s' "$build_args"
+    printf '\n    }'
+}
+
+write_bake_file() {
+    local out="$1" short sep=""
+    {
+        printf '{\n  "target": {\n'
+        for short in "${SELECTED[@]}"; do
+            printf '%s' "$sep"
+            bake_target_json "$short"
+            sep=$',\n'
+        done
+        printf '\n  }\n}\n'
+    } > "$out"
+}
+
+# ── Build ──────────────────────────────────────────────────────────────────
+if [[ $USE_BUILDX -eq 1 ]]; then
+    # buildx: single bake run for every selected target.
+    for short in "${SELECTED[@]}"; do
+        print_plan "$short"
+    done
+
+    BAKE_FILE="${TMPDIR:-/tmp}/gsage-bake-$$-${RANDOM}.json"
+    cleanup_bake_file() {
+        # Keep the generated file on --dry-run so it can be inspected/reused.
+        [[ $DRY_RUN -eq 1 ]] || rm -f "$BAKE_FILE"
+    }
+    trap cleanup_bake_file EXIT
+
+    write_bake_file "$BAKE_FILE"
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "  Dry run — generated bake file: $BAKE_FILE"
+        sed 's/^/    /' "$BAKE_FILE"
         echo ""
-        echo "  Pushing $full_tag …"
-        if ! docker push "$full_tag"; then
-            FAILED_PUSH=1
-            echo "  ERROR: push failed for $full_tag" >&2
-            continue
+        if docker buildx bake -f "$BAKE_FILE" "${SELECTED[@]}" --print >/dev/null; then
+            echo "  ✔ bake file validated (docker buildx bake --print)"
+        else
+            echo "  ERROR: bake file failed validation" >&2
+            exit 1
         fi
-        if [[ $NO_LATEST -eq 0 ]]; then
-            echo "  Pushing $latest_tag …"
-            if ! docker push "$latest_tag"; then
-                FAILED_PUSH=1
-                echo "  ERROR: push failed for $latest_tag" >&2
-            fi
-        fi
+        exit 0
     fi
+
+    # buildx: push directly to the registry, or load into the local daemon.
+    # The flag applies to every target in the bake graph.
+    bake_flags=()
+    if [[ $PUSH -eq 1 ]]; then
+        bake_flags+=(--push)
+    else
+        bake_flags+=(--load)
+    fi
+
+    docker buildx bake -f "$BAKE_FILE" "${bake_flags[@]}" "${SELECTED[@]}"
 
     echo ""
-done
+else
+    # ── Legacy path (--no-buildx): sequential docker build + docker push ───
+    for short in "${SELECTED[@]}"; do
+        print_plan "$short"
+
+        docker_args=(build -f "${DF_OF[$short]}")
+        [[ "${TARGET_OF[$short]}" != "-" ]] && docker_args+=(--target "${TARGET_OF[$short]}")
+        docker_args+=(-t "${FULL_TAG_OF[$short]}")
+        [[ $NO_LATEST -eq 0 ]] && docker_args+=(-t "${LATEST_TAG_OF[$short]}")
+        docker_args+=("${CTX_OF[$short]}")
+
+        if [[ $DRY_RUN -eq 1 ]]; then
+            echo "  (dry run) docker ${docker_args[*]}"
+            [[ $PUSH -eq 1 ]] && echo "  (dry run) docker push ${FULL_TAG_OF[$short]}"
+            echo ""
+            continue
+        fi
+
+        docker "${docker_args[@]}"
+
+        if [[ $PUSH -eq 1 ]]; then
+            echo ""
+            echo "  Pushing ${FULL_TAG_OF[$short]} …"
+            if ! docker push "${FULL_TAG_OF[$short]}"; then
+                FAILED_PUSH=1
+                echo "  ERROR: push failed for ${FULL_TAG_OF[$short]}" >&2
+                continue
+            fi
+            if [[ $NO_LATEST -eq 0 ]]; then
+                echo "  Pushing ${LATEST_TAG_OF[$short]} …"
+                if ! docker push "${LATEST_TAG_OF[$short]}"; then
+                    FAILED_PUSH=1
+                    echo "  ERROR: push failed for ${LATEST_TAG_OF[$short]}" >&2
+                fi
+            fi
+        fi
+
+        echo ""
+    done
+fi
 
 echo "══════════════════════════════════════════════════════════"
 if [[ $FAILED_PUSH -eq 1 ]]; then

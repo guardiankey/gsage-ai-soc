@@ -139,7 +139,8 @@ services:
           memory: 1.5G
 
   minio:
-    image: minio/minio:RELEASE.2024-07-13T01-46-15Z
+    #image: minio/minio:RELEASE.2024-07-13T01-46-15Z # deprecated
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
     container_name: gsage-minio
     restart: unless-stopped
     environment:
@@ -151,7 +152,8 @@ services:
     networks:
       - gsage-internal
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      #test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 10s
       retries: 5
