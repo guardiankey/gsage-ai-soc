@@ -44,8 +44,8 @@ _tool_session_ctx: ContextVar[Optional[AsyncSession]] = ContextVar(
 MAX_RETRIES = 2
 RETRY_BACKOFF_SECONDS = [1.0, 2.0]  # exponential: 1s then 2s
 
-# Redis key patterns — include profile_id for per-profile isolation
-TOOL_CONFIG_CACHE_KEY = "toolcfg:{org_id}:{tool_name}:{profile_id}"
+# Redis key patterns — include profile_id and department for isolation
+TOOL_CONFIG_CACHE_KEY = "toolcfg:{org_id}:{dept_id}:{tool_name}:{profile_id}"
 TOOL_RATE_LIMIT_KEY = "ratelimit:{org_id}:{tool_name}:{profile_id}"
 TOOL_CONFIG_CACHE_TTL = 300  # 5 minutes
 
@@ -1001,12 +1001,22 @@ class BaseTool(ABC):
         2. Cache miss → query DB, decrypt, validate, cache.
         3. Returns None if no config exists (tool uses config_defaults).
 
+        Scope resolution: a global config (``scope='org'``) applies to everyone;
+        a department config (``scope='dept'``) applies only when the requesting
+        agent belongs to one of its departments.  When both exist, the
+        department config is shallow-**merged over** the global one (department
+        keys win).  The cache key includes the department so results are never
+        leaked across departments.
+
         When :attr:`config_namespace` is set, rows for both the namespace
-        and ``self.name`` are loaded and merged (shallow), with per-tool
-        values taking precedence.
+        and ``self.name`` are loaded and merged (shallow) in lookup order, with
+        per-tool values taking precedence; each key resolves its own
+        global/department pair before the merge.
         """
+        dept_key = str(agent_context.dept_id) if agent_context.dept_id else "_org_"
         cache_key = TOOL_CONFIG_CACHE_KEY.format(
             org_id=agent_context.org_id,
+            dept_id=dept_key,
             tool_name=self.name,
             profile_id=profile_id,
         )
@@ -1015,14 +1025,16 @@ class BaseTool(ABC):
         if cached_raw is not None:
             cached_cfg = json.loads(cached_raw)
             logger.debug(
-                "load_config: cache HIT tool=%s org=%s profile=%s keys=%s",
-                self.name, agent_context.org_id, profile_id,
+                "load_config: cache HIT tool=%s org=%s profile=%s dept=%s keys=%s",
+                self.name, agent_context.org_id, profile_id, dept_key,
                 list(cached_cfg.keys()) if isinstance(cached_cfg, dict) else type(cached_cfg).__name__,
             )
             return cached_cfg
 
         # Cache miss — query DB.  When a namespace is declared we fetch
-        # both rows in one query and merge in lookup order.
+        # both rows in one query and merge in lookup order.  The
+        # ``departments`` relationship is eagerly loaded (lazy="selectin")
+        # so we can evaluate scope without extra round-trips.
         lookup_keys = self._config_lookup_keys()
         stmt = select(GSageToolConfig).where(
             GSageToolConfig.org_id == agent_context.org_id,
@@ -1030,34 +1042,59 @@ class BaseTool(ABC):
             GSageToolConfig.profile_id == profile_id,
         )
         result = await session.execute(stmt)
-        rows = {row.tool_name: row for row in result.scalars().all()}
 
-        if not rows:
-            logger.debug(
-                "load_config: cache MISS, NO DB rows tool=%s org=%s profile=%s "
-                "lookup_keys=%s — tool will use config_defaults/env only",
-                self.name, agent_context.org_id, profile_id, lookup_keys,
-            )
-            return None  # Caller uses config_defaults
+        # Group candidates by tool name, then resolve each key to its global
+        # and matching department config.  Global is applied first so the
+        # department keys override it (shallow merge).
+        by_key: dict[str, list[GSageToolConfig]] = {}
+        for row in result.scalars().all():
+            by_key.setdefault(row.tool_name, []).append(row)
 
-        # Merge in lookup order (base first, override last).  ``row.config``
-        # decrypts on access.
+        def _matches_dept(row: GSageToolConfig) -> bool:
+            if agent_context.dept_id is None:
+                return False  # department config and the caller has no dept
+            return any(d.dept_id == agent_context.dept_id for d in row.departments)
+
         merged: dict = {}
+        found_rows: list[str] = []
+        applicable = False
         for key in lookup_keys:
-            row = rows.get(key)
-            if row is None:
+            global_row: Optional[GSageToolConfig] = None
+            dept_row: Optional[GSageToolConfig] = None
+            for row in by_key.get(key, []):
+                if row.scope == "org":
+                    global_row = row
+                elif row.scope == "dept" and _matches_dept(row):
+                    dept_row = row
+            if global_row is None and dept_row is None:
                 continue
-            row_config = row.config
-            if isinstance(row_config, dict):
-                merged.update(row_config)
+            applicable = True
+            if global_row is not None:
+                row_config = global_row.config
+                if isinstance(row_config, dict):
+                    merged.update(row_config)
+                found_rows.append(global_row.tool_name)
+            if dept_row is not None:
+                row_config = dept_row.config
+                if isinstance(row_config, dict):
+                    merged.update(row_config)
+                found_rows.append(dept_row.tool_name)
 
-        if not merged:
+        if applicable and not merged:
             logger.warning(
                 "load_config: rows found but merged config EMPTY tool=%s org=%s "
-                "profile=%s found_rows=%s (decryption returned non-dict?)",
-                self.name, agent_context.org_id, profile_id, list(rows.keys()),
+                "profile=%s dept=%s found_rows=%s (decryption returned non-dict?)",
+                self.name, agent_context.org_id, profile_id, dept_key, found_rows,
             )
             return None
+
+        if not merged:
+            logger.debug(
+                "load_config: cache MISS, NO applicable DB rows tool=%s org=%s "
+                "profile=%s dept=%s lookup_keys=%s — tool will use config_defaults/env only",
+                self.name, agent_context.org_id, profile_id, dept_key, lookup_keys,
+            )
+            return None  # Caller uses config_defaults
 
         # Validate against schema (basic required fields check)
         if self.config_schema:
@@ -1074,7 +1111,7 @@ class BaseTool(ABC):
             "load_config: cache MISS, loaded from DB tool=%s org=%s profile=%s "
             "found_rows=%s merged_keys=%s",
             self.name, agent_context.org_id, profile_id,
-            list(rows.keys()), list(merged.keys()),
+            found_rows, list(merged.keys()),
         )
 
         # Cache the decrypted, merged config

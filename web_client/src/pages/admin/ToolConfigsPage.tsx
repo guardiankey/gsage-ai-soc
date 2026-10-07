@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useAuth } from '@/contexts/AuthContext'
 import ToolInfoModal from '@/components/admin/ToolInfoModal'
 import {
@@ -28,6 +29,7 @@ import {
   type ToolConfigOut,
   type ToolConfigCreate,
   type ToolConfigUpdate,
+  type ToolConfigScope,
   type AvailableTool,
   type DepartmentOut,
   type ToolCatalogEntry,
@@ -215,6 +217,7 @@ export default function ToolConfigsPage() {
                     <td className="px-4 py-3">
                       <ConfigCountBadge
                         entry={ns}
+                        departments={departments}
                         onEdit={handleEditConfig}
                         onDelete={(tc) => setDeleteTarget(tc)}
                       />
@@ -251,6 +254,7 @@ export default function ToolConfigsPage() {
                       <td className="px-4 py-3">
                         <ConfigCountBadge
                           entry={child}
+                          departments={departments}
                           onEdit={handleEditConfig}
                           onDelete={(tc) => setDeleteTarget(tc)}
                         />
@@ -300,6 +304,7 @@ export default function ToolConfigsPage() {
                   <td className="px-4 py-3">
                     <ConfigCountBadge
                       entry={tool}
+                      departments={departments}
                       onEdit={handleEditConfig}
                       onDelete={(tc) => setDeleteTarget(tc)}
                     />
@@ -370,7 +375,7 @@ export default function ToolConfigsPage() {
           {editTarget && (
             <ToolConfigForm
               initial={editTarget}
-              onSubmit={(p) => muUpdate.mutate({ id: editTarget.id, payload: { tool_name: p.tool_name, profile_id: p.profile_id, dept_id: p.dept_id, description: p.description, config: p.config } })}
+              onSubmit={(p) => muUpdate.mutate({ id: editTarget.id, payload: { tool_name: p.tool_name, profile_id: p.profile_id, scope: p.scope, dept_ids: p.dept_ids, description: p.description, config: p.config } })}
               onCancel={() => setEditTarget(null)}
               availableTools={allToolOptions}
               departments={departments}
@@ -443,11 +448,13 @@ export default function ToolConfigsPage() {
 
 function ConfigCountBadge({
   entry,
+  departments,
   onExpand,
   onEdit,
   onDelete,
 }: {
   entry: ToolCatalogEntry
+  departments: DepartmentOut[]
   onExpand?: () => void
   onEdit?: (tc: ToolConfigOut) => void
   onDelete?: (tc: ToolConfigOut) => void
@@ -490,6 +497,13 @@ function ConfigCountBadge({
           {entry.configs.map((tc) => (
             <div key={tc.id} className="flex items-center gap-1 text-xs">
               <Badge variant="secondary" className="text-xs">{tc.profile_id}</Badge>
+              <span className="text-muted-foreground max-w-[16rem] truncate">
+                {tc.scope === 'org' || tc.dept_ids.length === 0
+                  ? t('admin.toolConfigs.allDepartments')
+                  : tc.dept_ids
+                      .map((id) => departments.find((d) => d.id === id)?.name ?? id)
+                      .join(', ')}
+              </span>
               <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => onEdit({ ...tc, org_id: '', tool_name: entry.name, config: {}, updated_by_user_id: null, created_at: '', updated_at: '' } as unknown as ToolConfigOut)}>
                 <Pencil className="h-3 w-3" />
               </Button>
@@ -519,7 +533,9 @@ function ToolConfigForm({ onSubmit, onCancel, initial, initialToolName, configDe
   const { t } = useTranslation()
   const [toolName, setToolName] = useState(initial?.tool_name ?? initialToolName ?? '')
   const [profileId, setProfileId] = useState(initial?.profile_id ?? 'default')
-  const [deptId, setDeptId] = useState<string>(initial?.dept_id ?? '__org__')
+  const [scope, setScope] = useState<ToolConfigScope>(initial?.scope ?? 'org')
+  const [deptIds, setDeptIds] = useState<string[]>(initial?.dept_ids ?? [])
+  const [deptError, setDeptError] = useState<string | null>(null)
   const [description, setDescription] = useState(initial?.description ?? '')
   const [configJson, setConfigJson] = useState(() => {
     if (initial) return JSON.stringify(initial.config, null, 2)
@@ -546,7 +562,18 @@ function ToolConfigForm({ onSubmit, onCancel, initial, initialToolName, configDe
       setJsonError(t('datastores.invalidJson'))
       return
     }
-    onSubmit({ tool_name: toolName, profile_id: profileId, dept_id: deptId === '__org__' ? null : deptId, description: description || null, config })
+    if (scope === 'dept' && deptIds.length === 0) {
+      setDeptError(t('admin.toolConfigs.departmentsHint', 'At least one department is required.'))
+      return
+    }
+    onSubmit({
+      tool_name: toolName,
+      profile_id: profileId,
+      scope,
+      dept_ids: scope === 'org' ? [] : deptIds,
+      description: description || null,
+      config,
+    })
   }
 
   return (
@@ -570,17 +597,53 @@ function ToolConfigForm({ onSubmit, onCancel, initial, initialToolName, configDe
         <Input value={profileId} onChange={(e) => setProfileId(e.target.value)} />
       </div>
       <div className="space-y-1.5">
-        <Label>{t('admin.toolConfigs.department')}</Label>
-        <Select value={deptId} onValueChange={setDeptId}>
-          <SelectTrigger><SelectValue placeholder={t('admin.toolConfigs.allDepartments')} /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__org__">{t('admin.toolConfigs.allDepartments')}</SelectItem>
-            {departments.map((d) => (
-              <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Label>{t('admin.toolConfigs.scope', 'Scope')}</Label>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={scope === 'org' ? 'default' : 'outline'}
+            onClick={() => { setScope('org'); setDeptError(null) }}
+          >
+            {t('admin.toolConfigs.allDepartments')}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={scope === 'dept' ? 'default' : 'outline'}
+            onClick={() => setScope('dept')}
+          >
+            {t('admin.toolConfigs.specificDepartments', 'Specific departments')}
+          </Button>
+        </div>
       </div>
+      {scope === 'dept' && (
+        <div className="space-y-1.5">
+          <Label>{t('admin.toolConfigs.department')}</Label>
+          <div className="max-h-40 overflow-y-auto rounded-md border p-2 space-y-1.5">
+            {departments.length === 0 && (
+              <span className="text-xs text-muted-foreground">{t('common.noResults')}</span>
+            )}
+            {departments.map((d) => (
+              <label key={d.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={deptIds.includes(d.id)}
+                  onCheckedChange={(checked) => {
+                    setDeptError(null)
+                    setDeptIds((prev) =>
+                      checked ? [...prev, d.id] : prev.filter((x) => x !== d.id)
+                    )
+                  }}
+                />
+                {d.name}
+              </label>
+            ))}
+          </div>
+          <p className={deptError ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+            {deptError ?? t('admin.toolConfigs.departmentsHint', 'At least one department is required.')}
+          </p>
+        </div>
+      )}
       <div className="space-y-1.5">
         <Label>{t('admin.toolConfigs.description')}</Label>
         <Input value={description} onChange={(e) => setDescription(e.target.value)} />

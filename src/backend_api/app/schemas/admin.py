@@ -243,7 +243,8 @@ class ResetPasswordResponse(BaseModel):
 class ToolConfigOut(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
-    dept_id: Optional[uuid.UUID]
+    scope: str = "org"  # 'org' | 'dept'
+    dept_ids: list[uuid.UUID] = Field(default_factory=list)
     tool_name: str
     profile_id: str
     description: Optional[str]
@@ -256,7 +257,8 @@ class ToolConfigOut(BaseModel):
 
 
 class ToolConfigCreate(BaseModel):
-    dept_id: Optional[uuid.UUID] = None
+    scope: str = Field(default="org", pattern="^(org|dept)$")
+    dept_ids: list[uuid.UUID] = Field(default_factory=list)
     tool_name: str = Field(..., min_length=1, max_length=100)
     profile_id: str = Field(default="default", min_length=1, max_length=100)
     description: Optional[str] = None
@@ -266,7 +268,11 @@ class ToolConfigCreate(BaseModel):
 class ToolConfigUpdate(BaseModel):
     tool_name: Optional[str] = None
     profile_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    dept_id: Optional[uuid.UUID] = None
+    # ``None`` → leave the scope unchanged.
+    scope: Optional[str] = Field(default=None, pattern="^(org|dept)$")
+    # ``None`` → leave the department set unchanged; required non-empty when the
+    # resulting scope is 'dept'; ignored (cleared) when the scope is 'org'.
+    dept_ids: Optional[list[uuid.UUID]] = None
     description: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
 
@@ -279,7 +285,8 @@ class ToolConfigSummary(BaseModel):
     """Lightweight config reference for tool catalog rows."""
     id: uuid.UUID
     profile_id: str
-    dept_id: Optional[uuid.UUID]
+    scope: str = "org"  # 'org' | 'dept'
+    dept_ids: list[uuid.UUID] = Field(default_factory=list)
     description: Optional[str]
 
 

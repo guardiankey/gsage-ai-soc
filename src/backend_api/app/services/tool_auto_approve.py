@@ -30,8 +30,8 @@ from src.shared.models.tool_config import GSageToolConfig
 log = logging.getLogger(__name__)
 
 _CACHE_TTL_SECONDS = 30
-# Cache entries: (org_id, tool_name) -> (value, expires_at_monotonic)
-_cache: dict[tuple[uuid.UUID, str], tuple[bool, float]] = {}
+# Cache entries: (org_id, tool_name, dept_id) -> (value, expires_at_monotonic)
+_cache: dict[tuple[uuid.UUID, str, Optional[uuid.UUID]], tuple[bool, float]] = {}
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -59,16 +59,21 @@ def _env_auto_approve(tool_name: str) -> Optional[bool]:
 
 
 async def _db_auto_approve(
-    *, org_id: uuid.UUID, tool_name: str
+    *,
+    org_id: uuid.UUID,
+    tool_name: str,
+    dept_id: Optional[uuid.UUID] = None,
 ) -> Optional[bool]:
-    """Read ``auto_approve`` from the ``GSageToolConfig`` row (profile=default).
+    """Read ``auto_approve`` from the ``GSageToolConfig`` rows (profile=default).
 
+    Resolves the same scope precedence as the tool runtime: the global config
+    (``scope='org'``) is applied first, then the department config
+    (``scope='dept'``) whose departments include ``dept_id`` overrides it.
     Opens a **fresh** ``AsyncSession`` so this lookup is safe to call from
     contexts where the request-scoped session is already closed (e.g. the
     SSE generator that keeps streaming after FastAPI finalised the
-    response). Returns ``None`` when there is no row, or when the row
-    exists but does not declare ``auto_approve``. Decryption errors are
-    logged and treated as ``None`` so the caller falls back to env/default.
+    response). Returns ``None`` when no applicable row declares
+    ``auto_approve``; decryption errors are logged and skipped.
     """
     stmt = select(GSageToolConfig).where(
         GSageToolConfig.org_id == org_id,
@@ -76,44 +81,53 @@ async def _db_auto_approve(
         GSageToolConfig.profile_id == "default",
     )
     session_maker = _get_session_maker()
+    merged: dict = {}
     async with session_maker() as session:
         result = await session.execute(stmt)
-        row = result.scalar_one_or_none()
-    if row is None:
+        rows = list(result.scalars().all())
+        # Global first so the department config overrides it (shallow merge).
+        rows.sort(key=lambda r: 0 if r.scope == "org" else 1)
+        for row in rows:
+            if row.scope == "dept":
+                scoped = [d.dept_id for d in row.departments]
+                if dept_id is None or dept_id not in scoped:
+                    continue
+            try:
+                config = row.config
+            except Exception as exc:
+                log.warning(
+                    "auto_approve: failed to decrypt config for org=%s tool=%s: %s",
+                    org_id, tool_name, exc,
+                )
+                continue
+            if isinstance(config, dict):
+                merged.update(config)
+    if "auto_approve" not in merged:
         return None
-    try:
-        config = row.config
-    except Exception as exc:
-        log.warning(
-            "auto_approve: failed to decrypt config for org=%s tool=%s: %s",
-            org_id, tool_name, exc,
-        )
-        return None
-    if not isinstance(config, dict):
-        return None
-    if "auto_approve" not in config:
-        return None
-    return _coerce_bool(config["auto_approve"])
+    return _coerce_bool(merged["auto_approve"])
 
 
 async def is_auto_approve(
-    *, org_id: uuid.UUID, tool_name: str
+    *,
+    org_id: uuid.UUID,
+    tool_name: str,
+    dept_id: Optional[uuid.UUID] = None,
 ) -> bool:
     """Return True when HITL approvals for this tool should be auto-approved.
 
     Precedence: DB toolconfig > env var > ``False``.
     """
     now = time.monotonic()
-    key = (org_id, tool_name)
+    key = (org_id, tool_name, dept_id)
     cached = _cache.get(key)
     if cached is not None and cached[1] > now:
         log.debug(
-            "is_auto_approve: cache HIT org=%s tool=%s → %s",
-            org_id, tool_name, cached[0],
+            "is_auto_approve: cache HIT org=%s tool=%s dept=%s → %s",
+            org_id, tool_name, dept_id, cached[0],
         )
         return cached[0]
 
-    db_value = await _db_auto_approve(org_id=org_id, tool_name=tool_name)
+    db_value = await _db_auto_approve(org_id=org_id, tool_name=tool_name, dept_id=dept_id)
     if db_value is not None:
         resolved = db_value
         log.debug(

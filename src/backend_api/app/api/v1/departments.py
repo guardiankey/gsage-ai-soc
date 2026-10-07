@@ -151,6 +151,12 @@ async def delete_org_department(
     try:
         await delete_department(db, dept_id=dept_id, org_id=ctx.org_id)
         await db.commit()
+        # Department-scoped tool configs may have been auto-deleted: flush the
+        # MCP server's cached configs for this org (best-effort).
+        from src.shared.cache.permissions_cache import get_perm_redis_client  # noqa: PLC0415
+        from src.shared.cache.tool_config_cache import invalidate_tool_config_cache  # noqa: PLC0415
+
+        await invalidate_tool_config_cache(get_perm_redis_client(), ctx.org_id)
     except DepartmentNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
     except DepartmentDeleteError as exc:

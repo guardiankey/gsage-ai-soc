@@ -306,7 +306,7 @@ Do not duplicate these concerns inside `execute()` unless you have a very specif
 2. profile-aware permission checks
 3. Redis rate limiting
 4. circuit breaker checks
-5. config loading with a Redis cache (`toolcfg:{org_id}:{tool_name}:{profile_id}`, TTL 5 minutes)
+5. config loading with a Redis cache (`toolcfg:{org_id}:{dept_id}:{tool_name}:{profile_id}`, TTL 5 minutes)
 6. state loading
 7. optional background pre-flight dispatch
 8. required-parameter presence validation from `params_schema`
@@ -437,7 +437,7 @@ You do not need to write any code for this one. `load_config()` reads `GSageTool
 Use this mental model:
 
 - config cache is automatic
-- it is scoped by org + tool + profile
+- it is scoped by org + department + tool + profile
 - it caches configuration only, not business results
 
 ### 2. Execution-result cache via `src.shared.cache.cached`
@@ -535,6 +535,32 @@ Each profile is stored as a `GSageToolConfig` row with:
 The default `enrich_for_listing()` implementation adds a profile summary to the tool description in `list_tools`, and `mcp_server.main.handle_list_tools()` injects the visible `config_profile` enum into the MCP schema.
 
 You can override `enrich_for_listing()` if your tool needs to expose richer runtime hints, such as hosts, presets, or environment labels.
+
+### Scope And Department Overrides
+
+A tool config has an explicit `scope`:
+
+- `org`  → **global**, applies to the whole organization (at most one per
+  `(org, tool_name, profile_id)`; partial unique index `uq_tool_configs_global`);
+- `dept` → applies **only** to the departments listed in
+  `gsage_tool_config_departments` (the sets of different department configs for
+  the same tool/profile must be disjoint, enforced by
+  `uq_tool_config_dept_scope`).
+
+At runtime `load_config()` resolves, per tool/profile:
+
+1. the department config whose set contains `agent_context.dept_id`;
+2. otherwise the global config;
+3. otherwise env vars / `config_defaults`.
+
+When both exist, the department config is **shallow-merged over** the global one
+(department keys win; omitted keys are inherited):
+`effective = config_defaults ∪ env ∪ global_config ∪ dept_config`.
+
+A caller with no active department matches only the global config. The Redis
+cache key includes the department, so a merged result is never served to another
+department. Deleting a department that leaves a department config with zero
+departments auto-deletes that config.
 
 ---
 

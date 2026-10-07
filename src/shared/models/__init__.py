@@ -20,7 +20,7 @@ from src.shared.models.agent_run import GSageAgentRun
 
 # Tool models
 from src.shared.models.tool import GSageTool
-from src.shared.models.tool_config import GSageToolConfig
+from src.shared.models.tool_config import GSageToolConfig, GSageToolConfigDepartment
 from src.shared.models.tool_state import GSageToolState
 from src.shared.models.tool_cache import GSageToolCache, CacheScope
 from src.shared.models.org_tool_settings import GSageOrgToolSettings

@@ -178,10 +178,13 @@ export interface ResetPasswordResponse {
 }
 
 // ---------- ToolConfigs ----------
+export type ToolConfigScope = 'org' | 'dept'
+
 export interface ToolConfigOut {
   id: string
   org_id: string
-  dept_id: string | null
+  scope: ToolConfigScope
+  dept_ids: string[]
   tool_name: string
   profile_id: string
   description: string | null
@@ -192,7 +195,8 @@ export interface ToolConfigOut {
 }
 
 export interface ToolConfigCreate {
-  dept_id?: string | null
+  scope?: ToolConfigScope
+  dept_ids?: string[]
   tool_name: string
   profile_id?: string
   description?: string | null
@@ -202,7 +206,8 @@ export interface ToolConfigCreate {
 export interface ToolConfigUpdate {
   tool_name?: string
   profile_id?: string
-  dept_id?: string | null
+  scope?: ToolConfigScope
+  dept_ids?: string[]
   description?: string | null
   config?: Record<string, unknown>
 }
@@ -211,7 +216,8 @@ export interface ToolConfigUpdate {
 export interface ToolConfigSummary {
   id: string
   profile_id: string
-  dept_id: string | null
+  scope: ToolConfigScope
+  dept_ids: string[]
   description: string | null
 }
 

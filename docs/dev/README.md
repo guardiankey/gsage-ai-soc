@@ -48,7 +48,7 @@ The short version is:
    Operators can add custom MCP tools in `custom_code/tools/` and custom auth providers in `custom_code/auth_backends/` without editing the core packages.
 
 4. Configuration is tenant-scoped and mostly stored in PostgreSQL.
-   Tool config lives in `GSageToolConfig` (encrypted JSON), tool runtime state lives in `GSageToolState` (plain JSONB), and per-org auth chain/config lives in `GSageOrganization.auth_providers` plus `GSageOrganization.auth_config`.
+   Tool config lives in `GSageToolConfig` (encrypted JSON), optionally scoped to one or more departments via `GSageToolConfigDepartment`; tool runtime state lives in `GSageToolState` (plain JSONB), and per-org auth chain/config lives in `GSageOrganization.auth_providers` plus `GSageOrganization.auth_config`.
 
 5. Tool discovery is intentionally split.
    `list_tools` exposes only `core_tool=True` tools to keep MCP prompts small; the `search_tools` meta-tool is how the agent discovers the rest of the authorized catalog.

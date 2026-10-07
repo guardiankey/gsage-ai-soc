@@ -88,7 +88,8 @@ async def upsert_external_user(
         Successful AuthResult from the provider chain.
     provider_config:
         Merged provider config for this org.  Used for ``group_mapping``,
-        ``default_role``, and ``auto_create_groups``.
+        ``default_role``, ``auto_create_groups``, and
+        ``auto_create_departments``.
 
     Returns
     -------
@@ -458,7 +459,7 @@ async def _sync_department_memberships(
     When the same department is assigned by multiple matched groups, the
     highest-priority dept role wins (admin > member > viewer).
 
-    When ``auto_create_departments`` is True (default: False) missing
+    When ``auto_create_departments`` is True (default: True) missing
     departments are created automatically.
 
     Stale memberships (departments the user is currently in but no longer
@@ -468,7 +469,7 @@ async def _sync_department_memberships(
     If no department mapping is found at all the user is placed in the
     org's default department.
     """
-    auto_create: bool = bool(provider_config.get("auto_create_departments", False))
+    auto_create: bool = bool(provider_config.get("auto_create_departments", True))
 
     # ── 1. Build desired_depts: {dept_name: dept_role} from all matched groups ──
     desired_depts: dict[str, str] = {}

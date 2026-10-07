@@ -60,6 +60,7 @@ async def create_tool_config(
 
     tc = GSageToolConfig(
         org_id=org_id,
+        scope="org",
         tool_name=tool_name.strip(),
         profile_id=profile_id.strip(),
         description=description.strip() or None,
@@ -236,6 +237,7 @@ def _tool_config_to_dict(tc: Any) -> dict[str, Any]:
         "org_id": str(tc.org_id),
         "tool_name": tc.tool_name,
         "profile_id": tc.profile_id,
+        "scope": tc.scope,
         "description": tc.description or "",
         "config": config,
         "updated_at": tc.updated_at.isoformat() if tc.updated_at else "",

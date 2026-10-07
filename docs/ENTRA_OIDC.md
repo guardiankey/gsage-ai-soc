@@ -165,7 +165,7 @@ Optional fields supported by gSage include:
 - `required_groups`: block login unless the user belongs to at least one allowed Entra group
 - `group_mapping`: map Entra group object IDs to gSage roles, groups, and departments
 - `auto_create_groups`: create missing local gSage groups automatically
-- `auto_create_departments`: create missing local departments automatically
+- `auto_create_departments`: create missing local departments automatically (default: `true`)
 
 ### 3. Add email-domain lookup mappings when needed
 

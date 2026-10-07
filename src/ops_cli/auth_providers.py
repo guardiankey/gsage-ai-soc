@@ -107,7 +107,7 @@ def register(parser: argparse.ArgumentParser) -> None:
     c.add_argument("--auto-provision-users", choices=["true", "false"], default=None)
     c.add_argument("--auto-create-groups", choices=["true", "false"], default=None)
     c.add_argument("--auto-create-departments", choices=["true", "false"], default=None,
-                   help="When true, missing departments referenced in group_mapping are auto-created")
+                   help="Auto-create missing departments referenced in group_mapping (default: true)")
     c.add_argument("--required-groups", default=None,
                    help="Comma-separated list of group object IDs (login gate)")
     c.add_argument("--group-mapping-json", default=None,

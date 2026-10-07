@@ -19,7 +19,7 @@ import re
 import uuid
 from typing import Optional, Sequence
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -286,6 +286,17 @@ async def delete_department(
 
     await db.delete(dept)
     await db.flush()
+    # Auto-delete department-scoped tool configs that just lost their last
+    # department (the FK cascade above removed their join rows).
+    from src.shared.models.tool_config import GSageToolConfig  # noqa: PLC0415
+
+    await db.execute(
+        delete(GSageToolConfig).where(
+            GSageToolConfig.org_id == org_id,
+            GSageToolConfig.scope == "dept",
+            ~GSageToolConfig.departments.any(),
+        )
+    )
     logger.info("Deleted department %s (org=%s)", dept_id, org_id)
 
 

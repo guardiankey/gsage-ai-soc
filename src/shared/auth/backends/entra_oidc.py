@@ -34,6 +34,8 @@ Configuration (per-org, stored encrypted in ``GSageOrganization.auth_config``)
 - ``required_groups``     — Login gate (list of group object IDs).
 - ``auto_create_groups``  — Auto-create local ``GSageGroup`` rows for
                             mapped names.
+- ``auto_create_departments`` — Auto-create local ``GSageDepartment`` rows
+                            referenced by ``group_mapping`` (default True).
 - ``auto_provision_users`` — When False, only previously-known users may
                              sign in (default True).
 """
@@ -82,7 +84,7 @@ class EntraOIDCProvider(BaseAuthProvider):
         "group_mapping": {},
         "required_groups": [],
         "auto_create_groups": True,
-        "auto_create_departments": False,
+        "auto_create_departments": True,
         "auto_provision_users": True,
     }
 

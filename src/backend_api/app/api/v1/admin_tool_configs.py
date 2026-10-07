@@ -14,8 +14,9 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import and_, select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.backend_api.app.api.deps import get_db, require_org_admin
 from src.backend_api.app.schemas.admin import (
@@ -27,23 +28,166 @@ from src.backend_api.app.schemas.admin import (
     ToolMetadataOut,
     ToolSettingsUpdate,
 )
+from src.backend_api.app.services import tool_auto_approve
 from src.shared.cache.permissions_cache import get_perm_redis_client
 from src.shared.cache.tool_config_cache import invalidate_tool_config_cache
 from src.shared.config.settings import get_settings
+from src.shared.models.department import GSageDepartment
 from src.shared.models.org_tool_settings import GSageOrgToolSettings
 from src.shared.models.tool import GSageTool
-from src.shared.models.tool_config import GSageToolConfig
+from src.shared.models.tool_config import GSageToolConfig, GSageToolConfigDepartment
 from src.shared.models.user_organization import GSageUserOrganization
 
 router = APIRouter()
 
 
-def _tool_config_to_out(tc: GSageToolConfig) -> ToolConfigOut:
+async def _invalidate_config_caches(org_id: uuid.UUID) -> None:
+    """Best-effort flush of every cached tool config for an organization."""
+    try:
+        await invalidate_tool_config_cache(get_perm_redis_client(), org_id)
+    except Exception:  # pragma: no cover — best-effort
+        pass
+    # Clear the backend's in-memory auto_approve cache so the edited values
+    # take effect immediately instead of after the 30s TTL.
+    tool_auto_approve.invalidate_cache(org_id=org_id)
+
+
+async def _validate_dept_ids(
+    db: AsyncSession, org_id: uuid.UUID, dept_ids: list[uuid.UUID]
+) -> list[uuid.UUID]:
+    """De-duplicate ``dept_ids`` and ensure every id belongs to ``org_id``."""
+    unique = list(dict.fromkeys(dept_ids))
+    if not unique:
+        return []
+    found = set(
+        (
+            await db.execute(
+                select(GSageDepartment.id).where(
+                    GSageDepartment.org_id == org_id,
+                    GSageDepartment.id.in_(unique),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    missing = [str(d) for d in unique if d not in found]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown department id(s) for this organization: {', '.join(missing)}",
+        )
+    return unique
+
+
+async def _replace_departments(
+    db: AsyncSession, tc: GSageToolConfig, dept_ids: list[uuid.UUID]
+) -> None:
+    """Replace the config's department scope with ``dept_ids`` (empty = org-wide).
+
+    Uses the ORM ``departments`` collection so the ``delete-orphan`` cascade
+    removes the previous rows; the collection is always loaded (``lazy="selectin"``
+    on fetch, empty for a newly created config).  The intermediate flush emits
+    the DELETEs before the new INSERTs, so re-scoping to an overlapping set
+    (e.g. ``{A, B}`` → ``{B, C}``) cannot trip the ``(org, tool, profile, dept)``
+    unique constraint.
+    """
+    tc.departments.clear()
+    await db.flush()
+    for dept_id in dept_ids:
+        tc.departments.append(
+            GSageToolConfigDepartment(
+                org_id=tc.org_id,
+                tool_name=tc.tool_name,
+                profile_id=tc.profile_id,
+                dept_id=dept_id,
+            )
+        )
+
+
+async def _load_dept_ids(db: AsyncSession, config_id: uuid.UUID) -> list[uuid.UUID]:
+    """Return the department ids scoped to a config (empty = org-wide)."""
+    rows = (
+        await db.execute(
+            select(GSageToolConfigDepartment.dept_id).where(
+                GSageToolConfigDepartment.tool_config_id == config_id
+            )
+        )
+    ).scalars().all()
+    return list(rows)
+
+
+async def _check_scope_conflicts(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    tool_name: str,
+    profile_id: str,
+    scope: str,
+    dept_ids: list[uuid.UUID],
+    *,
+    exclude_config_id: uuid.UUID | None = None,
+) -> None:
+    """Enforce the scope invariants for ``(org, tool, profile)``.
+
+    * ``scope='org'``  → at most one global config (else 409).
+    * ``scope='dept'`` → ``dept_ids`` must be non-empty and none of them may
+      already be covered by another config of the same tool/profile (else 409).
+    """
+    if scope == "org":
+        stmt = select(GSageToolConfig.id).where(
+            GSageToolConfig.org_id == org_id,
+            GSageToolConfig.tool_name == tool_name,
+            GSageToolConfig.profile_id == profile_id,
+            GSageToolConfig.scope == "org",
+        )
+        if exclude_config_id is not None:
+            stmt = stmt.where(GSageToolConfig.id != exclude_config_id)
+        if (await db.execute(stmt)).first() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "A global (org-wide) config for this (org, tool_name, "
+                    "profile_id) already exists"
+                ),
+            )
+        return
+
+    if not dept_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scope='dept' requires at least one department.",
+        )
+
+    stmt = select(GSageToolConfigDepartment.dept_id).where(
+        GSageToolConfigDepartment.org_id == org_id,
+        GSageToolConfigDepartment.tool_name == tool_name,
+        GSageToolConfigDepartment.profile_id == profile_id,
+        GSageToolConfigDepartment.dept_id.in_(dept_ids),
+    )
+    if exclude_config_id is not None:
+        stmt = stmt.where(GSageToolConfigDepartment.tool_config_id != exclude_config_id)
+    conflicts = (await db.execute(stmt)).scalars().all()
+    if conflicts:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Department(s) already covered by another config for this "
+                f"tool/profile: {', '.join(str(d) for d in conflicts)}"
+            ),
+        )
+
+
+def _tool_config_to_out(
+    tc: GSageToolConfig, dept_ids: list[uuid.UUID] | None = None
+) -> ToolConfigOut:
     """Convert model to response schema (decrypts config)."""
+    if dept_ids is None:
+        dept_ids = [d.dept_id for d in tc.departments]
     return ToolConfigOut(
         id=tc.id,
         org_id=tc.org_id,
-        dept_id=tc.dept_id,
+        scope=tc.scope,
+        dept_ids=list(dept_ids),
         tool_name=tc.tool_name,
         profile_id=tc.profile_id,
         description=tc.description,
@@ -68,13 +212,26 @@ async def list_tool_configs(
 ) -> list[ToolConfigOut]:
     """List all tool configurations for the organization.
 
-    Optional filters: ``tool_name``, ``dept_id``.
+    Optional filters: ``tool_name``, ``dept_id`` (returns configs that apply to
+    the department — org-wide ones *and* those explicitly scoped to it).
     """
-    stmt = select(GSageToolConfig).where(GSageToolConfig.org_id == org_id)
+    stmt = (
+        select(GSageToolConfig)
+        .options(selectinload(GSageToolConfig.departments))
+        .where(GSageToolConfig.org_id == org_id)
+    )
     if tool_name:
         stmt = stmt.where(GSageToolConfig.tool_name == tool_name)
     if dept_id is not None:
-        stmt = stmt.where(GSageToolConfig.dept_id == dept_id)
+        stmt = stmt.where(
+            (GSageToolConfig.scope == "org")
+            | (
+                (GSageToolConfig.scope == "dept")
+                & GSageToolConfig.departments.any(
+                    GSageToolConfigDepartment.dept_id == dept_id
+                )
+            )
+        )
     stmt = stmt.order_by(GSageToolConfig.tool_name, GSageToolConfig.profile_id)
 
     result = await db.execute(stmt)
@@ -120,24 +277,26 @@ async def create_tool_config(
     ctx: Annotated[GSageUserOrganization, Depends(require_org_admin)],
     db: AsyncSession = Depends(get_db),
 ) -> ToolConfigOut:
-    """Create a new tool configuration. Raises 409 if the same
-    ``(org, dept, tool_name, profile_id)`` already exists.
+    """Create a new tool configuration.
+
+    ``scope='org'`` creates the org-wide config (at most one per tool/profile).
+    ``scope='dept'`` creates a department-scoped config: ``dept_ids`` must be
+    non-empty and not already covered by another config of the same
+    tool/profile.  Raises 409 on conflicts.
     """
-    clash_stmt = select(GSageToolConfig).where(
-        GSageToolConfig.org_id == org_id,
-        GSageToolConfig.tool_name == payload.tool_name,
-        GSageToolConfig.profile_id == payload.profile_id,
-        GSageToolConfig.dept_id == payload.dept_id,
+    scope = payload.scope
+    dept_ids = (
+        await _validate_dept_ids(db, org_id, payload.dept_ids)
+        if scope == "dept"
+        else []
     )
-    if (await db.execute(clash_stmt)).scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Tool config for this (org, dept, tool_name, profile_id) already exists",
-        )
+    await _check_scope_conflicts(
+        db, org_id, payload.tool_name, payload.profile_id, scope, dept_ids
+    )
 
     tc = GSageToolConfig(
         org_id=org_id,
-        dept_id=payload.dept_id,
+        scope=scope,
         tool_name=payload.tool_name,
         profile_id=payload.profile_id,
         description=payload.description,
@@ -145,12 +304,15 @@ async def create_tool_config(
     )
     tc.config = payload.config  # encrypts via property setter
     db.add(tc)
+    await db.flush()  # assign tc.id before creating the department rows
+    if scope == "dept":
+        await _replace_departments(db, tc, dept_ids)
     await db.commit()
     await db.refresh(tc)
     # Drop any stale config the MCP server may have cached for this org so
     # the new values take effect immediately instead of after the TTL.
-    await invalidate_tool_config_cache(get_perm_redis_client(), org_id)
-    return _tool_config_to_out(tc)
+    await _invalidate_config_caches(org_id)
+    return _tool_config_to_out(tc, dept_ids=dept_ids)
 
 
 @router.get(
@@ -198,45 +360,70 @@ async def update_tool_config(
     if tc is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool config not found")
 
+    original_scope = tc.scope
     new_tool_name = payload.tool_name if payload.tool_name is not None else tc.tool_name
     new_profile_id = payload.profile_id if payload.profile_id is not None else tc.profile_id
-    new_dept_id = payload.dept_id if payload.dept_id is not None else tc.dept_id
+    new_scope = payload.scope if payload.scope is not None else original_scope
+    identity_changed = (new_tool_name, new_profile_id) != (tc.tool_name, tc.profile_id)
 
-    # Check unique constraint only when tool_name, profile_id or dept_id changes
-    if (new_tool_name, new_profile_id, new_dept_id) != (tc.tool_name, tc.profile_id, tc.dept_id):
-        clash_stmt = select(GSageToolConfig).where(
-            and_(
-                GSageToolConfig.org_id == org_id,
-                GSageToolConfig.id != config_id,
-                GSageToolConfig.tool_name == new_tool_name,
-                GSageToolConfig.profile_id == new_profile_id,
-                GSageToolConfig.dept_id == new_dept_id,
-            )
-        )
-        if (await db.execute(clash_stmt)).scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Tool config for this (org, dept, tool_name, profile_id) already exists",
-            )
+    # Resolve the resulting department set:
+    #   scope='org'            → no departments (cleared);
+    #   dept_ids provided      → use them (must be non-empty when scope='dept');
+    #   otherwise              → keep the current set.
+    current_dept_ids = await _load_dept_ids(db, config_id)
+    if new_scope == "org":
+        new_dept_ids: list[uuid.UUID] = []
+    elif payload.dept_ids is not None:
+        new_dept_ids = await _validate_dept_ids(db, org_id, payload.dept_ids)
+    else:
+        new_dept_ids = current_dept_ids
+
+    # Enforce the scope invariants (U1 for 'org', overlap rule for 'dept').
+    await _check_scope_conflicts(
+        db,
+        org_id,
+        new_tool_name,
+        new_profile_id,
+        new_scope,
+        new_dept_ids,
+        exclude_config_id=config_id,
+    )
 
     if payload.tool_name is not None:
         tc.tool_name = payload.tool_name
     if payload.profile_id is not None:
         tc.profile_id = payload.profile_id
-    if payload.dept_id is not None:
-        tc.dept_id = payload.dept_id
+    if payload.scope is not None:
+        tc.scope = payload.scope
     if payload.description is not None:
         tc.description = payload.description
     if payload.config is not None:
         tc.config = payload.config  # encrypts via property setter
 
     tc.updated_by_user_id = ctx.user_id
+
+    if new_scope == "org":
+        if current_dept_ids:
+            await db.flush()  # persist tool_name/profile_id/scope first
+            await _replace_departments(db, tc, [])
+    elif set(new_dept_ids) != set(current_dept_ids):
+        await db.flush()  # persist tool_name/profile_id before rewriting the rows
+        await _replace_departments(db, tc, new_dept_ids)
+    elif identity_changed:
+        # Keep the denormalized keys on existing department rows in sync.
+        await db.flush()
+        await db.execute(
+            update(GSageToolConfigDepartment)
+            .where(GSageToolConfigDepartment.tool_config_id == tc.id)
+            .values(tool_name=tc.tool_name, profile_id=tc.profile_id)
+        )
+
     await db.commit()
     await db.refresh(tc)
     # Drop any stale config the MCP server may have cached for this org so
     # the edited values take effect immediately instead of after the TTL.
-    await invalidate_tool_config_cache(get_perm_redis_client(), org_id)
-    return _tool_config_to_out(tc)
+    await _invalidate_config_caches(org_id)
+    return _tool_config_to_out(tc, dept_ids=new_dept_ids)
 
 
 @router.delete(
@@ -263,7 +450,7 @@ async def delete_tool_config(
     await db.delete(tc)
     await db.commit()
     # Drop any stale config the MCP server may have cached for this org.
-    await invalidate_tool_config_cache(get_perm_redis_client(), org_id)
+    await _invalidate_config_caches(org_id)
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +488,7 @@ async def get_tool_catalog(
                 FALSE AS is_namespace,
                 COALESCE(json_agg(json_build_object(
                     'id', tc.id, 'profile_id', tc.profile_id,
-                    'dept_id', tc.dept_id, 'description', tc.description
+                    'scope', tc.scope, 'description', tc.description
                 )) FILTER (WHERE tc.id IS NOT NULL), '[]') AS configs,
                 COALESCE(ots.is_enabled, TRUE) AS is_enabled
             FROM gsage_tools t
@@ -334,7 +521,7 @@ async def get_tool_catalog(
                 TRUE AS is_namespace,
                 COALESCE(json_agg(json_build_object(
                     'id', tc.id, 'profile_id', tc.profile_id,
-                    'dept_id', tc.dept_id, 'description', tc.description
+                    'scope', tc.scope, 'description', tc.description
                 )) FILTER (WHERE tc.id IS NOT NULL), '[]') AS configs,
                 COALESCE(ots.is_enabled, TRUE) AS is_enabled
             FROM ns
@@ -363,13 +550,26 @@ async def get_tool_catalog(
                 return []
         return []
 
-    def _to_uuid(val) -> uuid.UUID | None:
-        """Coerce asyncpg UUID / str / None to uuid.UUID."""
-        if val is None:
-            return None
-        if isinstance(val, uuid.UUID):
-            return val
-        return uuid.UUID(str(val))
+    # ── Query C: department scope per config (from the join table) ──
+    rows_c = await db.execute(
+        select(
+            GSageToolConfigDepartment.tool_config_id,
+            GSageToolConfigDepartment.dept_id,
+        ).where(GSageToolConfigDepartment.org_id == org_id)
+    )
+    dept_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for cfg_id, dept_id in rows_c.all():
+        dept_map.setdefault(cfg_id, []).append(dept_id)
+
+    def _summary(c: dict) -> ToolConfigSummary:
+        cid = uuid.UUID(str(c["id"]))
+        return ToolConfigSummary(
+            id=cid,
+            profile_id=str(c["profile_id"]),
+            scope=str(c.get("scope") or "org"),
+            dept_ids=list(dept_map.get(cid, [])),
+            description=c.get("description"),
+        )
 
     for r in row_b.mappings().all():
         configs_raw = _parse_configs(r["configs"])
@@ -381,12 +581,7 @@ async def get_tool_catalog(
             is_namespace=bool(r["is_namespace"]),
             is_enabled=bool(r["is_enabled"]),
             config_count=len(configs_raw),
-            configs=[ToolConfigSummary(
-                id=uuid.UUID(str(c["id"])),
-                profile_id=str(c["profile_id"]),
-                dept_id=_to_uuid(c.get("dept_id")),
-                description=c.get("description"),
-            ) for c in configs_raw],
+            configs=[_summary(c) for c in configs_raw],
         ))
 
     for r in row_a.mappings().all():
@@ -399,12 +594,7 @@ async def get_tool_catalog(
             is_namespace=bool(r["is_namespace"]),
             is_enabled=bool(r["is_enabled"]),
             config_count=len(configs_raw),
-            configs=[ToolConfigSummary(
-                id=uuid.UUID(str(c["id"])),
-                profile_id=str(c["profile_id"]),
-                dept_id=_to_uuid(c.get("dept_id")),
-                description=c.get("description"),
-            ) for c in configs_raw],
+            configs=[_summary(c) for c in configs_raw],
         ))
 
     return entries

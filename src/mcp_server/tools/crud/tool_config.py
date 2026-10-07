@@ -50,6 +50,9 @@ def _serialize(tc: GSageToolConfig, include_config: bool = False) -> dict:
         "id": str(tc.id),
         "org_id": str(tc.org_id),
         "tool_name": tc.tool_name,
+        "profile_id": tc.profile_id,
+        "scope": tc.scope,
+        "dept_ids": [str(d.dept_id) for d in tc.departments],
         "updated_by_user_id": str(tc.updated_by_user_id) if tc.updated_by_user_id else None,
         "created_at": tc.created_at.isoformat(),
         "updated_at": tc.updated_at.isoformat(),
@@ -152,6 +155,8 @@ class ToolConfigCrudTool(CrudBaseTool):
             select(GSageToolConfig).where(
                 GSageToolConfig.org_id == agent_context.org_id,
                 GSageToolConfig.tool_name == tool_name,
+                GSageToolConfig.profile_id == "default",
+                GSageToolConfig.scope == "org",
             )
         )
         tc = result.scalar_one_or_none()
@@ -193,6 +198,8 @@ class ToolConfigCrudTool(CrudBaseTool):
             select(GSageToolConfig).where(
                 GSageToolConfig.org_id == agent_context.org_id,
                 GSageToolConfig.tool_name == tool_name,
+                GSageToolConfig.profile_id == "default",
+                GSageToolConfig.scope == "org",
             )
         )
         tc = result.scalar_one_or_none()
@@ -210,6 +217,7 @@ class ToolConfigCrudTool(CrudBaseTool):
         else:
             tc = GSageToolConfig(
                 org_id=agent_context.org_id,
+                scope="org",
                 tool_name=tool_name,
                 updated_by_user_id=agent_context.user_id,
             )
@@ -242,6 +250,8 @@ class ToolConfigCrudTool(CrudBaseTool):
             select(GSageToolConfig).where(
                 GSageToolConfig.org_id == agent_context.org_id,
                 GSageToolConfig.tool_name == tool_name,
+                GSageToolConfig.profile_id == "default",
+                GSageToolConfig.scope == "org",
             )
         )
         tc = result.scalar_one_or_none()
