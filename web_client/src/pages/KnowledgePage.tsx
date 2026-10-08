@@ -26,6 +26,7 @@ import {
   type KnowledgeDocument,
   type KnowledgeSearchResult,
 } from '@/api/knowledge'
+import { extractApiError } from '@/api/client'
 import { Pagination, calcTotalPages } from '@/components/ui/pagination'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
@@ -33,7 +34,7 @@ import { toast } from 'sonner'
 
 export default function KnowledgePage() {
   const { t } = useTranslation()
-  const { orgId, deptId, hasPermission } = useAuth()
+  const { orgId, deptId, orgRole, deptRole, hasPermission } = useAuth()
   const queryClient = useQueryClient()
 
   const [tab, setTab] = useState('search')
@@ -63,6 +64,17 @@ export default function KnowledgePage() {
   const [ingestJobs, setIngestJobs] = useState<IngestTracker[]>([])
   const [ingestScope, setIngestScope] = useState<'org' | 'user' | 'dept'>('org')
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // ── Write capabilities (mirror of the backend scope matrix) ──────────
+  // org admin/owner → all scopes; dept admin (active dept) → user + dept;
+  // member → own user scope; viewer → read-only.
+  const canWriteOrg = orgRole === 'admin' || orgRole === 'owner'
+  const canWriteDept = canWriteOrg || (deptRole === 'admin' && !!deptId)
+  const canWriteUser = canWriteOrg || canWriteDept || orgRole === 'member'
+  const canWriteAny = canWriteUser
+  const scopeOptions = (['org', 'dept', 'user'] as const).filter((s) =>
+    s === 'org' ? canWriteOrg : s === 'dept' ? (!!deptId && canWriteDept) : canWriteUser
+  )
 
   const { data: listData, isLoading: listLoading } = useQuery({
     queryKey: ['knowledge', orgId, docsPage],
@@ -121,6 +133,13 @@ export default function KnowledgePage() {
     }
   }, [ingestJobs.filter((j) => j.status !== 'completed' && j.status !== 'failed').map((j) => j.jobId).join(','), orgId])
 
+  // Keep the selected ingest scope within what the current role allows.
+  useEffect(() => {
+    if (scopeOptions.length > 0 && !scopeOptions.includes(ingestScope)) {
+      setIngestScope(scopeOptions[0])
+    }
+  }, [scopeOptions.join(','), ingestScope])
+
   const handleSearch = async () => {
     if (!orgId || !searchQuery.trim()) return
     setIsSearching(true)
@@ -153,6 +172,7 @@ export default function KnowledgePage() {
         trimmedContent || undefined,
         description,
         trimmedUrl || undefined,
+        ingestScope,
       )
       return { kind: 'content' as const, doc }
     },
@@ -180,7 +200,7 @@ export default function KnowledgePage() {
         toast.success(t('knowledge.addSuccess'))
       }
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err) => toast.error(extractApiError(err)),
   })
 
   const deleteMut = useMutation({
@@ -190,7 +210,7 @@ export default function KnowledgePage() {
       setDeleteItem(null)
       toast.success(t('knowledge.deleteSuccess'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err) => toast.error(extractApiError(err)),
   })
 
   const onDrop = useCallback(
@@ -207,8 +227,8 @@ export default function KnowledgePage() {
             scope: ingestScope,
           })
           toast.info(t('knowledge.ingestStarted') + `: ${file.name}`)
-        } catch {
-          toast.error(`${t('common.error')}: ${file.name}`)
+        } catch (err) {
+          toast.error(`${extractApiError(err)}: ${file.name}`)
         }
       }
       if (newJobs.length > 0) {
@@ -285,7 +305,7 @@ export default function KnowledgePage() {
             <p className="text-muted-foreground text-sm mt-1">{t('knowledge.subtitle')}</p>
           </div>
           <div className="flex gap-2">
-            {hasPermission('knowledge:write') && (
+            {canWriteAny && (
               <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
                 <Plus className="h-4 w-4 me-2" />
                 {t('knowledge.addDocument')}
@@ -298,7 +318,7 @@ export default function KnowledgePage() {
           <TabsList>
             <TabsTrigger value="search">{t('knowledge.search')}</TabsTrigger>
             <TabsTrigger value="documents">{t('knowledge.documents')}</TabsTrigger>
-            {hasPermission('knowledge:write') && (
+            {canWriteAny && (
               <TabsTrigger value="ingest">{t('knowledge.ingest')}</TabsTrigger>
             )}
           </TabsList>
@@ -362,7 +382,7 @@ export default function KnowledgePage() {
                 <CardContent className="p-12 flex flex-col items-center gap-3 text-muted-foreground">
                   <FileText className="h-10 w-10 opacity-40" />
                   <p className="text-sm">{t('knowledge.noDocuments')}</p>
-                  {hasPermission('knowledge:write') && (
+                  {canWriteAny && (
                     <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
                       <Plus className="h-4 w-4 me-2" />
                       {t('knowledge.addDocument')}
@@ -420,7 +440,7 @@ export default function KnowledgePage() {
               <div className="space-y-1.5">
                 <Label>{t('knowledge.scope')}</Label>
                 <div className="flex gap-2">
-                  {(['org', 'dept', 'user'] as const).filter((s) => s !== 'dept' || !!deptId).map((s) => (
+                  {scopeOptions.map((s) => (
                     <Button
                       key={s}
                       type="button"

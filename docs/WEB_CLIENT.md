@@ -113,6 +113,18 @@ When the AI needs to execute a sensitive tool, it may pause and wait for approva
 
 The Knowledge Base page lets you manage the documents the AI uses to answer your questions. It has three tabs: **Search**, **Documents**, and **Ingest**.
 
+### Scope and access
+
+Documents are stored with a **scope** that controls who can see them:
+
+| Scope | Visible to | Who can write |
+|---|---|---|
+| Organization | Everyone in the organization | Org admins/owners |
+| Department | Members of the selected department | Org admins + department admins |
+| My profile | Only you | Any member (viewers are read-only) |
+
+The scope selector on the **Ingest** tab shows only the options your role allows. Search and the documents list show only the documents visible to you (organization + your active department + your own).
+
 ### Search
 
 1. Type a query in the search box.
@@ -121,14 +133,14 @@ The Knowledge Base page lets you manage the documents the AI uses to answer your
 
 ### Documents
 
-This tab lists all documents stored in the knowledge base.
+This tab lists the documents visible to you in the knowledge base.
 
 - Click **Add document** to manually add a document:
   - **Title** (required)
   - **Description** (optional)
   - **URL** — the content is fetched automatically from the URL
   - **Content** — paste text directly (leave empty if using a URL)
-- To delete a document, click the trash icon and confirm.
+- To delete a document, click the trash icon and confirm. Deleting requires the `knowledge:delete` permission (org admins/owners).
 
 ### Ingest (File Upload)
 

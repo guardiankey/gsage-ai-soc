@@ -862,6 +862,7 @@ class GSageAPIClient:
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
         url: str | None = None,
+        scope: str | None = None,
     ) -> dict[str, Any]:
         """Add a text document to the tenant knowledge base.
 
@@ -871,6 +872,7 @@ class GSageAPIClient:
             description: Optional description
             metadata: Optional extra metadata dict
             url: Optional URL to fetch content from (used when content is not provided)
+            scope: Visibility scope ('org', 'user' or 'dept'); server default is 'org'
 
         Returns:
             KnowledgeContentOut dict with id, name, type, status, ...
@@ -884,6 +886,8 @@ class GSageAPIClient:
             payload["metadata"] = metadata
         if url is not None:
             payload["url"] = url
+        if scope is not None:
+            payload["scope"] = scope
 
         response = self.client.post(
             f"{self._org_prefix()}/knowledge/content",
@@ -1711,7 +1715,7 @@ class GSageAPIClient:
 
     def admin_list_permissions(self) -> list[dict[str, Any]]:
         """List all available permissions (admin)."""
-        response = self.client.get(f"{self._admin_prefix()}/groups/permissions")
+        response = self.client.get(f"{self._admin_prefix()}/permissions")
         if response.status_code != 200:
             self._raise_error(response)
         return response.json()

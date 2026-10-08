@@ -26,6 +26,8 @@ interface AuthContextValue extends AuthState {
   permissions: string[]
   hasPermission: (permission: string) => boolean
   isOrgAdmin: boolean
+  orgRole: string | null
+  deptRole: string | null
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -133,8 +135,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const isOrgAdmin = useMemo(() => permissions.includes('admin:access'), [permissions])
 
+  const orgRole = useMemo(() => {
+    if (!state.user || !state.orgId) return null
+    const membership = state.user.memberships.find((m) => m.org_id === state.orgId)
+    return membership?.role ?? null
+  }, [state.user, state.orgId])
+
+  const deptRole = useMemo(() => {
+    if (!state.user || !state.orgId || !state.deptId) return null
+    const membership = state.user.memberships.find((m) => m.org_id === state.orgId)
+    return membership?.departments?.find((d) => String(d.dept_id) === state.deptId)?.role ?? null
+  }, [state.user, state.orgId, state.deptId])
+
   return (
-    <AuthContext.Provider value={{ ...state, login, register, logout, refreshUser, switchOrg, switchDept, permissions, hasPermission, isOrgAdmin }}>
+    <AuthContext.Provider value={{ ...state, login, register, logout, refreshUser, switchOrg, switchDept, permissions, hasPermission, isOrgAdmin, orgRole, deptRole }}>
       {children}
     </AuthContext.Provider>
   )

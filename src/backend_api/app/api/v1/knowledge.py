@@ -24,6 +24,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.backend_api.app.api.deps import get_current_user, get_tenant_context
+from src.backend_api.app.core.kb_access import (
+    chunk_scope,
+    chunk_visible_for_ctx,
+    job_visible_for_ctx,
+    require_kb_write_scope,
+)
 from src.backend_api.app.core.tenant import TenantContext
 from src.backend_api.app.schemas.knowledge import (
     IngestJobStatusResponse,
@@ -41,6 +47,7 @@ from src.backend_api.app.services.knowledge import build_knowledge, knowledge_li
 from src.shared.database import get_db
 from src.shared.models.ingest_job import GSageIngestJob, IngestScope, IngestStatus
 from src.shared.models.user import GSageUser
+from src.shared.models.user_department import GSageUserDepartment
 from src.shared.models.user_organization import GSageUserOrganization
 
 router = APIRouter()
@@ -72,10 +79,15 @@ async def search_knowledge(
 
     kb = build_knowledge(org_id)
 
+    # Over-fetch so scope-visibility filtering still fills ``max_results``.
+    # Scope lives inside the chunk ``meta_data`` JSON, so the filter runs
+    # in-process (see ``kb_access``) rather than in the vector query.
+    fetch_limit = min(max(payload.max_results * 4, 20), 100)
+
     try:
         docs = await kb.asearch(
             query=payload.query,
-            max_results=payload.max_results,
+            max_results=fetch_limit,
         )
     except Exception as exc:
         raise HTTPException(
@@ -85,6 +97,8 @@ async def search_knowledge(
 
     results: list[KnowledgeSearchResult] = []
     for doc in docs or []:
+        if not chunk_visible_for_ctx(ctx, getattr(doc, "meta_data", None)):
+            continue
         content: str | None = None
         meta: dict[str, Any] | None = None
         if hasattr(doc, "content"):
@@ -100,6 +114,8 @@ async def search_knowledge(
                 metadata=meta,
             )
         )
+        if len(results) >= payload.max_results:
+            break
 
     return KnowledgeSearchResponse(results=results, total=len(results))
 
@@ -118,7 +134,13 @@ async def add_knowledge_content(
     import hashlib as _hashlib
     import uuid as _uuid_mod
 
-    ctx.require_permission("knowledge:write")
+    scope = payload.scope
+    if scope == IngestScope.DEPT and ctx.dept_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Department scope requires an active department context. Switch to a department first.",
+        )
+    require_kb_write_scope(ctx, scope)
 
     # Normalize empty description to None — agno excludes empty strings from content hash
     description = payload.description or None
@@ -195,6 +217,14 @@ async def add_knowledge_content(
             text_content = extracted
         metadata["source_url"] = str(payload.url)
 
+    # Scope metadata travels with the document so search/listing apply the
+    # same visibility rules as the ingest pipeline (see tasks/ingest.py).
+    metadata["scope"] = scope
+    if scope == IngestScope.USER:
+        metadata["user_id"] = str(ctx.user_id)
+    elif scope == IngestScope.DEPT and ctx.dept_id is not None:
+        metadata["dept_id"] = str(ctx.dept_id)
+
     knowledge = build_knowledge(org_id)
     await knowledge.ainsert(
         text_content=text_content,
@@ -221,7 +251,7 @@ async def add_knowledge_content(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to store knowledge content",
         )
-    return KnowledgeContentOut(**stored.model_dump())
+    return KnowledgeContentOut(**stored.model_dump(), scope=scope)
 
 
 @router.get(
@@ -236,12 +266,20 @@ async def list_knowledge_content(
 ) -> PaginatedResponse[KnowledgeContentOut]:
     ctx.require_permission("knowledge:read")
 
-    rows, total = await get_agno_db().get_knowledge_contents(
-        limit=pagination.limit,
-        page=pagination.page,
+    # Visibility filtering happens before pagination because the agno
+    # contents table has no scope column to filter on — scope lives inside
+    # the row metadata JSON.
+    rows, _ = await get_agno_db().get_knowledge_contents(
         linked_to=knowledge_linked_to(org_id),
     )
-    items = [KnowledgeContentOut(**r.model_dump()) for r in rows]
+    visible_rows = [r for r in rows if chunk_visible_for_ctx(ctx, r.metadata)]
+    total = len(visible_rows)
+    start = pagination.offset
+    page_rows = visible_rows[start : start + pagination.limit]
+    items = [
+        KnowledgeContentOut(**r.model_dump(), scope=chunk_scope(r.metadata))
+        for r in page_rows
+    ]
     return PaginatedResponse.build(items, total=total, pagination=pagination)
 
 
@@ -317,13 +355,12 @@ async def ingest_document(
     to convert + chunk + embed it into Weaviate.  The caller receives a job_id
     that can be polled via ``GET /knowledge/ingest/{job_id}``.
     """
-    ctx.require_permission("knowledge:write")
-
     if scope == IngestScope.DEPT and ctx.dept_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Department scope requires an active department context. Switch to a department first.",
         )
+    require_kb_write_scope(ctx, scope)
 
     # --- Validate filename & extension -----------------------------------------
     original_name = file.filename or "upload"
@@ -438,13 +475,12 @@ async def ingest_url(
     (PDF, DOCX, HTML, etc.), saves it to the shared ingest volume, then
     hands off to the standard ``ingest_document_task`` pipeline.
     """
-    ctx.require_permission("knowledge:write")
-
     if payload.scope == IngestScope.DEPT and ctx.dept_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Department scope requires an active department context. Switch to a department first.",
         )
+    require_kb_write_scope(ctx, payload.scope)
 
     # Persist job row up-front; original_filename is the user-supplied name
     # (worker will refine it once Content-Type/Disposition is known).
@@ -597,6 +633,15 @@ async def download_ingest_original(
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest job not found")
 
+    if not job_visible_for_ctx(ctx, job):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "This document is scoped to another department/user and is "
+                "not accessible in your current context."
+            ),
+        )
+
     return await _stream_ingest_original(job)
 
 
@@ -682,8 +727,27 @@ async def download_ingest_original_alias(
             GSageUserOrganization.is_active == True,  # noqa: E712
         )
     )
-    if mem_result.scalar_one_or_none() is None:
+    membership = mem_result.scalar_one_or_none()
+    if membership is None:
         # 404 instead of 403 to avoid leaking job existence across orgs.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest job not found")
+
+    # Scope visibility: org-wide documents are visible to every member,
+    # ``user`` documents only to their owner and ``dept`` documents to
+    # members of that department.  Org admins/owners retain oversight access.
+    if membership.role not in ("owner", "admin"):
+        job_scope = (job.scope or IngestScope.ORG).lower()
+        if job_scope == IngestScope.USER and job.user_id != user.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest job not found")
+        if job_scope == IngestScope.DEPT:
+            dept_mem = await db.execute(
+                select(GSageUserDepartment).where(
+                    GSageUserDepartment.user_id == user.id,
+                    GSageUserDepartment.dept_id == job.dept_id,
+                    GSageUserDepartment.is_active.is_(True),
+                )
+            )
+            if dept_mem.scalar_one_or_none() is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest job not found")
 
     return await _stream_ingest_original(job)

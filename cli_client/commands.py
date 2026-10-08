@@ -108,7 +108,7 @@ def show_help(console: Console, permissions: list[str] | None = None) -> None:
         "",
         _c("knowledge search <query>", "knowledge", " - Semantic search over the knowledge base", p),
         _c("knowledge list", "knowledge", r" \[page] \[limit] - List stored documents", p),
-        _c("knowledge add <name>", "knowledge", " - Add a text document (prompts for content)", p),
+        _c("knowledge add <name>", "knowledge", r" \[--scope org|user|dept] - Add a text document (prompts for content)", p),
         _c("knowledge delete <id>", "knowledge", " - Delete a document by ID", p),
         _c("knowledge ingest <file>", "knowledge", r" \[--scope org|user] - Upload a file for async ingestion (pdf, docx, html, json, txt, md, csv, xlsx, pptx, zip, tar.gz, \u2026)", p),
         _c("knowledge status <job_id>", "knowledge", " - Check ingest job status", p),
@@ -963,9 +963,9 @@ def handle_knowledge_command(
 
     knowledge search <query>
     knowledge list [page] [limit]
-    knowledge add <name> [--url <url>] [--description <desc>]
+    knowledge add <name> [--url <url>] [--description <desc>] [--scope org|user|dept]
     knowledge delete <id>
-    knowledge ingest <file> [--scope org|user]  (pdf, docx, html, json, txt, md, csv, xlsx, pptx, zip, tar.gz, …)
+    knowledge ingest <file> [--scope org|user|dept]  (pdf, docx, html, json, txt, md, csv, xlsx, pptx, zip, tar.gz, …)
     knowledge status <job_id>
     """
     if not args:
@@ -1067,10 +1067,11 @@ def handle_knowledge_command(
 
     # ── add ─────────────────────────────────────────────────────────────
     if subcommand == "add":
-        # Parse flags: --url <url> and --description <desc>
+        # Parse flags: --url <url>, --description <desc> and --scope org|user|dept
         remaining = args[1:]
         url: str | None = None
         description: str | None = None
+        scope: str | None = None
         positional: list[str] = []
         i = 0
         while i < len(remaining):
@@ -1080,13 +1081,22 @@ def handle_knowledge_command(
             elif remaining[i] == "--description" and i + 1 < len(remaining):
                 description = remaining[i + 1]
                 i += 2
+            elif remaining[i] == "--scope" and i + 1 < len(remaining):
+                scope = remaining[i + 1].lower()
+                i += 2
             else:
                 positional.append(remaining[i])
                 i += 1
 
+        if scope is not None and scope not in ("org", "user", "dept"):
+            console.print(
+                f"[{COLOR_ERROR}]Invalid scope '{scope}'. Use org, user or dept.[/{COLOR_ERROR}]"
+            )
+            return
+
         if not positional:
             console.print(
-                f"[{COLOR_ERROR}]Usage: knowledge add <name> [--url <url>] [--description <desc>][/{COLOR_ERROR}]"
+                f"[{COLOR_ERROR}]Usage: knowledge add <name> [--url <url>] [--description <desc>] [--scope org|user|dept][/{COLOR_ERROR}]"
             )
             return
 
@@ -1123,7 +1133,7 @@ def handle_knowledge_command(
             return
 
         try:
-            doc = client.add_knowledge(name=name, content=content, description=description, url=url)
+            doc = client.add_knowledge(name=name, content=content, description=description, url=url, scope=scope)
             console.print(f"[{COLOR_SUCCESS}]✓ Document added: {doc.get('id')}[/{COLOR_SUCCESS}]")
         except Exception as exc:
             console.print(f"[{COLOR_ERROR}]Failed to add document: {exc}[/{COLOR_ERROR}]")
@@ -3305,7 +3315,7 @@ def handle_admin_command(
             members = g.get("users", [])
             console.print(f"[bold]Members ({len(members)}):[/bold] " + ", ".join(m.get("email", "-") for m in members))
             perms = g.get("permissions", [])
-            console.print(f"[bold]Permissions ({len(perms)}):[/bold] " + ", ".join(p.get("name", "-") for p in perms))
+            console.print(f"[bold]Permissions ({len(perms)}):[/bold] " + ", ".join(p.get("tag", "-") for p in perms))
             return
 
         if subcmd == "create":
@@ -3344,9 +3354,9 @@ def handle_admin_command(
                 console.print(f"[{COLOR_ERROR}]{exc}[/{COLOR_ERROR}]")
                 return
             tbl = Table(show_header=True, header_style=f"bold {COLOR_INFO}")
-            tbl.add_column("Name"); tbl.add_column("Display Name"); tbl.add_column("Category")
+            tbl.add_column("Tag"); tbl.add_column("Description"); tbl.add_column("Category")
             for p in perms:
-                tbl.add_row(p.get("name", "-"), p.get("display_name", "-"), p.get("category", "-"))
+                tbl.add_row(p.get("tag", "-"), p.get("description") or "-", p.get("category", "-"))
             console.print(tbl)
             return
 

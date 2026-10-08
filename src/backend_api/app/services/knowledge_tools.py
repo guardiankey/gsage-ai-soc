@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Optional, cast
 from agno.knowledge.knowledge import Knowledge
 from agno.tools import Toolkit
 
+from src.backend_api.app.core.kb_access import is_kb_chunk_visible
 from src.shared.database import _get_session_maker
 from src.shared.config.settings import get_settings
 from src.shared.models.ingest_job import GSageIngestJob, IngestScope, IngestStatus
@@ -212,6 +213,18 @@ class KnowledgeToolkit(Toolkit):
         except Exception as exc:
             log.error("search_knowledge_base failed: %s", exc, exc_info=True)
             docs = []
+
+        # Scope visibility: hide user/dept-scoped chunks the caller must not
+        # see (org-wide chunks and legacy scope-less ones stay visible).
+        docs = [
+            doc
+            for doc in docs
+            if is_kb_chunk_visible(
+                doc.meta_data,
+                user_id=self._user_id,
+                dept_id=self._dept_id,
+            )
+        ]
 
         # Hybrid: also query the shared ``KnowledgeBase`` collection used
         # by the MCP ``knowledge_base`` tool.  Failures are absorbed so a

@@ -29,7 +29,7 @@ async def create_api_key(
         org_id: Organization UUID.
         name: Human-readable key name.
         environment: 'live' or 'test'.
-        scoped_permissions: List of permission tags (empty = all org permissions).
+        scoped_permissions: Permission tags used verbatim (empty = no permissions).
         interface: UI interface hint ('api', 'web', 'cli', etc.) or None.
         rate_limit_per_minute: Max requests per minute (min 1).
 

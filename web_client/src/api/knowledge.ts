@@ -83,9 +83,10 @@ export async function addKnowledge(
   name: string,
   content?: string,
   description?: string,
-  url?: string
+  url?: string,
+  scope: 'org' | 'user' | 'dept' = 'org'
 ): Promise<KnowledgeDocument> {
-  const payload: Record<string, string> = { name }
+  const payload: Record<string, string> = { name, scope }
   if (content) payload.content = content
   if (description) payload.description = description
   if (url) payload.url = url

@@ -33,6 +33,14 @@ class KnowledgeContentCreate(BaseModel):
     description: Optional[str] = Field(None, max_length=1000)
     url: Optional[str] = Field(None, max_length=2000)
     metadata: Optional[dict[str, Any]] = None
+    scope: str = Field(
+        "org",
+        pattern="^(org|user|dept)$",
+        description=(
+            "Visibility scope of the stored document: 'org' (whole tenant), "
+            "'dept' (active department) or 'user' (caller profile)."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_content_or_url(self) -> "KnowledgeContentCreate":
@@ -48,6 +56,7 @@ class KnowledgeContentOut(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     metadata: Optional[dict[str, Any]] = None
+    scope: Optional[str] = None
     type: Optional[str] = None
     size: Optional[int] = None
     status: Optional[str] = None

@@ -52,7 +52,10 @@ class _ApiKeyForm(FormScreen):
             "scoped_permissions",
             "Scoped permissions",
             field_type="textarea",
-            placeholder="Leave empty to inherit all org permissions.\nOne tag per line or comma-separated.",
+            placeholder=(
+                "Org-level key scopes (one tag per line or comma-separated).\n"
+                "Empty = key without any permissions."
+            ),
         ),
     ]
 

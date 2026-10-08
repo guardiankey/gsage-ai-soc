@@ -283,9 +283,9 @@ CVE-2024-12345 is a ...
 |---|---|
 | `knowledge search <query>` | Semantic search over the knowledge base |
 | `knowledge list [page] [limit]` | List stored documents (default: page 1, limit 20) |
-| `knowledge add <name> [--url <url>] [--description <desc>]` | Add a text document (prompts for content via stdin, or fetches from URL) |
+| `knowledge add <name> [--url <url>] [--description <desc>] [--scope org\|user\|dept]` | Add a text document (prompts for content via stdin, or fetches from URL) |
 | `knowledge delete <id>` | Delete a document by ID (asks for confirmation) |
-| `knowledge ingest <file> [--scope org\|user]` | Upload a file for async ingestion |
+| `knowledge ingest <file> [--scope org\|user\|dept]` | Upload a file for async ingestion |
 | `knowledge status <job_id>` | Check the status of an ingest job |
 
 **Examples:**
@@ -352,10 +352,13 @@ Maximum size: **10 MB** for documents, **50 MB** for archives.
 
 **Scope options:**
 
-| Scope | Description |
-|---|---|
-| `org` | Document is shared across the entire organization (default) |
-| `user` | Document is private to the authenticated user |
+| Scope | Description | Who can write |
+|---|---|---|
+| `org` | Shared across the entire organization (default) | Org admins/owners |
+| `dept` | Visible to members of the active department (requires `dept set`) | Org admins + department admins |
+| `user` | Private to your profile | Any member (viewers are read-only) |
+
+> Scope is enforced server-side: members can only write `user` documents, department admins (with an active department) also write `dept`, and org admins write every scope. Search and listing return only the documents visible to you.
 
 ---
 
