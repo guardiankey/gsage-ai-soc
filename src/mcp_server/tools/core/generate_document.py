@@ -104,6 +104,16 @@ class GenerateDocumentTool(BaseTool):
     **Conversion** relies on pandoc and (for ``pdf`` via Pandoc bundles) a
     LaTeX engine — both must be installed in the container.
 
+    **Accents and Unicode.** All output pipelines are UTF-8 safe and
+    preserve accented Latin letters verbatim (á é í ó ú â ê ô à ã õ ç, in
+    both lower and upper case). NEVER remove, normalize to ASCII, or avoid
+    accents — always write the text with its full natural-language
+    accentuation. Only LaTeX-hostile typographic characters — emojis,
+    pictographs, curly/smart quotes, en/em dashes, and bullet glyphs —
+    are normalized to ASCII equivalents or removed for PDF output; the PDF
+    normalization filter preserves accented Latin letters, including the
+    U+00C0–U+024F range.
+
     **Template variables:** Use ``document_templates`` with
     ``include_variables=true`` to discover which ``{{placeholders}}`` a
     template expects. The ``content`` variable is always available.
@@ -210,14 +220,19 @@ class GenerateDocumentTool(BaseTool):
                     "Ignored when the 'rows' parameter is provided. "
                     "Available as the '{{content}}' variable inside Markdown "
                     "and DOCX templates. "
-                    "For any PDF generation path that uses Pandoc/LaTeX, UTF-8 "
-                    "text is supported — accented Latin letters (e.g. Portuguese "
-                    "\u00e1\u00e9\u00ed\u00f3\u00fa\u00e3\u00f5\u00e7) are preserved. "
-                    "AVOID emojis, pictographic symbols, smart/curly quotes "
-                    "(\u201c\u201d\u2018\u2019), en/em dashes (\u2013\u2014), bullet glyphs (\u2022\u2023), "
-                    "and other characters typical of typographic rich-text — these "
-                    "are either normalized to ASCII equivalents or stripped before "
-                    "rendering. Prefer straight quotes, hyphens, and plain hyphen-minus "
+                    "ACCENT RULE: accented Latin letters (á é í ó ú â ê ô à ã õ ç, "
+                    "in both lower and upper case, and any other accented Latin "
+                    "letter) MUST NEVER be removed, normalized to ASCII, or stripped "
+                    "— always write the document text with its full natural-language "
+                    "accentuation (e.g. write 'segurança', not 'seguranca'). For PDF "
+                    "via Pandoc/LaTeX, the normalization filter preserves accented "
+                    "Latin letters (including the U+00C0–U+024F range) and touches "
+                    "only LaTeX-hostile typographic characters. That restriction "
+                    "applies EXCLUSIVELY to: emojis, pictographs, curly/smart quotes "
+                    "(\u201c \u201d \u2018 \u2019), en/em dashes (\u2013 \u2014), bullet glyphs (\u2022 \u2023), "
+                    "and similar non-letter symbols (\u00a9 \u00ae \u00b0 \u2026). Only these are "
+                    "normalized to ASCII equivalents or stripped before rendering; "
+                    "prefer straight quotes, hyphens, and plain hyphen-minus "
                     "list markers in source content. "
                     "For PDF via pandoc bundles (e.g. 'builtin:pandoc_gsage' "
                     "or pandoc=true), prepend a YAML front-matter block with "
@@ -295,9 +310,11 @@ class GenerateDocumentTool(BaseTool):
                 "type": "object",
                 "description": (
                     "Additional template variables merged with {'content': content}. "
-                    "Values must be strings or coercible to string. For PDF "
-                    "generation, UTF-8 with accented letters is supported; avoid "
-                    "emojis and pictographic symbols."
+                    "Values must be strings or coercible to string. The same ACCENT "
+                    "RULE as 'content' applies: accented Latin letters MUST NEVER be "
+                    "stripped or normalized to ASCII — only LaTeX-hostile characters "
+                    "(emojis, pictographs, curly quotes, en/em dashes, bullet "
+                    "glyphs) are normalized or removed for PDF generation."
                 ),
                 "additionalProperties": {"type": "string"},
             },
