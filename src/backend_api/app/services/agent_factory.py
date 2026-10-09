@@ -82,7 +82,7 @@ def _patch_agno_unknown_tool_message() -> None:
                 # message history use clean arguments.
                 _raw_args = _fn.get("arguments")
                 if isinstance(_raw_args, str):
-                    from src.shared.llm.vllm_recovering import sanitize_tool_call_arguments
+                    from src.shared.llm.tool_call_recovery import sanitize_tool_call_arguments
                     _sanitized = sanitize_tool_call_arguments(_raw_args)
                     if _sanitized != _raw_args:
                         _fn["arguments"] = _sanitized
@@ -1294,11 +1294,17 @@ def _build_model(org: Optional["GSageOrganization"] = None):
 
     # Resolve maker model and API key from org (if set) or .env
     if provider == "openai":
-        from agno.models.openai import OpenAIChat
+        # Always use the gSage recovery adapter (wraps ``OpenAIChat``) so
+        # tool calls leaked as plain text during streaming are recovered and
+        # request/response DEBUG diagnostics are emitted.  With
+        # OPENAI_TOOL_CALL_PARSER="none" it behaves as a transparent
+        # passthrough (native ``tool_calls`` are forwarded untouched).
+        from src.shared.llm.tool_call_recovery import RecoveringToolCallOpenAI
 
         model_id = (org.default_maker_model.strip() if org and org.default_maker_model else None) or settings.openai_maker_model
         api_key = (org.llm_api_key if org else None) or settings.openai_api_key
         base_url = settings.openai_base_url
+        parser_mode = (settings.openai_tool_call_parser or "none").strip().lower()
 
         # Agno 2.8.x OpenAIChat maps "system" → "developer" by default.
         # OpenAI's official API accepts the "developer" role, but Azure
@@ -1317,12 +1323,13 @@ def _build_model(org: Optional["GSageOrganization"] = None):
                 "tool": "tool",
                 "model": "assistant",
             },
+            "tool_call_dialect": None if parser_mode in ("", "none") else parser_mode,
         }
         if api_key:
             kwargs["api_key"] = api_key
         if base_url:
             kwargs["base_url"] = base_url
-        return OpenAIChat(**kwargs)
+        return RecoveringToolCallOpenAI(**kwargs)
 
     if provider == "deepseek":
         from agno.models.deepseek import DeepSeek
@@ -1367,7 +1374,7 @@ def _build_model(org: Optional["GSageOrganization"] = None):
         # are emitted in every configuration.  When parser_mode is "none" the
         # adapter installs a NoOp dialect and behaves as a transparent
         # passthrough (native tool_calls are forwarded untouched).
-        from src.shared.llm.vllm_recovering import RecoveringToolCallVLLM
+        from src.shared.llm.tool_call_recovery import RecoveringToolCallVLLM
         # Build kwargs dict so unset sampling params fall back to Agno's
         # class-level defaults instead of being forced to None.
         sampling_kwargs: dict[str, Any] = {}

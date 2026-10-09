@@ -344,7 +344,7 @@ async def _build_model_for_summarize(
 
     if provider == "vllm":
         model_id = model_override or org_model or settings.vllm_maker_model
-        from src.shared.llm.vllm_recovering import (  # noqa: PLC0415
+        from src.shared.llm.tool_call_recovery import (  # noqa: PLC0415
             RecoveringToolCallVLLM,
         )
 

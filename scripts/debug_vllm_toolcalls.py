@@ -595,12 +595,13 @@ def run_replay(
 ) -> Dict[str, Any]:
     """Replay a request payload dumped by the backend (Phase 1 diagnostic).
 
-    The dump file is produced by ``RecoveringToolCallVLLM`` when
-    ``VLLM_DEBUG_REQUEST_DUMP_PATH`` is set.  It contains the exact
-    messages/tools/tool_choice/extra_body sent to vLLM, so replaying it from
-    this script proves whether the failure reproduces *outside* the Agno
-    pipeline (\u2192 it's the request shape) or only inside it (\u2192 it's an
-    adapter bug).
+    The dump file is produced by the recovery adapters
+    (``RecoveringToolCallVLLM`` / ``RecoveringToolCallOpenAI``) when the
+    provider's ``*_DEBUG_REQUEST_DUMP_PATH`` setting is configured.  It
+    contains the exact messages/tools/tool_choice/extra_body sent to the
+    endpoint, so replaying it from this script proves whether the failure
+    reproduces *outside* the Agno pipeline (→ it's the request shape) or only
+    inside it (→ it's an adapter bug).
     """
     print()
     print("=" * 78)

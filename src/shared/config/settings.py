@@ -116,6 +116,18 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = ""  # empty → use official OpenAI endpoint
     openai_maker_model: str = "gpt-4o-mini"
+    # Client-side recovery of tool calls leaked as plain text during
+    # streaming.  Azure AI Foundry / OpenAI-compatible DeepSeek endpoints can
+    # forward the model's native DSML tool-call markup inside ``content`` when
+    # their server-side streaming parser fails to convert it to native
+    # ``tool_calls``; the adapter detects and converts it.
+    # "dsml" → detect/convert DeepSeek DSML blocks (alias: "deepseek");
+    # "none" → disable text parsing (native tool_calls still pass through).
+    openai_tool_call_parser: str = "dsml"
+    # Opt-in diagnostic dump of every outgoing OpenAI request (messages +
+    # tools + final params) to a timestamped JSON file for replay.  Dev only —
+    # includes full prompt/PII bodies.
+    openai_debug_request_dump_path: str = ""
 
     # ── DeepSeek ─────────────────────────────────────────────
     # DeepSeek uses an OpenAI-compatible Chat API.
