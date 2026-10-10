@@ -152,7 +152,7 @@ For new tools, start with the smallest hook that solves the problem:
 |---|---|
 | Normal request handling | Implement `execute()` only |
 | Background offload decision based on params/config | Override `should_run_background()` |
-| Show profiles/hosts/presets in `list_tools` | Override `enrich_for_listing()` |
+| Show hosts/presets in tool listings | Override `enrich_for_listing()` (config profiles are injected by the framework) |
 | Return large tabular/list results to the agent | Use `src.mcp_server.tools.result_export` |
 | Read or emit platform-managed files | Use `_load_file()` / `_store_file()` |
 | Cache idempotent helper results | Use `src.shared.cache.cached` on a helper function |
@@ -532,9 +532,23 @@ Each profile is stored as a `GSageToolConfig` row with:
 - optional `description`
 - encrypted `config`
 
-The default `enrich_for_listing()` implementation adds a profile summary to the tool description in `list_tools`, and `mcp_server.main.handle_list_tools()` injects the visible `config_profile` enum into the MCP schema.
+At runtime the agent selects a profile through the auto-injected
+`config_profile` parameter (defaults to `"default"` when omitted). The
+framework advertises the profiles **applicable to the caller** — global
+configs plus department configs covering the caller's department, filtered
+by profile-level permissions — on both discovery surfaces:
 
-You can override `enrich_for_listing()` if your tool needs to expose richer runtime hints, such as hosts, presets, or environment labels.
+- core tools: `mcp_server.main.handle_list_tools()` appends a `Profiles:`
+  line to the tool description and injects the enum into the
+  `config_profile` schema field;
+- discoverable (non-core) tools: the `search_tools` detailed result carries
+  a `config_profiles` list and the same enum inside `params_schema`.
+
+`enrich_for_listing()` is a separate hook for tool-specific runtime hints,
+such as hosts, presets, or environment labels. It receives the caller's
+`dept_id` and its output is appended in `list_tools` (core tools) and to the
+`config_hints` field of the detailed `search_tools` result (discoverable
+tools).
 
 ### Scope And Department Overrides
 

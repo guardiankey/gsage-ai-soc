@@ -13,11 +13,25 @@ Permission: none required — visible to any authenticated user.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import ClassVar, Optional
 
-from src.mcp_server.tools.base import BaseTool, ToolResult
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.mcp_server.tools.base import (
+    BaseTool,
+    ToolResult,
+    _config_row_applies_to_dept,
+    _has_profile_permission,
+    _merge_config_profiles,
+    _tool_session_ctx,
+)
+from src.shared.models import GSageToolConfig
 from src.shared.security.context import AgentContext
+
+log = logging.getLogger(__name__)
 
 # Available categories (informational — used in param description)
 _KNOWN_CATEGORIES = (
@@ -54,6 +68,64 @@ def _compact_tool_entry(tool: BaseTool) -> dict:
         ),
         "credential_namespace": getattr(tool, "credential_namespace", None),
     }
+
+
+async def _load_applicable_profiles(
+    tools: list[BaseTool],
+    agent_context: AgentContext,
+    session: AsyncSession,
+) -> dict[str, list[dict]]:
+    """Load the config profiles applicable to the caller for *tools*.
+
+    ``search_tools`` is the discovery surface for non-core tools, so the
+    ``config_profile`` values must be exposed here — otherwise the LLM never
+    learns that a non-default profile exists and always calls the tool with
+    the implicit ``"default"`` profile (which does not resolve a config
+    stored under another profile).
+
+    Every config row for the tools' lookup keys is fetched in a single
+    query; rows not applicable to the caller (department mismatch) and
+    profiles the caller may not use are removed.  Merging honours
+    namespace → tool precedence, mirroring
+    :meth:`BaseTool.list_config_profiles`.
+
+    Returns ``{tool_name: [{"profile_id": ..., "description": ...}]}``.
+    """
+    lookup_keys: set[str] = set()
+    for tool in tools:
+        lookup_keys.update(tool._config_lookup_keys())
+
+    result = await session.execute(
+        select(GSageToolConfig).where(
+            GSageToolConfig.org_id == agent_context.org_id,
+            GSageToolConfig.tool_name.in_(sorted(lookup_keys)),
+        )
+    )
+    rows_by_key: dict[str, list[GSageToolConfig]] = {}
+    for row in result.scalars().all():
+        if not _config_row_applies_to_dept(row, agent_context.dept_id):
+            continue
+        rows_by_key.setdefault(row.tool_name, []).append(row)
+
+    profiles_by_tool: dict[str, list[dict]] = {}
+    for tool in tools:
+        tool_keys = tool._config_lookup_keys()
+        rows = [
+            row for key in tool_keys for row in rows_by_key.get(key, [])
+        ]
+        if not rows:
+            continue
+        visible_profiles = [
+            profile
+            for profile in _merge_config_profiles(rows, tool_keys)
+            if _has_profile_permission(
+                agent_context.permissions, tool.permissions,
+                profile["profile_id"],
+            )
+        ]
+        if visible_profiles:
+            profiles_by_tool[tool.name] = visible_profiles
+    return profiles_by_tool
 
 
 class SearchToolsTool(BaseTool):
@@ -150,15 +222,13 @@ class SearchToolsTool(BaseTool):
         tools = [t for t in visible if t.name != self.name]
 
         # ── Filter out tools disabled for this org ──────────────────────────
+        session = _tool_session_ctx.get()
         try:
-            from src.mcp_server.tools.base import _tool_session_ctx  # noqa: PLC0415
-            session = _tool_session_ctx.get()
             if session is not None and agent_context.org_id:
-                from sqlalchemy import select as _sql_select  # noqa: PLC0415
                 from src.shared.models.org_tool_settings import GSageOrgToolSettings  # noqa: PLC0415
 
                 result = await session.execute(
-                    _sql_select(GSageOrgToolSettings.tool_name).where(
+                    select(GSageOrgToolSettings.tool_name).where(
                         GSageOrgToolSettings.org_id == agent_context.org_id,
                         GSageOrgToolSettings.is_enabled.is_(False),
                     )
@@ -256,8 +326,45 @@ class SearchToolsTool(BaseTool):
             )
 
         # ── Detailed results for filtered searches ────────────────────────
-        results = [
-            {
+        # Applicable config profiles (multi-config tools) — department- and
+        # permission-filtered.  Without this the LLM would never discover
+        # non-default profile IDs for discoverable (non-core) tools.
+        profile_map: dict[str, list[dict]] = {}
+        multi_config_tools = [
+            t for t in tools if getattr(t, "supports_multiple_configs", False)
+        ]
+        if multi_config_tools and session is not None and agent_context.org_id:
+            try:
+                profile_map = await _load_applicable_profiles(
+                    multi_config_tools, agent_context, session
+                )
+            except Exception as exc:  # pragma: no cover
+                log.warning(
+                    "search_tools: config-profile discovery failed org=%s: %s",
+                    agent_context.org_id, exc,
+                )
+
+        results = []
+        for t in tools:
+            # Tool-specific config hints (e.g. SSH hosts/presets).  The base
+            # implementation is a no-op; only overrides do work here.
+            # ``list_tools`` only carries core tools, so for everything else
+            # this is the only place the hints can reach the LLM.
+            config_hints: Optional[str] = None
+            if session is not None and agent_context.org_id:
+                try:
+                    config_hints = await t.enrich_for_listing(
+                        agent_context.org_id, session,
+                        dept_id=agent_context.dept_id,
+                    )
+                except Exception as exc:  # pragma: no cover
+                    log.warning(
+                        "search_tools: enrich_for_listing failed tool=%s: %s",
+                        t.name, exc,
+                    )
+
+            params_schema = t.effective_params_schema
+            entry: dict = {
                 "name": t.name,
                 "summary": (
                     getattr(t, "summary", None)
@@ -271,10 +378,24 @@ class SearchToolsTool(BaseTool):
                 ),
                 "credential_schema": getattr(t, "credential_schema", None),
                 "credential_namespace": getattr(t, "credential_namespace", None),
-                "params_schema": t.effective_params_schema,
+                "params_schema": params_schema,
             }
-            for t in tools
-        ]
+            if config_hints:
+                entry["config_hints"] = config_hints
+            profiles = profile_map.get(t.name)
+            if profiles:
+                entry["config_profiles"] = profiles
+                props = dict(params_schema.get("properties", {}))
+                if "config_profile" in props:
+                    props["config_profile"] = {
+                        **props["config_profile"],
+                        "enum": [p["profile_id"] for p in profiles],
+                    }
+                    entry["params_schema"] = {
+                        **params_schema,
+                        "properties": props,
+                    }
+            results.append(entry)
 
         # ── Payload size guard ─────────────────────────────────────────────
         # Even a filtered search can return a huge params_schema for a single

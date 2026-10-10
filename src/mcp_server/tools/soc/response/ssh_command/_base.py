@@ -19,7 +19,11 @@ from typing import ClassVar, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.mcp_server.tools.base import BaseTool, ToolResult
+from src.mcp_server.tools.base import (
+    BaseTool,
+    ToolResult,
+    _config_row_applies_to_dept,
+)
 from src.mcp_server.tools.soc.response.ssh_command._sanitizer import (
     check_config_deny,
     check_hardcoded_deny,
@@ -288,21 +292,66 @@ class SSHCommandBase(BaseTool):
         self,
         org_id: uuid.UUID,
         session: AsyncSession,
+        *,
+        dept_id: Optional[uuid.UUID] = None,
     ) -> Optional[str]:
-        """Inject available hosts, presets and credential profiles into the tool
-        description at ``list_tools`` time so the LLM knows what is available
-        without needing to probe the tool with invalid parameters."""
+        """Inject available hosts, presets and credential profiles into the
+        tool description at ``list_tools`` time so the LLM knows what is
+        available without needing to probe the tool with invalid parameters.
+
+        Profiles are per ``config_profile``: the framework injects the list of
+        applicable profiles, and this override adds the hosts / presets /
+        credentials of each of them — the department config is shallow-merged
+        over the global one, mirroring :meth:`BaseTool.load_config`.
+        """
+        lines: list[str] = []
+        base_suffix = await super().enrich_for_listing(
+            org_id, session, dept_id=dept_id
+        )
+        if base_suffix:
+            lines.append(base_suffix)
+
         stmt = select(GSageToolConfig).where(
             GSageToolConfig.org_id == org_id,
             GSageToolConfig.tool_name == self.name,
-            GSageToolConfig.profile_id == "default",
         )
         result = await session.execute(stmt)
-        row = result.scalar_one_or_none()
-        if row is None:
-            return None
+        rows = [
+            row
+            for row in result.scalars().all()
+            if _config_row_applies_to_dept(row, dept_id)
+        ]
+        if not rows:
+            return "\n".join(lines) or None
 
-        config: dict = row.config  # property decrypts on access
+        # Resolve per profile: global config first, then the applicable
+        # department config shallow-merged over it (same precedence as
+        # load_config).  Rows are decrypted on access via ``row.config``.
+        resolved: dict[str, dict] = {}
+        for row in rows:
+            if row.scope == "org":
+                resolved[row.profile_id] = dict(row.config or {})
+        for row in rows:
+            if row.scope == "dept":
+                resolved[row.profile_id] = {
+                    **resolved.get(row.profile_id, {}),
+                    **(row.config or {}),
+                }
+
+        for profile_id in sorted(resolved):
+            section = self._format_config_hints(resolved[profile_id])
+            if not section:
+                continue
+            if len(resolved) > 1:
+                lines.append(f"[profile {profile_id}]\n{section}")
+            else:
+                lines.append(section)
+
+        return "\n".join(lines) if lines else None
+
+    @staticmethod
+    def _format_config_hints(config: dict) -> Optional[str]:
+        """Format host / preset / credential hints for one resolved config."""
         lines: list[str] = []
 
         hosts = config.get("hosts", [])
@@ -333,10 +382,7 @@ class SSHCommandBase(BaseTool):
                 "instead of host_key to connect to a dynamically specified host."
             )
 
-        if not lines:
-            return None
-
-        return "\n".join(lines)
+        return "\n".join(lines) if lines else None
 
     @abstractmethod
     async def execute(

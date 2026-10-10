@@ -10,6 +10,7 @@ import time
 import traceback
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -92,6 +93,47 @@ def _has_profile_permission(
                 return True
 
     return False
+
+
+def _config_row_applies_to_dept(
+    row: GSageToolConfig,
+    dept_id: Optional[uuid.UUID],
+) -> bool:
+    """Return True when a config row applies to a caller in *dept_id*.
+
+    ``scope='org'`` rows apply to every caller.  ``scope='dept'`` rows apply
+    only when the caller has an active department covered by the row — a
+    caller without a department never matches a department config.
+    """
+    if row.scope == "org":
+        return True
+    if dept_id is None:
+        return False
+    return any(d.dept_id == dept_id for d in row.departments)
+
+
+def _merge_config_profiles(
+    rows: Iterable[GSageToolConfig],
+    lookup_keys: list[str],
+) -> list[dict]:
+    """Dedupe config *rows* into ``{profile_id, description}`` dicts.
+
+    *rows* must already be filtered to those applicable to the caller (see
+    :func:`_config_row_applies_to_dept`).  Lookup order wins: rows for keys
+    later in *lookup_keys* (the tool itself) override descriptions from
+    earlier keys (e.g. the shared namespace).  Output is sorted by
+    ``profile_id``.
+    """
+    priority = {key: idx for idx, key in enumerate(lookup_keys)}
+    merged: dict[str, dict] = {}
+    for row in sorted(rows, key=lambda r: priority.get(r.tool_name, 0)):
+        existing = merged.get(row.profile_id)
+        description = row.description or (existing or {}).get("description")
+        merged[row.profile_id] = {
+            "profile_id": row.profile_id,
+            "description": description,
+        }
+    return sorted(merged.values(), key=lambda p: p["profile_id"])
 
 
 @dataclass
@@ -312,10 +354,11 @@ class BaseTool(ABC):
                 "type": "string",
                 "description": (
                     "Configuration profile ID to use. "
-                    "Available profiles are listed in the tool description. "
-                    "Defaults to 'default' when omitted."
+                    "Available profiles are listed in the ``config_profiles`` "
+                    "field of the search_tools result and in the tool "
+                    "description. Defaults to 'default' when omitted."
                 ),
-                # enum is populated dynamically by handle_list_tools
+                # enum is populated dynamically by list_tools / search_tools
             }
             base["properties"] = props
             # Not required — 'default' is the implicit fallback
@@ -1333,51 +1376,54 @@ class BaseTool(ABC):
         self,
         org_id: uuid.UUID,
         session: AsyncSession,
+        *,
+        dept_id: Optional[uuid.UUID] = None,
     ) -> Optional[str]:
         """Return an optional description suffix injected into the MCP tool
         description at ``list_tools`` time.
 
-        Called by ``handle_list_tools`` for **every** tool that has an active
-        config for the requesting org.  The returned string (if any) is
-        appended to the tool's ``__doc__``-derived description so the LLM
-        knows exactly which hosts, presets, profiles, etc. are available
-        **before** making its first call.
+        The framework injects the applicable config profiles **centrally**
+        (:meth:`list_config_profiles`): ``handle_list_tools`` appends a
+        ``Profiles:`` line and the ``config_profile`` enum for core tools,
+        and the ``search_tools`` meta-tool mirrors the same values in its
+        detailed results (``config_profiles``).  This hook is therefore
+        reserved for **tool-specific** runtime hints derived from the tool's
+        config (available hosts, preset commands, credential profiles, …).
 
-        The default implementation handles :attr:`supports_multiple_configs`
-        tools by listing visible profiles — the same behaviour that was
-        previously hardcoded in ``handle_list_tools``.
+        Override in subclasses; call
+        ``await super().enrich_for_listing(...)`` first to preserve any
+        framework-provided suffix.
 
-        Override in subclasses to expose configuration-derived context
-        (e.g. available SSH hosts, preset commands, credential profiles).
+        Args:
+            org_id: Tenant organisation.
+            session: DB session owned by the caller.
+            dept_id: Active department of the caller, when any — override
+                implementations should use it so that department-scoped
+                rows are only revealed to their own departments.
 
         Returns:
             A plain-text suffix string, or ``None`` if nothing should be added.
         """
-        if not self.supports_multiple_configs:
-            return None
-
-        profiles = await self.list_config_profiles(org_id, session)
-        if not profiles:
-            return None
-
-        profile_labels = ", ".join(
-            f"{p['profile_id']} ({p['description']})"
-            if p.get("description")
-            else p["profile_id"]
-            for p in profiles
-        )
-        return f"Profiles: {profile_labels}"
+        return None
 
     async def list_config_profiles(
         self,
         org_id: uuid.UUID,
         session: AsyncSession,
+        *,
+        dept_id: Optional[uuid.UUID] = None,
     ) -> list[dict]:
-        """
-        Return all configured profiles for this tool in the given org.
+        """Return the config profiles applicable to a caller for this tool.
 
-        Each dict has ``profile_id`` and ``description`` (may be None).
-        Only meaningful when ``supports_multiple_configs=True``.
+        Each dict has ``profile_id`` and ``description`` (may be None) — the
+        same shape consumed by the ``config_profile`` enum.  Only meaningful
+        when :attr:`supports_multiple_configs` is ``True``.
+
+        Applicability mirrors :meth:`load_config` scope resolution: a
+        ``scope='org'`` row applies to every caller; a ``scope='dept'`` row
+        applies only when the caller's active department is covered by it.
+        A caller without an active department therefore only sees profiles
+        backed by a global config.
 
         When :attr:`config_namespace` is set, profiles from both the
         namespace and ``self.name`` are returned, deduped by profile_id.
@@ -1385,35 +1431,17 @@ class BaseTool(ABC):
         namespace description.
         """
         lookup_keys = self._config_lookup_keys()
-        stmt = (
-            select(
-                GSageToolConfig.tool_name,
-                GSageToolConfig.profile_id,
-                GSageToolConfig.description,
-            )
-            .where(
-                GSageToolConfig.org_id == org_id,
-                GSageToolConfig.tool_name.in_(lookup_keys),
-            )
-            .order_by(GSageToolConfig.profile_id)
+        stmt = select(GSageToolConfig).where(
+            GSageToolConfig.org_id == org_id,
+            GSageToolConfig.tool_name.in_(lookup_keys),
         )
         result = await session.execute(stmt)
-
-        # Build dedup map: per-tool row overrides namespace row.  We
-        # iterate in lookup order (namespace first, name last) so the
-        # later assignment wins.
-        priority = {key: idx for idx, key in enumerate(lookup_keys)}
-        merged: dict[str, dict] = {}
-        rows = list(result.all())
-        rows.sort(key=lambda r: priority.get(r.tool_name, 0))
-        for row in rows:
-            existing = merged.get(row.profile_id)
-            description = row.description or (existing or {}).get("description")
-            merged[row.profile_id] = {
-                "profile_id": row.profile_id,
-                "description": description,
-            }
-        return sorted(merged.values(), key=lambda p: p["profile_id"])
+        applicable = [
+            row
+            for row in result.scalars().all()
+            if _config_row_applies_to_dept(row, dept_id)
+        ]
+        return _merge_config_profiles(applicable, lookup_keys)
 
     # ── File helpers ─────────────────────────────────────────────────────
 

@@ -234,15 +234,20 @@ async def handle_list_tools() -> list[mcp_types.Tool]:
         mcp_tools = [_base_tool_to_mcp(t) for t in core_tools]
 
         # ── Enrich tools via config-aware hook ────────────────────────────
-        # Call enrich_for_listing() on every tool that has a config stored for
-        # this org.  The hook returns an optional description suffix.  The
-        # default implementation handles supports_multiple_configs (profiles);
-        # subclasses override to expose hosts, presets, credentials, etc.
+        # enrich_for_listing() contributes tool-specific hints (hosts,
+        # presets, credentials, …).  The framework separately appends the
+        # applicable config profiles (department-aware and permission-
+        # filtered) plus the matching enum for tools with
+        # supports_multiple_configs, so the LLM always knows which
+        # config_profile values it can pass — even when the tool's own
+        # enrichment returns nothing.
         if _state.session_factory is not None:
             async with _state.session_factory() as session:
                 for i, tool in enumerate(core_tools):
                     try:
-                        suffix = await tool.enrich_for_listing(tenant.org_id, session)
+                        suffix = await tool.enrich_for_listing(
+                            tenant.org_id, session, dept_id=tenant.dept_id,
+                        )
                     except Exception as exc:  # pragma: no cover
                         logger.warning(
                             "enrich_for_listing failed for tool=%s org=%s: %s",
@@ -250,37 +255,53 @@ async def handle_list_tools() -> list[mcp_types.Tool]:
                         )
                         suffix = None
 
-                    if not suffix:
-                        continue
-
-                    # For supports_multiple_configs, also inject enum + profile
-                    # description into the config_profile schema field.
                     old = mcp_tools[i]
                     schema = dict(old.inputSchema)
+                    suffixes: list[str] = [suffix] if suffix else []
+
                     if tool.supports_multiple_configs:
-                        profiles = await tool.list_config_profiles(tenant.org_id, session)
-                        visible = [
+                        try:
+                            profiles = await tool.list_config_profiles(
+                                tenant.org_id, session, dept_id=tenant.dept_id,
+                            )
+                        except Exception as exc:  # pragma: no cover
+                            logger.warning(
+                                "list_config_profiles failed for tool=%s org=%s: %s",
+                                tool.name, tenant.org_id, exc,
+                            )
+                            profiles = []
+                        visible_profiles = [
                             p for p in profiles
                             if _has_profile_permission(
                                 tool_perms, tool.permissions, p["profile_id"]
                             )
                         ]
-                        if visible:
-                            enum_values = [p["profile_id"] for p in visible]
+                        if visible_profiles:
+                            profile_labels = ", ".join(
+                                f"{p['profile_id']} ({p['description']})"
+                                if p.get("description")
+                                else p["profile_id"]
+                                for p in visible_profiles
+                            )
+                            suffixes.append(f"Profiles: {profile_labels}")
                             props = dict(schema.get("properties", {}))
                             if "config_profile" in props:
                                 props["config_profile"] = {
                                     **props["config_profile"],
-                                    "enum": enum_values,
+                                    "enum": [
+                                        p["profile_id"]
+                                        for p in visible_profiles
+                                    ],
                                 }
                                 schema["properties"] = props
 
-                    existing_desc = old.description or ""
-                    new_desc = (
-                        f"{existing_desc}\n\n{suffix}"
-                        if existing_desc
-                        else suffix
-                    )
+                    if not suffixes:
+                        continue
+
+                    parts = (
+                        [old.description] if old.description else []
+                    ) + suffixes
+                    new_desc = "\n\n".join(parts)
                     mcp_tools[i] = mcp_types.Tool.model_validate({
                         "name": old.name,
                         "description": new_desc,
